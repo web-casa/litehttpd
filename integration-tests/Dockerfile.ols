@@ -1,0 +1,78 @@
+## Stage 1: Build patched OLS from source (optional, for RewriteRule support)
+FROM ubuntu:22.04 AS ols-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ cmake make wget ca-certificates patch git \
+    libpcre3-dev libexpat1-dev zlib1g-dev libxml2-dev libaio-dev \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG OLS_VERSION=1.8.5
+RUN git clone --depth 1 --recurse-submodules --branch v${OLS_VERSION} \
+    https://github.com/litespeedtech/openlitespeed.git /tmp/openlitespeed-${OLS_VERSION}
+
+WORKDIR /tmp/openlitespeed-${OLS_VERSION}
+
+COPY patches/0001-lsiapi-phpconfig.patch /tmp/
+COPY patches/0002-lsiapi-rewrite.patch /tmp/
+COPY patches/0004-autoindex-403.patch /tmp/
+RUN patch -p1 < /tmp/0001-lsiapi-phpconfig.patch && \
+    patch -p1 < /tmp/0002-lsiapi-rewrite.patch && \
+    patch -p1 < /tmp/0004-autoindex-403.patch
+
+RUN mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/usr/local/lsws \
+          .. && \
+    make -j$(nproc) && \
+    make install DESTDIR=/opt/ols-install
+
+## Stage 2: Runtime image with patched OLS
+FROM litespeedtech/openlitespeed:latest
+
+# Replace OLS binary with patched version
+COPY --from=ols-builder /opt/ols-install/usr/local/lsws/bin/openlitespeed \
+                         /usr/local/lsws/bin/openlitespeed
+
+# Install additional PHP extensions and tools needed by the 4 test apps.
+# The base image ships lsphp83 with mysql/curl/intl/opcache/redis already.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl unzip wget bzip2 mariadb-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Ensure CLI php points to the installed lsphp
+RUN LSPHP_DIR=$(ls -d /usr/local/lsws/lsphp*/bin 2>/dev/null | head -1) && \
+    if [ -n "$LSPHP_DIR" ] && [ -f "${LSPHP_DIR}/php" ]; then \
+        rm -f /usr/bin/php /usr/local/bin/php; \
+        ln -s "${LSPHP_DIR}/php" /usr/bin/php; \
+        ln -s "${LSPHP_DIR}/php" /usr/local/bin/php; \
+    fi && \
+    php -v
+
+# Copy compiled litehttpd_htaccess module
+COPY build/litehttpd_htaccess.so /usr/local/lsws/modules/litehttpd_htaccess.so
+
+# NOTE: docker-compose mounts a named volume over /var/www/vhosts/localhost/html
+# which hides build-time files. App verify scripts create dirs at runtime.
+# The healthcheck start_period allows time for OLS + volume initialization.
+
+# Enable litehttpd_htaccess module
+RUN CONF="/usr/local/lsws/conf/httpd_config.conf" && \
+    if ! grep -q 'litehttpd_htaccess' "$CONF" 2>/dev/null; then \
+      printf '\nmodule litehttpd_htaccess {\n  ls_enabled              1\n}\n' >> "$CONF"; \
+    fi
+
+# Enable .htaccess in vhost config
+RUN VHCONF="/usr/local/lsws/conf/vhosts/localhost/vhconf.conf" && \
+    if [ -f "$VHCONF" ]; then \
+      sed -i 's/^[[:space:]]*allowOverride.*/allowOverride             255/' "$VHCONF" || true; \
+      grep -q 'allowOverride' "$VHCONF" || echo 'allowOverride 255' >> "$VHCONF"; \
+    fi
+
+# Link lsphp for fcgi (use whichever version is installed)
+RUN LSPHP_BIN=$(ls /usr/local/lsws/lsphp*/bin/lsphp 2>/dev/null | head -1) && \
+    if [ -n "$LSPHP_BIN" ]; then \
+        ln -sf "$LSPHP_BIN" /usr/local/lsws/fcgi-bin/lsphp; \
+    fi
+
+EXPOSE 80 443

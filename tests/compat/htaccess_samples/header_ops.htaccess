@@ -1,0 +1,7 @@
+# Header operations
+Header set X-Frame-Options "SAMEORIGIN"
+Header set X-Content-Type-Options "nosniff"
+Header append Cache-Control "public"
+Header merge Vary "Accept-Encoding"
+Header unset X-Powered-By
+RequestHeader set X-Forwarded-Proto "https"

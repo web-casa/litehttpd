@@ -1,0 +1,151 @@
+---
+title: LiteHTTPD
+description: OpenLiteSpeed 的 Apache .htaccess 兼容模块
+template: splash
+hero:
+  title: 让 OLS 真正理解 .htaccess
+  tagline: |
+    OpenLiteSpeed 缺失的 .htaccess 引擎。
+    80 条指令，90%+ Apache 兼容，2 倍性能，免费开源。
+  image:
+    html: |
+      <div style="background:#0d1117;border-radius:8px;overflow:hidden;font-family:'SF Mono','Cascadia Code','Fira Code',Consolas,monospace;font-size:0.75rem;line-height:1.6;box-shadow:0 8px 32px rgba(0,0,0,0.4);border:1px solid #30363d;max-width:540px;width:100%">
+        <div style="background:#161b22;padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.375rem;border-bottom:1px solid #30363d">
+          <span style="width:10px;height:10px;border-radius:50%;background:#ff5f56"></span>
+          <span style="width:10px;height:10px;border-radius:50%;background:#ffbd2e"></span>
+          <span style="width:10px;height:10px;border-radius:50%;background:#27c93f"></span>
+          <span style="margin-left:0.5rem;color:#8b949e;font-size:0.7rem">terminal</span>
+        </div>
+        <div style="padding:0.75rem 1rem;color:#c9d1d9">
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>dnf install openlitespeed-litehttpd litehttpd</span></div>
+          <div style="color:#8b949e;padding-left:1rem">Installed: openlitespeed-litehttpd-1.8.5, litehttpd-2.0</div>
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>systemctl restart lsws</span></div>
+          <div style="height:0.5rem"></div>
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>curl -I localhost:8088/</span></div>
+          <div style="color:#8b949e;padding-left:1rem">HTTP/1.1 <span style="color:#22c55e;font-weight:600">200 OK</span></div>
+          <div style="color:#8b949e;padding-left:1rem">x-custom-header: <span style="color:#79c0ff">LiteHTTPD</span></div>
+          <div style="color:#8b949e;padding-left:1rem">cache-control: <span style="color:#79c0ff">max-age=31536000</span></div>
+          <div style="color:#8b949e;padding-left:1rem">x-frame-options: <span style="color:#79c0ff">SAMEORIGIN</span></div>
+          <div style="height:0.5rem"></div>
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>curl -sI localhost:8088/test-redirect/old-page</span></div>
+          <div style="color:#8b949e;padding-left:1rem">HTTP/1.1 <span style="color:#22c55e;font-weight:600">301 Moved Permanently</span></div>
+          <div style="color:#8b949e;padding-left:1rem">location: <span style="color:#79c0ff">/test-redirect/new-page</span></div>
+          <div style="height:0.5rem"></div>
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>curl -sI localhost:8088/.htaccess</span></div>
+          <div style="color:#8b949e;padding-left:1rem"><span style="color:#22c55e;font-weight:600">403 Forbidden</span> <span style="color:#6e7681;font-style:italic"># 已保护</span></div>
+        </div>
+      </div>
+  actions:
+    - text: 快速开始
+      link: /zh/getting-started/introduction/
+      icon: right-arrow
+    - text: 引擎对比
+      link: /zh/compare/
+      variant: minimal
+      icon: external
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+<CardGrid>
+  <Card title="90%+ 兼容" icon="approve-check">
+    80 条指令：Require、Header、RewriteRule、ExpiresByType、FilesMatch、
+    If/ElseIf/Else 等。WordPress 插件直接可用。
+  </Card>
+  <Card title="2 倍性能" icon="rocket">
+    静态文件 22,000+ RPS。200 行 .htaccess 解析开销仅 0.7%，
+    Apache 为 4.2%。
+  </Card>
+  <Card title="省 30% 内存" icon="seti:db">
+    基线 676 MB vs Apache 的 969 MB。模块仅比原生 OLS 多占 +13 MB。
+  </Card>
+  <Card title="5 分钟部署" icon="puzzle">
+    复制 .so 文件，设置 `allowOverride 255`，重启即可。.htaccess 文件无需修改。
+  </Card>
+</CardGrid>
+
+---
+
+## 为什么选择 LiteHTTPD？
+
+原生 OpenLiteSpeed 忽略大部分 `.htaccess` 指令——`Require all denied` 返回 200，`Header set` 被静默跳过，`RewriteRule [R=301]` 返回 404。Wordfence 和 AIOS 等安全插件实际上处于失效状态。
+
+LiteHTTPD 提供两个版本：
+
+- **LiteHTTPD-Thin** -- 仅 `.so` 模块，安装在原生 OLS 上。添加安全头、ACL、认证、缓存、条件块和重定向。适合快速部署。
+- **LiteHTTPD-Full** -- 模块 + 打补丁的 OLS。添加完整的 RewriteRule 执行、`php_value`/`php_flag` 和引擎级 `Options -Indexes`。完整 Apache 迁移必选。
+
+<LinkCard title="版本对比" href="/zh/getting-started/editions/" description="查看 Thin 和 Full 各自支持哪些指令，以及如何选择。" />
+
+---
+
+## 核心功能
+
+<CardGrid>
+  <Card title="安全" icon="approve-check-circle">
+    Require all/ip/env、FilesMatch ACL、Options -Indexes、AuthType Basic、
+    IPv6 CIDR 访问控制、暴力破解防护。
+  </Card>
+  <Card title="URL 重写" icon="random">
+    RewriteEngine、RewriteCond、RewriteRule [R=301,L,QSA,F,G]、
+    RewriteBase、RewriteOptions、RewriteMap。
+  </Card>
+  <Card title="响应头" icon="list-format">
+    Header set/unset/append/merge/add/edit，env=VAR 条件，
+    Header always，RequestHeader。
+  </Card>
+  <Card title="缓存控制" icon="star">
+    ExpiresActive、ExpiresByType、ExpiresDefault，自动生成
+    Cache-Control 和 Expires 响应头。
+  </Card>
+  <Card title="条件块" icon="setting">
+    If/ElseIf/Else + ap_expr 引擎：==、!=、=~、-f、-d、-ipmatch。
+    条件化的 Header、访问控制、类型覆盖。
+  </Card>
+  <Card title="PHP 配置" icon="seti:php">
+    php_value、php_flag、php_admin_value/flag 通过 LSIAPI 传递给 lsphp。
+  </Card>
+</CardGrid>
+
+---
+
+## 性能一览
+
+| | Apache httpd | 原生 OLS | **LiteHTTPD** | LSWS Enterprise |
+|-|-------------|---------|-----------|-----------------|
+| **静态 RPS** | 11,082 | 23,242 | **22,104** | 24,786 |
+| **.htaccess 开销** | -4.2% | -18.8% | **-0.7%** | -18.1% |
+| **内存** | 969 MB | 663 MB | **676 MB** | 819 MB |
+| **兼容性** | 100% | 44% | **90%+** | 100% |
+| **许可证** | 免费 | 免费 | **免费** | 付费 |
+| **安全 ACL** | 完整 | 缺失 | **完整** | 完整 |
+
+<LinkCard title="完整性能对比" href="/zh/compare/" description="4 引擎在同等硬件上的详细测试结果，WordPress 6.9 + 19 插件。" />
+
+---
+
+## 开始使用
+
+<CardGrid>
+  <LinkCard title="安装 LiteHTTPD" href="/zh/getting-started/installation/" description="RPM、二进制 .so 或源码编译。5 分钟获得完整 .htaccess 支持。" />
+  <LinkCard title="WordPress 部署" href="/zh/solutions/wordpress/" description="已测试 15 个热门插件：AIOS、Wordfence、W3TC、Yoast 等。" />
+  <LinkCard title="从 Apache 迁移" href="/zh/migration/apache-to-ols/" description="分步指南。.htaccess 文件无需任何修改。" />
+  <LinkCard title="替代 LSWS" href="/zh/migration/lsws-to-litehttpd/" description="90%+ 兼容性，无许可证费用。每月节省 $65。" />
+</CardGrid>
+
+---
+
+## Linux 文档联盟
+
+<CardGrid>
+  <LinkCard title="Debian.Club" href="https://debian.club/" description="Debian Linux 社区与文档。" />
+  <LinkCard title="Ubuntu.Fan" href="https://ubuntu.fan/" description="Ubuntu Linux 社区与资源。" />
+  <LinkCard title="RunEntLinux" href="https://runentlinux.com/" description="企业级 Linux 指南与教程。" />
+  <LinkCard title="AlmaLinuxCN" href="https://www.almalinux.com.cn/" description="AlmaLinux 中文社区。" />
+</CardGrid>
+
+查看软件支持生命周期请访问 [EOL.Wiki](https://eol.wiki/)。
+
+更 AI Native 的开源服务器控制面板：[WebCasa](https://web.casa)。
+
+高度兼容 Apache httpd 的轻量化 Web Server：[LiteHTTPD](https://litehttpd.com)。

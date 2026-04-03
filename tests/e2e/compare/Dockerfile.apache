@@ -1,0 +1,15 @@
+FROM php:8.1-apache
+
+# Enable required Apache modules
+RUN a2enmod rewrite headers expires auth_basic authn_file authn_core authz_core
+
+# Enable AllowOverride All for document root
+RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' \
+    /etc/apache2/apache2.conf
+
+# Copy shared document root
+COPY htdocs/ /var/www/html/
+
+RUN chown -R www-data:www-data /var/www/html
+
+EXPOSE 80

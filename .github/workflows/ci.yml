@@ -1,0 +1,253 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  # ── Job 1: Build + All Unit/Property/Compat Tests ──────────────────
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --parallel $(nproc)
+
+      - name: Verify .so artifact
+        run: |
+          test -f build/litehttpd_htaccess.so
+          file build/litehttpd_htaccess.so | grep "shared object"
+
+      - name: Run unit tests
+        run: ctest --test-dir build -R "unit_tests" --output-on-failure --parallel $(nproc)
+
+      - name: Run property tests
+        run: ctest --test-dir build -R "property_tests" --output-on-failure --parallel $(nproc)
+
+      - name: Run compatibility tests
+        run: ctest --test-dir build -R "compat_tests" --output-on-failure --parallel $(nproc)
+
+      - name: Run confconv tests
+        run: ctest --test-dir build -R "confconv_tests" --output-on-failure --parallel $(nproc)
+
+      - name: Upload build artifacts
+        if: matrix.build_type == 'Release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-release
+          path: |
+            build/litehttpd_htaccess.so
+            build/litehttpd-confconv
+          retention-days: 1
+
+  # ── Job 2: Apache httpd Behaviour Comparison ────────────────────────
+  apache-comparison:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Apache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apache2 curl
+          sudo a2enmod headers expires rewrite env setenvif
+
+      - name: Prepare document root
+        run: |
+          sudo mkdir -p /var/www/test/subdir
+          echo "<h1>OK</h1>" | sudo tee /var/www/test/index.html
+          echo "<?php phpinfo();" | sudo tee /var/www/test/index.php
+          echo "img" | sudo tee /var/www/test/photo.jpg
+          sudo chown -R www-data:www-data /var/www/test
+
+      - name: Configure Apache vhost
+        run: |
+          sudo tee /etc/apache2/sites-available/test.conf << 'EOF'
+          <VirtualHost *:80>
+              ServerName localhost
+              DocumentRoot /var/www/test
+              <Directory /var/www/test>
+                  AllowOverride All
+                  Require all granted
+              </Directory>
+              LogLevel debug
+              ErrorLog ${APACHE_LOG_DIR}/test-error.log
+          </VirtualHost>
+          EOF
+          sudo a2dissite 000-default
+          sudo a2ensite test
+          sudo systemctl restart apache2
+
+      - name: Test Header directives
+        run: |
+          sudo tee /var/www/test/.htaccess << 'HTACCESS'
+          Header set X-Frame-Options "SAMEORIGIN"
+          Header set X-Content-Type-Options "nosniff"
+          Header append Cache-Control "public"
+          HTACCESS
+          sleep 1
+          RESP=$(curl -sI http://localhost/)
+          echo "$RESP"
+          echo "$RESP" | grep -qi "X-Frame-Options: SAMEORIGIN"
+          echo "$RESP" | grep -qi "X-Content-Type-Options: nosniff"
+          echo "$RESP" | grep -qi "Cache-Control.*public"
+
+      - name: Test Redirect directives
+        run: |
+          sudo tee /var/www/test/.htaccess << 'HTACCESS'
+          Redirect 301 /old-page /new-page
+          Redirect /temp-page /other-page
+          HTACCESS
+          sleep 1
+          RESP=$(curl -sI http://localhost/old-page)
+          echo "$RESP" | grep -q "301"
+          echo "$RESP" | grep -qi "Location:.*/new-page"
+          RESP=$(curl -sI http://localhost/temp-page)
+          echo "$RESP" | grep -q "302"
+
+      - name: Test Expires directives
+        run: |
+          sudo tee /var/www/test/.htaccess << 'HTACCESS'
+          ExpiresActive On
+          ExpiresByType text/html "access plus 1 hour"
+          HTACCESS
+          sleep 1
+          RESP=$(curl -sI http://localhost/index.html)
+          echo "$RESP" | grep -qi "Cache-Control.*max-age=3600"
+
+      - name: Test Access Control directives
+        run: |
+          sudo tee /var/www/test/.htaccess << 'HTACCESS'
+          Order Allow,Deny
+          Deny from all
+          HTACCESS
+          sleep 1
+          RESP=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/)
+          test "$RESP" = "403"
+
+      - name: Test FilesMatch directives
+        run: |
+          sudo tee /var/www/test/.htaccess << 'HTACCESS'
+          <FilesMatch "\.(jpg|jpeg|png|gif)$">
+          Header set X-Image-Cache "HIT"
+          </FilesMatch>
+          HTACCESS
+          sleep 1
+          RESP=$(curl -sI http://localhost/photo.jpg)
+          echo "$RESP" | grep -qi "X-Image-Cache: HIT"
+
+      - name: Test combined WordPress-style .htaccess
+        run: |
+          sudo tee /var/www/test/.htaccess << 'HTACCESS'
+          Header set X-Frame-Options "SAMEORIGIN"
+          ExpiresActive On
+          ExpiresByType text/html "access plus 1 hour"
+          ErrorDocument 404 /index.html
+          HTACCESS
+          sleep 1
+          RESP=$(curl -sI http://localhost/)
+          echo "$RESP" | grep -qi "X-Frame-Options: SAMEORIGIN"
+          echo "$RESP" | grep -qi "Cache-Control.*max-age=3600"
+
+      - name: Collect Apache logs on failure
+        if: failure()
+        run: sudo cat /var/log/apache2/test-error.log || true
+
+  # ── Job 3: OLS E2E Directive Tests ──────────────────────────────────
+  ols-e2e:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-release
+          path: build/
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Build module (for Docker image)
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build --parallel $(nproc) --target litehttpd_htaccess
+
+      - name: Build OLS E2E image
+        run: docker build -t ols-e2e-test -f tests/e2e/Dockerfile .
+
+      - name: Start OLS container
+        run: docker run -d --name ols-e2e -p 8088:8088 ols-e2e-test
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8088/ > /dev/null 2>&1; then
+              echo "OLS is ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs ols-e2e
+          exit 1
+
+      - name: Run directive E2E tests
+        run: bash tests/e2e/test_directives.sh
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          docker exec ols-e2e cat /usr/local/lsws/logs/error.log || true
+          docker logs ols-e2e || true
+
+  # ── Job 4: ASan + UBSan ───────────────────────────────────────────
+  sanitizer:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Build with sanitizers
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build --parallel $(nproc)
+
+      - name: Run tests with sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ctest --test-dir build --output-on-failure --parallel $(nproc)
+
+  # ── Job 5: Consistency Check ───────────────────────────────────────
+  consistency:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Run directive support consistency check
+        run: bash tests/check_consistency.sh

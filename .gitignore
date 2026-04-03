@@ -1,0 +1,106 @@
+# ==========================================
+# C++ & CMake Build Outputs
+# ==========================================
+build/
+out/
+output/
+bin/
+lib/
+*.o
+*.so
+*.a
+*.dylib
+*.dll
+*.exe
+
+# CMake specific
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# ==========================================
+# Testing & Coverage
+# ==========================================
+tests/e2e/compare/ols_htaccess.so
+tests/e2e/compare/out/
+# If there are any app-matrix test outputs or logs:
+tests/e2e/apps-matrix/out/
+coverage/
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+
+# ==========================================
+# IDE & OS Files
+# ==========================================
+.vscode/
+.idea/
+.vs/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# ==========================================
+# Packaging & Release Artifacts
+# ==========================================
+*.rpm
+*.deb
+*.tar.gz
+*.tar.xz
+*.zip
+
+# ==========================================
+# AI Agent & DevTool Local Configs
+# ==========================================
+# Un-comment the next lines if team agents should also be ignored
+# .agents/
+# .qwen/
+# skills-lock.json
+
+# These usually contain absolute paths or local chat history:
+.claude/
+.mcp.json
+
+# ==========================================
+# Local Scratch / Temp Files
+# ==========================================
+ghidra-mcp/
+lsws_temp/
+upx-*/
+ghidra_*.log
+ghidra_*.pid
+*_result.txt
+*_decompiled.txt
+rewrite_decompiled.txt
+start-headless.sh
+analyze_rewrite.py
+__pycache__/
+*.pyc
+.env
+
+# Agent skill caches (local only)
+.agents/skills/reverse-engineering-*/
+.agents/skills/binary-analysis-*/
+.qwen/skills/reverse-engineering-*/
+
+# LSWS comparison artifacts (local test only)
+tests/e2e/compare/Dockerfile.lsws
+tests/e2e/compare/conf/lsws_docker_template.xml
+
+# AI development tool configs (local only)
+.agents/
+.kiro/
+.qwen/
+
+# Git history backup (local only)
+.git-history-backup.md

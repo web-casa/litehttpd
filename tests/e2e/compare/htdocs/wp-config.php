@@ -1,0 +1,1 @@
+<?php echo 'WP_CONFIG_SHOULD_BE_BLOCKED'; 

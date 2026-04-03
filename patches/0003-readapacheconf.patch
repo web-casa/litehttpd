@@ -1,0 +1,112 @@
+From: litehttpd
+Subject: [PATCH 0003] litehttpd: add readApacheConf startup hook
+
+Adds readApacheConf directive to httpd_config.conf that triggers
+litehttpd-confconv at OLS startup to convert Apache configuration files
+into native OLS format.
+
+Usage:
+  # In /usr/local/lsws/conf/httpd_config.conf, add:
+  readApacheConf /etc/httpd/conf/httpd.conf portmap=80:8088,443:8443
+
+This is a CONCEPTUAL patch -- it documents the intended integration
+point in OpenLiteSpeed. The actual patch requires OLS source code
+to apply.
+
+---
+ src/main/plainconf.cpp | 30 ++++++++++++++++++++++++++++++
+ 1 file changed, 30 insertions(+)
+
+diff --git a/src/main/plainconf.cpp b/src/main/plainconf.cpp
+index 0000000..0000001 100644
+--- a/src/main/plainconf.cpp
++++ b/src/main/plainconf.cpp
+@@ -XXX,6 +XXX,36 @@ void PlainConf::configServer(XmlNode *pRoot)
+     // ... existing server configuration code ...
+
++    // litehttpd: readApacheConf support
++    // Converts Apache httpd.conf to OLS config at startup time
++    const char *pApacheConf = pRoot->getChildValue("readApacheConf");
++    if (pApacheConf && pApacheConf[0])
++    {
++        // Extract config path (first word) and options (rest)
++        char sConfPath[4096];
++        char sOptions[4096] = {0};
++        const char *pSpace = strchr(pApacheConf, ' ');
++        if (pSpace)
++        {
++            size_t pathLen = pSpace - pApacheConf;
++            if (pathLen >= sizeof(sConfPath)) pathLen = sizeof(sConfPath) - 1;
++            memcpy(sConfPath, pApacheConf, pathLen);
++            sConfPath[pathLen] = '\0';
++            snprintf(sOptions, sizeof(sOptions), "%s", pSpace + 1);
++        }
++        else
++        {
++            snprintf(sConfPath, sizeof(sConfPath), "%s", pApacheConf);
++        }
++
++        const char *pHome = MainServerConfig::getInstance().getServerRoot();
++        char sBin[4096];
++        char sOutDir[4096];
++        snprintf(sBin, sizeof(sBin), "%s/modules/litehttpd-confconv", pHome);
++        snprintf(sOutDir, sizeof(sOutDir), "%s/conf/apacheconf", pHome);
++
++        /* Use fork+execve to avoid shell injection via sConfPath/sOptions.
++         * The argv array passes arguments directly without shell parsing. */
++        const char *argv[16];
++        int argc_idx = 0;
++        argv[argc_idx++] = sBin;
++        argv[argc_idx++] = "--input";
++        argv[argc_idx++] = sConfPath;
++        argv[argc_idx++] = "--output";
++        argv[argc_idx++] = sOutDir;
++        if (sOptions[0])
++            argv[argc_idx++] = sOptions;
++        argv[argc_idx] = NULL;
++
++        LOG_D(("readApacheConf: running %s --input %s --output %s %s",
++               sBin, sConfPath, sOutDir, sOptions));
++
++        pid_t pid = fork();
++        int iRet = -1;
++        if (pid == 0)
++        {
++            /* Child: redirect stderr to stdout, exec */
++            dup2(STDOUT_FILENO, STDERR_FILENO);
++            execv(sBin, (char *const *)argv);
++            _exit(127);
++        }
++        else if (pid > 0)
++        {
++            int status = 0;
++            waitpid(pid, &status, 0);
++            iRet = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
++        }
++        if (iRet == 0)
++        {
++            char sPath[4096];
++
++            // Load generated vhosts configuration
++            snprintf(sPath, sizeof(sPath), "%s/conf/apacheconf/vhosts.conf", pHome);
++            struct stat st;
++            if (stat(sPath, &st) == 0)
++                loadConfigFile(pRoot, sPath);
++
++            // Load generated listeners configuration
++            snprintf(sPath, sizeof(sPath), "%s/conf/apacheconf/listeners.conf", pHome);
++            if (stat(sPath, &st) == 0)
++                loadConfigFile(pRoot, sPath);
++
++            LOG_D(("readApacheConf: successfully loaded converted config"));
++        }
++        else
++        {
++            LOG_W(("readApacheConf: litehttpd-confconv failed with exit code %d", iRet));
++        }
++    }
++
+     // ... rest of server configuration ...
+ }
+--
+2.40.0

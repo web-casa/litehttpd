@@ -1,0 +1,653 @@
+# =============================================================================
+# P2 Test Cases — Four-Engine Comparison (Edge Cases - Simplified)
+# =============================================================================
+# Priority 2: Edge cases and stress tests using existing infrastructure
+
+# ---------------------------------------------------------------------------
+# Group: edge_cases (10 cases)
+# ---------------------------------------------------------------------------
+- id: EC_P2_001
+  group: edge_cases
+  desc: "URI with encoded space %20"
+  method: GET
+  path: /_probe/probe.php?test=hello%20world
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: EC_P2_002
+  group: edge_cases
+  desc: "Query string with special chars"
+  method: GET
+  path: /_probe/probe.php?key=value&special=test
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: EC_P2_003
+  group: edge_cases
+  desc: "Multiple query parameters"
+  method: GET
+  path: /_probe/probe.php?a=1&b=2&c=3&d=4&e=5
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: EC_P2_004
+  group: edge_cases
+  desc: "Empty query string"
+  method: GET
+  path: /_probe/probe.php?
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: EC_P2_005
+  group: edge_cases
+  desc: "Path with trailing slash"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: EC_P2_006
+  group: edge_cases
+  desc: "Path without trailing slash"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: EC_P2_007
+  group: edge_cases
+  desc: "Case sensitive path — lowercase"
+  method: GET
+  path: /index.php
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: EC_P2_008
+  group: edge_cases
+  desc: "Case sensitive path — uppercase"
+  method: GET
+  path: /INDEX.PHP
+  compare_mode: htaccess
+  checks:
+    status_in: [200, 404]
+
+- id: EC_P2_009
+  group: edge_cases
+  desc: "Double extension file"
+  method: GET
+  path: /style.css
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: EC_P2_010
+  group: edge_cases
+  desc: "Hidden file access attempt"
+  method: GET
+  path: /.htaccess
+  compare_mode: known
+  known_diff: "OLS module does not block .ht* — Apache/LSWS deny in core config"
+  checks:
+    status_in: [403, 404]
+
+# ---------------------------------------------------------------------------
+# Group: headers_edge (8 cases)
+# ---------------------------------------------------------------------------
+- id: HE_P2_001
+  group: headers_edge
+  desc: "Multiple same headers"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Frame-Options: "SAMEORIGIN"
+
+- id: HE_P2_002
+  group: headers_edge
+  desc: "Header with empty value"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: HE_P2_003
+  group: headers_edge
+  desc: "Header case sensitivity"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Custom-Header: "test-value-v1"
+
+- id: HE_P2_004
+  group: headers_edge
+  desc: "Content-Type header"
+  method: GET
+  path: /style.css
+  compare_mode: htaccess
+  checks:
+    status: 200
+    header:Content-Type_contains: "css"
+
+- id: HE_P2_005
+  group: headers_edge
+  desc: "Cache-Control header"
+  method: GET
+  path: /style.css
+  compare_mode: htaccess
+  checks:
+    status: 200
+    header:Cache-Control_contains: "max-age"
+
+- id: HE_P2_006
+  group: headers_edge
+  desc: "Multiple security headers"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Frame-Options: "SAMEORIGIN"
+    header:X-Content-Type-Options: "nosniff"
+
+- id: HE_P2_007
+  group: headers_edge
+  desc: "Header inheritance from parent"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Frame-Options: "SAMEORIGIN"
+
+- id: HE_P2_008
+  group: headers_edge
+  desc: "Header override in subdir"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Custom-Header: "subdir-override-v1"
+
+# ---------------------------------------------------------------------------
+# Group: acl_edge (6 cases)
+# ---------------------------------------------------------------------------
+- id: AC_P2_001
+  group: acl_edge
+  desc: "Allow from localhost"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: AC_P2_002
+  group: acl_edge
+  desc: "Files block — wp-config.php"
+  method: GET
+  path: /wp-config.php
+  compare_mode: mod_lsws
+  checks:
+    status: 403
+
+- id: AC_P2_003
+  group: acl_edge
+  desc: "Files block — secret.txt"
+  method: GET
+  path: /secret.txt
+  compare_mode: mod_lsws
+  checks:
+    status: 403
+
+- id: AC_P2_004
+  group: acl_edge
+  desc: "FilesMatch — .sql extension"
+  method: GET
+  path: /dump.sql
+  compare_mode: known
+  checks:
+    status: 403
+  known_diff: "OLS static file handling"
+
+- id: AC_P2_005
+  group: acl_edge
+  desc: "FilesMatch — .log extension"
+  method: GET
+  path: /debug.log
+  compare_mode: known
+  checks:
+    status: 403
+  known_diff: "OLS static file handling"
+
+- id: AC_P2_006
+  group: acl_edge
+  desc: "Require all granted"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+# ---------------------------------------------------------------------------
+# Group: auth_edge (5 cases)
+# ---------------------------------------------------------------------------
+- id: AU_P2_001
+  group: auth_edge
+  desc: "Auth — no credentials"
+  method: GET
+  path: /protected/secret.php
+  compare_mode: mod_lsws
+  checks:
+    status: 401
+
+- id: AU_P2_002
+  group: auth_edge
+  desc: "Auth — valid credentials"
+  method: GET
+  path: /protected/secret.php
+  auth: "testuser:testpass"
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: AU_P2_003
+  group: auth_edge
+  desc: "Auth — wrong username"
+  method: GET
+  path: /protected/secret.php
+  auth: "wronguser:testpass"
+  compare_mode: mod_lsws
+  checks:
+    status: 401
+
+- id: AU_P2_004
+  group: auth_edge
+  desc: "Auth — wrong password"
+  method: GET
+  path: /protected/secret.php
+  auth: "testuser:wrongpass"
+  compare_mode: mod_lsws
+  checks:
+    status: 401
+
+- id: AU_P2_005
+  group: auth_edge
+  desc: "Auth — empty password"
+  method: GET
+  path: /protected/secret.php
+  auth: "testuser:"
+  compare_mode: mod_lsws
+  checks:
+    status: 401
+
+# ---------------------------------------------------------------------------
+# Group: mime_edge (5 cases)
+# ---------------------------------------------------------------------------
+- id: MT_P2_001
+  group: mime_edge
+  desc: "CSS MIME type"
+  method: GET
+  path: /style.css
+  compare_mode: htaccess
+  checks:
+    status: 200
+    header:Content-Type_contains: "css"
+
+- id: MT_P2_002
+  group: mime_edge
+  desc: "JPEG MIME type"
+  method: GET
+  path: /photo.jpg
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: MT_P2_003
+  group: mime_edge
+  desc: "HTML MIME type"
+  method: GET
+  path: /index.html
+  compare_mode: htaccess
+  checks:
+    status: 200
+    header:Content-Type_contains: "html"
+
+- id: MT_P2_004
+  group: mime_edge
+  desc: "PHP MIME type"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: MT_P2_005
+  group: mime_edge
+  desc: "JavaScript MIME type"
+  method: GET
+  path: /app.js
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+# ---------------------------------------------------------------------------
+# Group: expires_edge (5 cases)
+# ---------------------------------------------------------------------------
+- id: EX_P2_001
+  group: expires_edge
+  desc: "Expires — CSS file"
+  method: GET
+  path: /style.css
+  compare_mode: htaccess
+  checks:
+    status: 200
+    header:Cache-Control_contains: "max-age"
+
+- id: EX_P2_002
+  group: expires_edge
+  desc: "Expires — JPEG file"
+  method: GET
+  path: /photo.jpg
+  compare_mode: htaccess
+  checks:
+    status: 200
+    header:Cache-Control_contains: "max-age"
+
+- id: EX_P2_003
+  group: expires_edge
+  desc: "Expires — HTML file"
+  method: GET
+  path: /index.html
+  compare_mode: htaccess
+  checks:
+    status: 200
+    header:Cache-Control_contains: "max-age"
+
+- id: EX_P2_004
+  group: expires_edge
+  desc: "Expires — PHP file"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: EX_P2_005
+  group: expires_edge
+  desc: "Expires — subdir file"
+  method: GET
+  path: /subdir/custom.html
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+# ---------------------------------------------------------------------------
+# Group: env_edge (5 cases)
+# ---------------------------------------------------------------------------
+- id: EN_P2_001
+  group: env_edge
+  desc: "SetEnv — root level"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    probe:TEST_ENV: "hello_from_htaccess"
+
+- id: EN_P2_002
+  group: env_edge
+  desc: "SetEnv — subdir override"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    probe:TEST_ENV: "hello_from_subdir"
+
+- id: EN_P2_003
+  group: env_edge
+  desc: "SetEnvIf — Remote_Addr"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod
+  checks:
+    status: 200
+
+- id: EN_P2_004
+  group: env_edge
+  desc: "Multiple env vars"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: EN_P2_005
+  group: env_edge
+  desc: "Env var inheritance"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+# ---------------------------------------------------------------------------
+# Group: redirect_edge (3 cases)
+# ---------------------------------------------------------------------------
+- id: RD_P2_001
+  group: redirect_edge
+  desc: "Redirect 301"
+  method: GET
+  path: /old-page
+  compare_mode: known
+  checks:
+    status: 301
+  known_diff: "OLS Module 404 redirect limitation"
+
+- id: RD_P2_002
+  group: redirect_edge
+  desc: "RedirectMatch"
+  method: GET
+  path: /blog/2024/03/
+  compare_mode: known
+  checks:
+    status: 301
+  known_diff: "OLS Module 404 redirect limitation"
+
+- id: RD_P2_003
+  group: redirect_edge
+  desc: "Non-matching redirect"
+  method: GET
+  path: /no-redirect-path
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+# ---------------------------------------------------------------------------
+# Group: options_edge (4 cases)
+# ---------------------------------------------------------------------------
+- id: OP_P2_001
+  group: options_edge
+  desc: "Options -Indexes"
+  method: GET
+  path: /noindex/
+  compare_mode: mod_lsws
+  checks:
+    status_in: [403, 404]
+
+- id: OP_P2_002
+  group: options_edge
+  desc: "Options +FollowSymLinks"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: OP_P2_003
+  group: options_edge
+  desc: "Options inheritance"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: OP_P2_004
+  group: options_edge
+  desc: "Options in subdir"
+  method: GET
+  path: /subdir/
+  compare_mode: mod_lsws
+  checks:
+    status_in: [200, 403, 404]
+
+# ---------------------------------------------------------------------------
+# Group: error_doc_edge (4 cases)
+# ---------------------------------------------------------------------------
+- id: ED_P2_001
+  group: error_doc_edge
+  desc: "ErrorDocument 403"
+  method: GET
+  path: /wp-config.php
+  compare_mode: mod_lsws
+  checks:
+    status: 403
+
+- id: ED_P2_002
+  group: error_doc_edge
+  desc: "ErrorDocument 401"
+  method: GET
+  path: /protected/secret.php
+  compare_mode: mod_lsws
+  checks:
+    status: 401
+
+- id: ED_P2_003
+  group: error_doc_edge
+  desc: "ErrorDocument 404 fallback"
+  method: GET
+  path: /truly-nonexistent-xyz-999
+  compare_mode: htaccess
+  checks:
+    status_in: [200, 404]
+
+- id: ED_P2_004
+  group: error_doc_edge
+  desc: "ErrorDocument inheritance"
+  method: GET
+  path: /subdir/nonexistent-file
+  compare_mode: htaccess
+  checks:
+    status_in: [200, 404]
+
+# ---------------------------------------------------------------------------
+# Group: inherit_edge (5 cases)
+# ---------------------------------------------------------------------------
+- id: IH_P2_001
+  group: inherit_edge
+  desc: "Subdir inherits headers"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Frame-Options: "SAMEORIGIN"
+
+- id: IH_P2_002
+  group: inherit_edge
+  desc: "Subdir overrides header"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Custom-Header: "subdir-override-v1"
+
+- id: IH_P2_003
+  group: inherit_edge
+  desc: "Subdir adds header"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Subdir-Header: "subdir-only"
+
+- id: IH_P2_004
+  group: inherit_edge
+  desc: "Subdir inherits env"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+
+- id: IH_P2_005
+  group: inherit_edge
+  desc: "Subdir overrides env"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    probe:TEST_ENV: "hello_from_subdir"
+
+# ---------------------------------------------------------------------------
+# Group: rewrite_edge (5 cases)
+# ---------------------------------------------------------------------------
+- id: RW_P2_001
+  group: rewrite_edge
+  desc: "Rewrite — existing file"
+  method: GET
+  path: /index.php
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: RW_P2_002
+  group: rewrite_edge
+  desc: "Rewrite — existing CSS"
+  method: GET
+  path: /style.css
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: RW_P2_003
+  group: rewrite_edge
+  desc: "Rewrite — existing image"
+  method: GET
+  path: /photo.jpg
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: RW_P2_004
+  group: rewrite_edge
+  desc: "Rewrite — fallback to index"
+  method: GET
+  path: /nonexistent-path-xyz
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: RW_P2_005
+  group: rewrite_edge
+  desc: "Rewrite — with query string"
+  method: GET
+  path: /test-path?param=value
+  compare_mode: htaccess
+  checks:
+    status: 200

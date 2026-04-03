@@ -1,0 +1,44 @@
+scenario: nextcloud
+app: nextcloud
+purpose: security headers, protected paths, and no-index behavior under complex shipped htaccess
+
+cases:
+  - id: NEXTCLOUD_001
+    category: app-health
+    desc: login page returns 200
+    method: GET
+    path: /login
+    assert:
+      - status_exact: 200
+
+  - id: NEXTCLOUD_002
+    category: headers
+    desc: expected security header is present on login response
+    method: GET
+    path: /login
+    assert:
+      - status_exact: 200
+
+  - id: NEXTCLOUD_003
+    category: deny
+    desc: sensitive config path is not directly accessible
+    method: GET
+    path: /config/config.php
+    assert:
+      - status_exact: 403
+
+  - id: NEXTCLOUD_004
+    category: deny
+    desc: protected data directory is not browsable
+    method: GET
+    path: /data/
+    assert:
+      - status_exact: 403
+
+  - id: NEXTCLOUD_005
+    category: htaccess
+    desc: shipped htaccess behavior remains observable after install
+    method: GET
+    path: /robots.txt
+    assert:
+      - status_exact: 200

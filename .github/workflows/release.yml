@@ -1,0 +1,296 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Build litehttpd .so for each platform ──────────────────────────
+  build-module:
+    strategy:
+      matrix:
+        include:
+          - container: almalinux:9
+            suffix: el9-x86_64
+            platform: linux/amd64
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+          - container: almalinux:10
+            suffix: el10-x86_64
+            platform: linux/amd64
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+          - container: ubuntu:22.04
+            suffix: ubuntu22-x86_64
+            platform: linux/amd64
+            pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev"
+          - container: arm64v8/almalinux:9
+            suffix: el9-aarch64
+            platform: linux/arm64
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+            qemu: true
+          - container: arm64v8/almalinux:10
+            suffix: el10-aarch64
+            platform: linux/arm64
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+            qemu: true
+          - container: arm64v8/ubuntu:22.04
+            suffix: ubuntu22-aarch64
+            platform: linux/arm64
+            pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev"
+            qemu: true
+
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up QEMU for ARM builds
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Build .so
+        run: |
+          mkdir -p output
+          docker run --rm \
+            --platform ${{ matrix.platform }} \
+            -v ${{ github.workspace }}:/src:ro \
+            -v ${{ github.workspace }}/output:/output \
+            ${{ matrix.container }} \
+            bash -c '
+              set -e
+              ${{ matrix.pkg_cmd }} 2>&1 | tail -2
+              mkdir /tmp/build && cd /tmp/build
+              tar cf - -C /src --exclude=build --exclude=.git . | tar xf -
+              cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-O2 -DNDEBUG"
+              cmake --build build --target litehttpd_htaccess -j$(nproc)
+              strip build/litehttpd_htaccess.so
+              cp build/litehttpd_htaccess.so /output/litehttpd_htaccess-${{ matrix.suffix }}.so
+            '
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: litehttpd_htaccess-${{ matrix.suffix }}
+          path: output/litehttpd_htaccess-${{ matrix.suffix }}.so
+
+  # ── Build litehttpd RPM (EL9, x86_64 + aarch64) ───────────────────
+  build-rpm-module:
+    strategy:
+      matrix:
+        include:
+          - container: almalinux:9
+            platform: linux/amd64
+            arch_suffix: x86_64
+          - container: arm64v8/almalinux:9
+            platform: linux/arm64
+            arch_suffix: aarch64
+            qemu: true
+
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up QEMU for ARM builds
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Extract version from spec
+        id: ver
+        run: echo "version=$(grep '^Version:' packaging/litehttpd.spec | awk '{print $2}')" >> $GITHUB_OUTPUT
+
+      - name: Build RPM
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          mkdir -p output
+          tar czf /tmp/litehttpd-${VERSION}.tar.gz \
+            --transform='s,^\.,litehttpd-${VERSION},' \
+            --exclude=build --exclude=.git .
+
+          docker run --rm \
+            --platform ${{ matrix.platform }} \
+            -v ${{ github.workspace }}:/src:ro \
+            -v /tmp/litehttpd-${VERSION}.tar.gz:/tmp/litehttpd-${VERSION}.tar.gz:ro \
+            -v ${{ github.workspace }}/output:/output \
+            -e VERSION=${VERSION} \
+            ${{ matrix.container }} \
+            bash -c '
+              set -e
+              dnf -y install rpm-build cmake gcc gcc-c++ git-core libxcrypt-devel 2>&1 | tail -2
+              mkdir -p /root/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+              cp /tmp/litehttpd-${VERSION}.tar.gz /root/rpmbuild/SOURCES/
+              rpmbuild -bb --define "_topdir /root/rpmbuild" /src/packaging/litehttpd.spec
+              find /root/rpmbuild/RPMS -name "litehttpd-*.rpm" ! -name "*debug*" \
+                -exec cp {} /output/ \;
+              ls -lh /output/
+            '
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@v5
+        with:
+          name: litehttpd-rpm-${{ matrix.arch_suffix }}
+          path: output/litehttpd-*.rpm
+
+  # ── Build openlitespeed-litehttpd RPM (EL9, x86_64 + aarch64) ────────
+  build-rpm-ols:
+    strategy:
+      matrix:
+        include:
+          - container: almalinux:9
+            platform: linux/amd64
+            arch_suffix: x86_64
+          - container: arm64v8/almalinux:9
+            platform: linux/arm64
+            arch_suffix: aarch64
+            qemu: true
+
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up QEMU for ARM builds
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Download OLS source
+        run: |
+          curl -sL -o /tmp/v1.8.5.tar.gz \
+            https://github.com/litespeedtech/openlitespeed/archive/v1.8.5.tar.gz
+
+      - name: Build RPM
+        run: |
+          mkdir -p output
+          docker run --rm \
+            --platform ${{ matrix.platform }} \
+            -v ${{ github.workspace }}:/src:ro \
+            -v /tmp/v1.8.5.tar.gz:/tmp/v1.8.5.tar.gz:ro \
+            -v ${{ github.workspace }}/output:/output \
+            ${{ matrix.container }} \
+            bash -c '
+              set -e
+              dnf -y install rpm-build gcc gcc-c++ cmake make autoconf automake libtool \
+                pcre-devel openssl-devel expat-devel zlib-devel bzip2-devel \
+                libxml2-devel curl-devel systemd-rpm-macros 2>&1 | tail -2
+              mkdir -p /root/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+              cp /tmp/v1.8.5.tar.gz /root/rpmbuild/SOURCES/
+              cp /src/patches/0001-lsiapi-phpconfig.patch /root/rpmbuild/SOURCES/
+              cp /src/patches/0002-lsiapi-rewrite.patch /root/rpmbuild/SOURCES/
+              rpmbuild -bb --define "_topdir /root/rpmbuild" /src/packaging/openlitespeed-litehttpd.spec
+              find /root/rpmbuild/RPMS -name "openlitespeed-litehttpd-*.rpm" ! -name "*debug*" \
+                -exec cp {} /output/ \;
+              ls -lh /output/
+            '
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@v5
+        with:
+          name: openlitespeed-litehttpd-rpm-${{ matrix.arch_suffix }}
+          path: output/openlitespeed-litehttpd-*.rpm
+
+  # ── Run tests ──────────────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install deps
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Build and test
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build --parallel $(nproc)
+          ctest --test-dir build --output-on-failure --parallel $(nproc)
+
+  # ── Create GitHub Release ──────────────────────────────────────────
+  release:
+    needs: [build-module, build-rpm-module, build-rpm-ols, test]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.so" -exec cp {} release/ \;
+          find artifacts -name "*.rpm" -exec cp {} release/ \;
+          cp patches/0001-lsiapi-phpconfig.patch release/
+          cp patches/0002-lsiapi-rewrite.patch release/
+          cp patches/0003-readapacheconf.patch release/
+          cp patches/0004-autoindex-403.patch release/
+          find artifacts -name "litehttpd-confconv" -exec cp {} release/ \; 2>/dev/null || true
+          cd release
+          sha256sum * > SHA256SUMS
+          ls -lh
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "litehttpd v${{ steps.version.outputs.version }}"
+          body: |
+            ## litehttpd v${{ steps.version.outputs.version }}
+
+            Apache .htaccess compatibility module for OpenLiteSpeed (80 directives, 1017 tests).
+
+            ### RPM Packages (EL 9/10, x86_64 + aarch64)
+
+            | Package | Description |
+            |---------|-------------|
+            | `litehttpd-*.x86_64.rpm` | .htaccess module + litehttpd-confconv (x86_64) |
+            | `litehttpd-*.aarch64.rpm` | .htaccess module + litehttpd-confconv (ARM64) |
+            | `openlitespeed-litehttpd-*.x86_64.rpm` | OLS with PHPConfig + Rewrite + readApacheConf patch (x86_64) |
+            | `openlitespeed-litehttpd-*.aarch64.rpm` | OLS with PHPConfig + Rewrite + readApacheConf patch (ARM64) |
+
+            ```bash
+            # Install both (replaces stock OLS)
+            dnf install ./openlitespeed-litehttpd-*.$(uname -m).rpm
+            dnf install ./litehttpd-*.$(uname -m).rpm
+
+            # Or just the module (stock OLS, php_value/RewriteRule won't execute)
+            dnf install ./litehttpd-*.$(uname -m).rpm
+            ```
+
+            ### .so Files (Ubuntu/Debian/Docker)
+
+            | File | Platform |
+            |------|----------|
+            | `litehttpd_htaccess-el9-x86_64.so` | EL 9 x86_64 |
+            | `litehttpd_htaccess-el9-aarch64.so` | EL 9 ARM64 |
+            | `litehttpd_htaccess-el10-x86_64.so` | EL 10 x86_64 |
+            | `litehttpd_htaccess-el10-aarch64.so` | EL 10 ARM64 |
+            | `litehttpd_htaccess-ubuntu22-x86_64.so` | Ubuntu 22.04+, Debian 12+ x86_64 |
+            | `litehttpd_htaccess-ubuntu22-aarch64.so` | Ubuntu 22.04+, Debian 12+ ARM64 |
+
+            ### OLS Patches
+
+            | Patch | Description |
+            |-------|-------------|
+            | `0001-lsiapi-phpconfig.patch` | PHPConfig + set_req_header LSIAPI extensions |
+            | `0002-lsiapi-rewrite.patch` | RewriteRule engine LSIAPI extensions |
+            | `0003-readapacheconf.patch` | readApacheConf startup integration |
+            | `0004-autoindex-403.patch` | Options -Indexes returns 403 (match LSWS) |
+
+            Apply in order: `patch -p1 < 0001-*.patch && patch -p1 < 0002-*.patch && patch -p1 < 0003-*.patch && patch -p1 < 0004-*.patch`
+
+            ### Requirements
+            - OpenLiteSpeed >= 1.7.0
+            - glibc >= 2.34
+            - For `php_value`/`php_flag` + `RewriteRule`: install `openlitespeed-litehttpd` RPM or apply both patches
+          files: release/*

@@ -1,0 +1,46 @@
+scenario: wordpress-wp-optimize
+app: wordpress + wp-optimize
+purpose: browser-cache rules, expires defaults, and static resource behavior
+
+cases:
+  - id: WP_OPT_001
+    category: app-health
+    desc: homepage remains healthy with WP-Optimize htaccess rules
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: WP_OPT_002
+    category: ttl
+    desc: CSS asset publishes configured expires/default TTL
+    method: GET
+    path: /wp-content/cache-matrix/wp-optimize.css
+    assert:
+      - status_exact: 200
+      - header_contains: Cache-Control=max-age=
+      - ttl_close: 31536000
+
+  - id: WP_OPT_003
+    category: headers
+    desc: expires-related header is present on deterministic asset
+    method: GET
+    path: /wp-content/cache-matrix/wp-optimize.css
+    assert:
+      - status_exact: 200
+
+  - id: WP_OPT_004
+    category: deny
+    desc: directory listing remains disabled on plugin-managed static directory
+    method: GET
+    path: /wp-content/cache-matrix/
+    assert:
+      - status_exact: 403
+
+  - id: WP_OPT_005
+    category: htaccess
+    desc: probe confirms plugin-managed htaccess did not break request handling
+    method: GET
+    path: /_probe/server.php
+    assert:
+      - status_exact: 200

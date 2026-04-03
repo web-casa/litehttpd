@@ -1,0 +1,5 @@
+# cPanel AuthType Basic sample
+AuthType Basic
+AuthName "Restricted Area"
+AuthUserFile /home/user/.htpasswd
+Require valid-user

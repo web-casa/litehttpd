@@ -1,0 +1,107 @@
+---
+title: Installation
+description: How to install LiteHTTPD on OpenLiteSpeed
+---
+
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+
+## LiteHTTPD Installation
+
+LiteHTTPD (Full) is the default and recommended edition. It includes the patched OLS binary and the htaccess module.
+
+### Prerequisites
+
+- OpenLiteSpeed 1.7.0 or later
+- Linux x86_64 or ARM64
+
+<Tabs>
+<TabItem label="RPM (EL 9) -- recommended">
+
+<Steps>
+1. Download the RPM packages from the [Releases](https://github.com/web-casa/litehttpd/releases) page
+
+2. Install the patched OLS binary:
+   ```bash
+   dnf install ./openlitespeed-litehttpd-*.rpm
+   ```
+
+3. Install the htaccess module:
+   ```bash
+   dnf install ./litehttpd-*.rpm
+   ```
+
+4. Restart OLS:
+   ```bash
+   systemctl restart lsws
+   ```
+</Steps>
+
+</TabItem>
+<TabItem label="From Source (Full)">
+
+<Steps>
+1. Install build dependencies:
+   ```bash
+   # AlmaLinux / Rocky / RHEL
+   dnf install cmake gcc gcc-c++ libcrypt-devel
+
+   # Ubuntu / Debian
+   apt install cmake g++ libcrypt-dev
+   ```
+
+2. Clone OLS, apply patches, and build:
+   ```bash
+   git clone --branch v1.8.5 https://github.com/litespeedtech/openlitespeed.git
+   cd openlitespeed
+   patch -p1 < /path/to/patches/0001-lsiapi-phpconfig.patch
+   patch -p1 < /path/to/patches/0002-lsiapi-rewrite.patch
+   # Apply patches 0003, 0004
+   bash build.sh
+   ```
+
+3. Build the module:
+   ```bash
+   cd /path/to/litehttpd
+   cmake -B build -DCMAKE_BUILD_TYPE=Release
+   cmake --build build --target litehttpd_htaccess
+   ```
+
+4. Install:
+   ```bash
+   cp build/litehttpd_htaccess.so /usr/local/lsws/modules/
+   ```
+</Steps>
+
+</TabItem>
+</Tabs>
+
+## LiteHTTPD-Thin (Module Only)
+
+For stock OLS without patches. Quick to set up but limited:
+
+- RewriteRule directives are parsed but not executed
+- `php_value`/`php_flag` directives are parsed but not passed to lsphp
+
+<Steps>
+1. Copy the module to OLS:
+   ```bash
+   cp litehttpd_htaccess.so /usr/local/lsws/modules/
+   ```
+
+2. Enable the module in OLS config:
+   ```bash
+   cat >> /usr/local/lsws/conf/httpd_config.conf <<'CONF'
+
+   module litehttpd_htaccess {
+       ls_enabled              1
+   }
+   CONF
+   ```
+
+3. Restart OLS:
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+   ```
+</Steps>
+
+Consider upgrading to Full for production WordPress sites that rely on `.htaccess` redirects.

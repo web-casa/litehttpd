@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: litehttpd <noreply@github.com>
+Date: Wed, 02 Apr 2026 23:00:00 +0800
+Subject: [PATCH 4/4] litehttpd: return 403 when .htaccess Options -Indexes
+
+When Options -Indexes is set in .htaccess and a directory has no
+index file, Apache returns 403 Forbidden. Stock OLS returns 200 with
+directory listing (or 404 if autoIndex script is missing).
+
+This patch checks the directory's .htaccess for "Options -Indexes"
+INSIDE the isAutoIndexOn() block, BEFORE the autoIndex internal
+redirect. This ensures the check happens at the right time in the
+request lifecycle (contextMap stage, before URI_MAP hooks).
+
+Unlike the previous version which added isAutoIndexOff() after the
+autoIndex block (never reached when autoIndex was ON), this version
+directly scans .htaccess in processPath() at the engine level,
+matching Apache's Options directive behavior.
+---
+diff --git a/src/http/httpreq.cpp b/src/http/httpreq.cpp
+index 3defd16..3c9801e 100644
+--- a/src/http/httpreq.cpp
++++ b/src/http/httpreq.cpp
+@@ -2441,6 +2441,33 @@ int HttpReq::processPath(const char *pURI, int uriLen, char *pBuf,
+             *p = 0;
+             if (m_pContext->isAutoIndexOn())
+             {
++                /* litehttpd: check if .htaccess in this directory disables
++                 * autoIndex via Options -Indexes. Parse Options tokens
++                 * with proper precedence: last -Indexes/+Indexes wins. */
++                {
++                    char htpath[4096];
++                    int hlen = snprintf(htpath, sizeof(htpath), "%s/.htaccess", pBuf);
++                    if (hlen > 0 && hlen < (int)sizeof(htpath)) {
++                        FILE *htfp = fopen(htpath, "r");
++                        if (htfp) {
++                            int indexes_disabled = 0;
++                            char line[512];
++                            while (fgets(line, sizeof(line), htfp)) {
++                                char *lp = line;
++                                while (*lp == ' ' || *lp == '\t') lp++;
++                                /* Skip comments */
++                                if (*lp == '#') continue;
++                                if (strncasecmp(lp, "Options", 7) != 0) continue;
++                                lp += 7;
++                                if (*lp != ' ' && *lp != '\t') continue;
++                                /* Parse each token: -Indexes disables, +Indexes enables */
++                                char *tok = lp;
++                                while (*tok) {
++                                    while (*tok == ' ' || *tok == '\t') tok++;
++                                    if (!*tok || *tok == '\r' || *tok == '\n') break;
++                                    if (strncasecmp(tok, "-Indexes", 8) == 0 &&
++                                        (tok[8] == ' ' || tok[8] == '\t' || tok[8] == '\r' || tok[8] == '\n' || tok[8] == '\0'))
++                                        indexes_disabled = 1;
++                                    else if (strncasecmp(tok, "+Indexes", 8) == 0 &&
++                                        (tok[8] == ' ' || tok[8] == '\t' || tok[8] == '\r' || tok[8] == '\n' || tok[8] == '\0'))
++                                        indexes_disabled = 0;
++                                    else if (strncasecmp(tok, "Indexes", 7) == 0 &&
++                                        (tok[7] == ' ' || tok[7] == '\t' || tok[7] == '\r' || tok[7] == '\n' || tok[7] == '\0'))
++                                        indexes_disabled = 0; /* bare Indexes = enable */
++                                    /* Advance to next token */
++                                    while (*tok && *tok != ' ' && *tok != '\t' && *tok != '\r' && *tok != '\n') tok++;
++                                }
++                            }
++                            fclose(htfp);
++                            if (indexes_disabled) {
++                                LS_INFO(getLogSession(),
++                                        "Auto Index disabled by .htaccess Options -Indexes in [%s]",
++                                        pBuf);
++                                return SC_403;
++                            }
++                        }
++                    }
++                }
+                 addEnv("LS_AI_PATH", 10, pBuf, p - pBuf);
+                 const AutoStr2 *pURI = m_pVHost->getAutoIndexURI();
+                 ret = internalRedirectURI(pURI->c_str(), pURI->len());
+@@ -2449,6 +2476,15 @@ int HttpReq::processPath(const char *pURI, int uriLen, char *pBuf,
+                 return LS_FAIL;  //internal redirect
+             }
+             if (!m_pContext->isAppContext())
++            /* litehttpd: match Apache behavior — return 403 when autoIndex
++             * is explicitly disabled (Options -Indexes or autoIndex 0) */
++            if (m_pContext->isAutoIndexOff())
++            {
++                LS_INFO(getLogSession(),
++                        "Auto Index is disabled for [%s], access denied.",
++                        pBuf);
++                return SC_403;
++            }
+                 LS_DBG_L(getLogSession(), "Index file is not available in [%s].",
+                          pBuf);
+             return SC_404; //can't find a index file

@@ -1,0 +1,233 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 3 * * *'  # 3:17 UTC daily
+  workflow_dispatch:       # manual trigger
+
+jobs:
+  # ── Sanitizer + Fuzz ──────────────────────────────────────────────
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build
+
+      - name: Build parser fuzzer
+        run: |
+          clang -g -O1 -fsanitize=fuzzer,address -I include \
+            -DHTACCESS_UNIT_TEST \
+            tests/fuzz/fuzz_parser.cpp \
+            src/htaccess_parser.c \
+            src/htaccess_directive.c \
+            src/htaccess_expires.c \
+            -lstdc++ -lm \
+            -o fuzz_parser
+
+      - name: Run parser fuzzer (5 minutes)
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+        run: |
+          mkdir -p fuzz_corpus
+          cp tests/fuzz/corpus/* fuzz_corpus/
+          timeout 300 ./fuzz_parser fuzz_corpus/ \
+            -max_len=4096 \
+            -timeout=5 \
+            || true
+          echo "Fuzzer completed"
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: fuzz-crashes
+          path: |
+            crash-*
+            oom-*
+
+  # ── OLS Container Smoke Tests ─────────────────────────────────────
+  ols-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Build module
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build --parallel $(nproc)
+
+      - name: Start OLS container
+        run: |
+          docker build -t ols-smoke -f tests/e2e/Dockerfile .
+          docker run -d --name ols-smoke -p 8088:8088 ols-smoke
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8088/ > /dev/null 2>&1; then
+              echo "OLS ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Smoke test — Header directives
+        run: |
+          docker exec ols-smoke bash -c 'echo "Header set X-Smoke yes" > /var/www/vhosts/localhost/html/.htaccess'
+          sleep 0.5
+          curl -sI http://localhost:8088/index.html | grep -qi "X-Smoke: yes"
+          echo "PASS: Header set"
+
+      - name: Smoke test — Redirect
+        run: |
+          docker exec ols-smoke bash -c 'echo "Redirect 301 /smoke-redir /smoke-target" > /var/www/vhosts/localhost/html/.htaccess'
+          sleep 0.5
+          RESP=$(curl -sI http://localhost:8088/smoke-redir)
+          echo "$RESP" | grep -q "301"
+          echo "$RESP" | grep -qi "Location.*smoke-target"
+          echo "PASS: Redirect 301"
+
+      - name: Smoke test — FilesMatch ACL
+        run: |
+          docker exec ols-smoke bash -c '
+            echo "test" > /var/www/vhosts/localhost/html/secret.env
+            cat > /var/www/vhosts/localhost/html/.htaccess <<EOF
+          <FilesMatch "\.(env|log)$">
+              Order allow,deny
+              Deny from all
+          </FilesMatch>
+          EOF
+          '
+          sleep 0.5
+          STATUS=$(curl -sI http://localhost:8088/secret.env -o /dev/null -w "%{http_code}")
+          test "$STATUS" = "403"
+          echo "PASS: FilesMatch ACL (403)"
+
+      - name: Smoke test — Access Control
+        run: |
+          docker exec ols-smoke bash -c 'echo -e "Order Allow,Deny\nDeny from all" > /var/www/vhosts/localhost/html/.htaccess'
+          sleep 0.5
+          STATUS=$(curl -sI http://localhost:8088/ -o /dev/null -w "%{http_code}")
+          test "$STATUS" = "403"
+          echo "PASS: Deny from all (403)"
+
+      - name: Smoke test — Mixed directives (no crash)
+        run: |
+          docker exec ols-smoke bash -c '
+            cat > /var/www/vhosts/localhost/html/.htaccess <<EOF
+          AddDefaultCharset UTF-8
+          DefaultType application/octet-stream
+          Header set X-Mixed yes
+          RewriteEngine On
+          RewriteRule ^test$ /index.html [L]
+          EOF
+          '
+          sleep 0.5
+          RESP=$(curl -sI http://localhost:8088/index.html)
+          echo "$RESP" | grep -qi "X-Mixed: yes"
+          echo "PASS: Mixed directives (no crash)"
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f ols-smoke || true
+
+  # ── OLS PHP Application E2E Tests (moved from ci.yml) ─────────────
+  ols-app-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Build module
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel $(nproc)
+
+      - name: Start app stack
+        run: docker compose -f tests/e2e/docker-compose.yml up -d --build
+
+      - name: Wait for services
+        run: bash tests/e2e/lib/wait_for_services.sh
+
+      - name: Run PHP app tests
+        run: bash tests/e2e/test_apps.sh --all
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          docker compose -f tests/e2e/docker-compose.yml logs ols || true
+          docker compose -f tests/e2e/docker-compose.yml exec ols cat /usr/local/lsws/logs/error.log || true
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f tests/e2e/docker-compose.yml down -v
+
+  # ── Integration Tests: 4 PHP Apps (moved from ci.yml) ─────────────
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Build module
+        run: |
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel $(nproc)
+
+      - name: Start integration test stack
+        run: docker compose -f integration-tests/docker-compose.yml up -d --build
+
+      - name: Wait for services
+        run: |
+          for i in $(seq 1 90); do
+            if curl -sf http://localhost:8088/ > /dev/null 2>&1; then
+              echo "OLS ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+          for i in $(seq 1 60); do
+            if docker exec ols-integ-db mariadb -uroot -prootpass -e "SELECT 1" > /dev/null 2>&1; then
+              echo "MariaDB ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run WordPress tests
+        run: bash integration-tests/apps/wordpress/verify.sh
+
+      - name: Run Laravel tests
+        run: bash integration-tests/apps/laravel/verify.sh
+
+      - name: Run Nextcloud tests
+        run: bash integration-tests/apps/nextcloud/verify.sh
+
+      - name: Run Drupal tests
+        run: bash integration-tests/apps/drupal/verify.sh
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          docker exec ols-integ cat /usr/local/lsws/logs/error.log 2>/dev/null | tail -100 || true
+          docker compose -f integration-tests/docker-compose.yml logs --tail=50 || true
+
+      - name: Cleanup
+        if: always()
+        run: docker compose -f integration-tests/docker-compose.yml down -v

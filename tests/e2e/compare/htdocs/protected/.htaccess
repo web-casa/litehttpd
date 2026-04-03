@@ -1,0 +1,5 @@
+# Auth Basic test directory
+AuthType Basic
+AuthName "Protected Area"
+AuthUserFile /var/www/html/protected/.htpasswd
+Require valid-user

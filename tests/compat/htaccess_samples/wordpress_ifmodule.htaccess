@@ -1,0 +1,8 @@
+# WordPress IfModule block sample
+<IfModule mod_rewrite.c>
+Header set X-Powered-By WordPress
+</IfModule>
+<IfModule mod_headers.c>
+Header always set X-Frame-Options SAMEORIGIN
+Header always set X-Content-Type-Options nosniff
+</IfModule>

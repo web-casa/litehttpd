@@ -1,0 +1,26 @@
+# Security-focused .htaccess
+Header set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+Header set Content-Security-Policy "default-src 'self'"
+Header set Referrer-Policy "strict-origin-when-cross-origin"
+Header unset Server
+Header unset X-Powered-By
+RequestHeader unset Proxy
+
+Order Deny,Allow
+Deny from all
+Allow from 10.0.0.0/8
+Allow from 172.16.0.0/12
+Allow from 192.168.0.0/16
+
+<FilesMatch "\.(env|ini|log|sh|sql)$">
+Order Allow,Deny
+Deny from all
+</FilesMatch>
+
+SetEnvIf User-Agent "bot" is_bot
+SetEnvIf Remote_Addr "^10\." internal_network
+
+BruteForceProtection On
+BruteForceAllowedAttempts 3
+BruteForceWindow 900
+BruteForceAction block

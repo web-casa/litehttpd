@@ -1,0 +1,20 @@
+# CyberPanel full sample — covers all v2 directive categories
+Options -Indexes +FollowSymLinks
+Header always set X-Frame-Options SAMEORIGIN
+Header always set X-Content-Type-Options nosniff
+ExpiresActive On
+ExpiresDefault "access plus 1 hours"
+Require all granted
+AuthType Basic
+AuthName "Admin"
+AuthUserFile /etc/htpasswd/admin
+Require valid-user
+DirectoryIndex index.php index.html
+AddType application/json .json
+ForceType text/html
+AddEncoding gzip .gz
+AddCharset UTF-8 .html
+BruteForceProtection On
+BruteForceXForwardedFor On
+BruteForceWhitelist 10.0.0.0/8
+BruteForceProtectPath /wp-login.php
