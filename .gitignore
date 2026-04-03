@@ -6,6 +6,7 @@ out/
 output/
 bin/
 lib/
+!tests/e2e/lib/
 *.o
 *.so
 *.a
