@@ -109,7 +109,7 @@ jobs:
         run: |
           mkdir -p output
           tar czf /tmp/litehttpd-${VERSION}.tar.gz \
-            --transform='s,^\.,litehttpd-${VERSION},' \
+            --transform="s,^\.,litehttpd-${VERSION}," \
             --exclude=build --exclude=.git .
 
           docker run --rm \
