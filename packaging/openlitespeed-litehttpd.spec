@@ -45,7 +45,23 @@ patch -p1 < %{SOURCE1}
 patch -p1 < %{SOURCE2}
 
 %build
-bash build.sh
+# OLS build.sh needs to detect package manager; provide a shim
+# Third-party deps are already built by build.sh's internal logic
+# but rpmbuild environment may not have them. Use cmake directly
+# after build.sh prepares third-party libs.
+if command -v dnf &>/dev/null; then
+    export APP_MGR_CMD="dnf -y install"
+elif command -v yum &>/dev/null; then
+    export APP_MGR_CMD="yum -y install"
+fi
+# build.sh handles third-party (boringssl, brotli, etc.)
+bash build.sh || {
+    # Fallback: if build.sh fails on package detection,
+    # try direct cmake build (deps already in rpmbuild)
+    mkdir -p build && cd build
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=%{install_dir} ..
+    make %{?_smp_mflags}
+}
 
 %install
 cd build
@@ -85,7 +101,7 @@ getent group nogroup >/dev/null || groupadd -r nogroup
 %{_unitdir}/*.service
 
 %changelog
-* Fri Apr 04 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-1.litehttpd
+* Sat Apr 04 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-1.litehttpd
 - OpenLiteSpeed v1.8.5 with LiteHTTPD patches
 - Patch 0001: PHPConfig LSIAPI extensions
 - Patch 0002: RewriteRule execution

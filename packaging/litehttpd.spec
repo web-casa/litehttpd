@@ -75,7 +75,7 @@ fi
 %{install_dir}/bin/litehttpd-confconv
 
 %changelog
-* Fri Apr 04 2026 LiteHTTPD <noreply@web.casa> - 0.2.1-1
+* Sat Apr 04 2026 LiteHTTPD <noreply@web.casa> - 0.2.1-1
 - Initial public release
 - 80 .htaccess directives, 90%+ Apache compatible
 - LiteHTTPD-Full and LiteHTTPD-Thin editions
