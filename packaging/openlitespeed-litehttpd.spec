@@ -45,11 +45,7 @@ patch -p1 < %{SOURCE1}
 patch -p1 < %{SOURCE2}
 
 %build
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=%{install_dir} \
-    ..
-make %{?_smp_mflags}
+bash build.sh
 
 %install
 cd build

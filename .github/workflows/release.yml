@@ -162,8 +162,9 @@ jobs:
 
       - name: Download OLS source
         run: |
-          curl -sL -o /tmp/v1.8.5.tar.gz \
-            https://github.com/litespeedtech/openlitespeed/archive/v1.8.5.tar.gz
+          git clone --depth 1 --recurse-submodules --branch v1.8.5 \
+            https://github.com/litespeedtech/openlitespeed.git /tmp/ols-src
+          cd /tmp/ols-src && tar czf /tmp/v1.8.5.tar.gz --transform="s,^\.,openlitespeed-1.8.5," .
 
       - name: Build RPM
         run: |
