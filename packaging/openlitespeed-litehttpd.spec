@@ -59,8 +59,21 @@ patch -p1 < %{SOURCE1}
 patch -p1 < %{SOURCE2}
 
 %build
-# build.sh detects the package manager via `which`, downloads and compiles
-# all third-party deps (boringssl, lsquic, brotli, etc.), then builds OLS.
+# ── Patch build.sh to fix rpmbuild compatibility ──
+#
+# 1. Skip preparelibquic: lsquic submodule is already populated in the
+#    tarball (git clone --recurse-submodules). The function would delete
+#    and re-clone it, which breaks symlinks in some rpmbuild layouts.
+sed -i 's/^preparelibquic$/# preparelibquic (skipped for rpmbuild)/' build.sh
+
+# 2. Skip lsrecaptcha Go build: Go 1.21+ (EL9) dropped legacy GOPATH mode
+#    that build.sh relies on. lsrecaptcha is a captcha helper, not needed.
+sed -i '/^cd src\/modules\/lsrecaptcha$/,/^cd \.\.\/\.\.\/\.\.\/$/s/^/#/' build.sh
+
+# 3. Disable cmake GIT_SUBMODULE: tarball is not a git repo, this avoids
+#    cmake trying to run `git submodule update --force` during configure.
+sed -i 's/-DMOD_LUA=\$MOD_LUA/-DMOD_LUA=$MOD_LUA -DGIT_SUBMODULE=OFF/' build.sh
+
 bash build.sh
 [ -e dist/bin/openlitespeed ] || exit 1
 
@@ -95,11 +108,17 @@ chmod 0755 %{buildroot}/etc/init.d/lsws 2>/dev/null || true
 # Mark as RPM install
 echo 'RPM' > %{buildroot}%{install_dir}/PLAT
 
-# Clean up buildroot prefix leaked into ALL installed text files (must be LAST)
-find %{buildroot} -type f \( -name '*.conf' -o -name '*.sh' -o -name '*.rc' \
-    -o -name '*.service' -o -name '*.in' \) \
-    -exec grep -l "%{buildroot}" {} \; 2>/dev/null | \
+# Clean up buildroot prefix leaked into installed text files (must be LAST)
+grep -rl "%{buildroot}" %{buildroot} 2>/dev/null | \
     xargs -r sed -i "s#%{buildroot}##g"
+# Fix absolute symlinks that point into buildroot
+find %{buildroot} -type l | while read link; do
+    target=$(readlink "$link")
+    case "$target" in *%{buildroot}*)
+        newtarget="${target#%{buildroot}}"
+        ln -snf "$newtarget" "$link"
+    ;; esac
+done
 
 %pre
 getent group lsadm > /dev/null || groupadd -r lsadm
@@ -121,13 +140,9 @@ fi
 
 %files
 %defattr(-,root,root,-)
-%license LICENSE GPL.txt
-%doc README.md
+%license GPL.txt
 %dir %{install_dir}
 %{install_dir}/*
-%config(noreplace) %{install_dir}/conf/*
-%config(noreplace) %{install_dir}/admin/conf/*
-%config(noreplace) %{install_dir}/PLAT
 /etc/init.d/lsws
 %{_unitdir}/lshttpd.service
 

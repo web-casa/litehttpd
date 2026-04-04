@@ -1,57 +1,39 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: litehttpd <noreply@github.com>
 Date: Wed, 02 Apr 2026 23:00:00 +0800
-Subject: [PATCH 2/4] litehttpd: add RewriteRule + PHPConfig LSIAPI extensions
+Subject: [PATCH 2/4] litehttpd: add RewriteRule LSIAPI extensions
 
 Adds function pointers to lsi_api_t for:
 - parse_rewrite_rules: parse RewriteRule/RewriteCond text into handle
 - exec_rewrite_rules: execute parsed rules against session (with redirect)
 - free_rewrite_rules: cleanup handle
-- set_php_config_value/flag: set PHP INI via PHPConfig API
 - getStatusCode: public getter for RewriteEngine status code
 
-Key fixes vs original patch:
-- Uses HttpContext tmpCtx for parseRules (was NULL → segfault)
+Must be applied AFTER 0001-lsiapi-phpconfig.patch.
+
+Key implementation details:
+- Uses HttpContext tmpCtx for parseRules (was NULL -> segfault)
 - Detects REWRITE_REDIR on HttpReq for redirect handling
 - Converts enum status code via indexToCode for module return value
-- Adds getStatusCode() public getter to RewriteEngine
 ---
-diff --git a/include/ls.h b/include/ls.h
-index 9e7aef6..0fecf99 100644
---- a/include/ls.h
-+++ b/include/ls.h
-@@ -3981,6 +3981,26 @@ struct lsi_api_s
-     void (*register_thread_cleanup)(const lsi_module_t *module,
-                                     void (*routine)(void *), void * arg);
+--- a/include/ls.h	2026-04-05 01:16:22.294098242 +0800
++++ b/include/ls.h	2026-04-05 01:17:33.642880332 +0800
+@@ -3995,6 +3995,12 @@
+                           const char *value, int value_len,
+                           int op);
  
-+    /* litehttpd: PHPConfig LSIAPI + request header write */
-+    int (*set_php_config_value)(const lsi_session_t *session,
-+                                const char *name, const char *value,
-+                                int type);
-+    int (*set_php_config_flag)(const lsi_session_t *session,
-+                               const char *name, int value,
-+                               int type);
-+    int (*get_php_config)(const lsi_session_t *session,
-+                          const char *name, char *buf, int buf_len);
-+    int (*set_req_header)(const lsi_session_t *session,
-+                          const char *name, int name_len,
-+                          const char *value, int value_len,
-+                          int op);
 +
 +    /* litehttpd: Rewrite engine LSIAPI extensions */
 +    void *(*parse_rewrite_rules)(const char *rules_text, int text_len);
 +    int (*exec_rewrite_rules)(const lsi_session_t *session, void *handle,
 +                              const char *base, int base_len);
 +    void (*free_rewrite_rules)(void *handle);
-+
  };
  
  /**
-diff --git a/src/http/rewriteengine.h b/src/http/rewriteengine.h
-index fdc3354..5c8d6f9 100644
---- a/src/http/rewriteengine.h
-+++ b/src/http/rewriteengine.h
-@@ -113,6 +113,7 @@ public:
+--- a/src/http/rewriteengine.h	2026-04-05 01:16:22.292767365 +0800
++++ b/src/http/rewriteengine.h	2026-04-05 01:17:33.643464622 +0800
+@@ -113,6 +113,7 @@
                         const HttpContext *pContext, const HttpContext *pRootContext);
      const char *getResultURI()     {   return m_pSourceURL;    }
      int          getResultURILen()  {   return m_sourceURLLen;  }
@@ -59,10 +41,8 @@ index fdc3354..5c8d6f9 100644
  
      void clearUnparsedRuleBuf()     {   m_qsLen = 0;            }
      int appendUnparsedRule(AutoStr2 &sDirective, char *pBegin,
-diff --git a/src/lsiapi/lsiapilib.cpp b/src/lsiapi/lsiapilib.cpp
-index a51c6a9..eec2eb3 100644
---- a/src/lsiapi/lsiapilib.cpp
-+++ b/src/lsiapi/lsiapilib.cpp
+--- a/src/lsiapi/lsiapilib.cpp	2026-04-05 01:16:22.294313825 +0800
++++ b/src/lsiapi/lsiapilib.cpp	2026-04-05 01:17:33.646322324 +0800
 @@ -38,6 +38,8 @@
  #include <http/reqparser.h>
  #include <http/clientinfo.h>
@@ -72,44 +52,10 @@ index a51c6a9..eec2eb3 100644
  
  #include <log4cxx/logger.h>
  #include <lsiapi/envmanager.h>
-@@ -3792,6 +3794,126 @@ void lsiapi_init_server_api()
-     pApi->schedule_remove_session_cbs_event = schedule_remove_session_cbs_event;
-     pApi->register_thread_cleanup = register_thread_cleanup_ts;
+@@ -3826,6 +3828,92 @@
+     pApi->get_php_config = nullptr;
+     pApi->set_req_header = nullptr;
  
-+    /* litehttpd: PHPConfig LSIAPI extensions */
-+    pApi->set_php_config_value = [](const lsi_session_t *session,
-+                                    const char *name, const char *value,
-+                                    int type) -> int {
-+        if (!session || !name || !name[0]) return -1;
-+        HttpSession *pSess = (HttpSession *)session;
-+        HttpReq *pReq = pSess->getReq();
-+        if (!pReq) return -1;
-+        HttpContext *pCtx = (HttpContext *)pReq->getContext();
-+        if (!pCtx) return -1;
-+        PHPConfig *pCfg = pCtx->getPHPConfig();
-+        if (!pCfg) {
-+            pCfg = new PHPConfig();
-+            pCtx->setPHPConfig(pCfg);
-+        }
-+        char buf[1024];
-+        int n = snprintf(buf, sizeof(buf), "%s %s", name, value ? value : "");
-+        if (n < 0 || n >= (int)sizeof(buf)) return -1;
-+        char err[256] = {0};
-+        pCfg->parse(type, buf, err, sizeof(err));
-+        pCfg->buildLsapiEnv();
-+        return 0;
-+    };
-+    pApi->set_php_config_flag = [](const lsi_session_t *session,
-+                                   const char *name, int value,
-+                                   int type) -> int {
-+        const char *v = value ? "1" : "0";
-+        if (g_lsiapi.set_php_config_value)
-+            return g_lsiapi.set_php_config_value(session, name, v, type);
-+        return -1;
-+    };
-+    pApi->get_php_config = nullptr;
-+    pApi->set_req_header = nullptr;
-+
 +    /* litehttpd: Rewrite engine LSIAPI extensions */
 +    pApi->parse_rewrite_rules = [](const char *rules_text,
 +                                    int text_len) -> void * {
@@ -199,3 +145,5 @@ index a51c6a9..eec2eb3 100644
      g_lsiapi_ts = g_lsiapi;
  
      pApi = &g_lsiapi_ts;
+-- 
+2.47.3
