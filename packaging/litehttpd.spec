@@ -2,12 +2,12 @@
 %global install_dir  /usr/local/lsws
 
 Name:           litehttpd
-Version:        2.0.0
+Version:        0.2.1
 Release:        1%{?dist}
 Summary:        Apache .htaccess compatibility module for OpenLiteSpeed
 
 License:        GPLv3+
-URL:            https://github.com/example/litehttpd
+URL:            https://github.com/web-casa/litehttpd
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  cmake >= 3.14
@@ -75,13 +75,11 @@ fi
 %{install_dir}/bin/litehttpd-confconv
 
 %changelog
-* Tue Mar 31 2026 litehttpd maintainer <noreply@example.com> - 2.0.0-1
-- 80 directive types, 1017 tests
-- If/ElseIf/Else conditional blocks with ap_expr engine
-- RewriteOptions inherit/IgnoreInherit, RewriteMap txt/rnd/int
-- IPv6 CIDR, Require env/ip, RemoveType, RemoveHandler, Action
-- litehttpd-confconv Apache-to-OLS config converter (60+ directives)
-- OLS Patch 0003: readApacheConf startup integration
+* Fri Apr 04 2026 LiteHTTPD <noreply@web.casa> - 0.2.1-1
+- Initial public release
+- 80 .htaccess directives, 90%+ Apache compatible
+- LiteHTTPD-Full and LiteHTTPD-Thin editions
+- litehttpd-confconv Apache config converter
 - 4 rounds security audit + 7 Codex review rounds
 
 * Sun Mar 30 2026 litehttpd maintainer <noreply@example.com> - 0.2.0-1

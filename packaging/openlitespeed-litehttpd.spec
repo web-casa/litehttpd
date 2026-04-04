@@ -89,7 +89,9 @@ getent group nogroup >/dev/null || groupadd -r nogroup
 %{_unitdir}/*.service
 
 %changelog
-* Sun Mar 30 2026 litehttpd maintainer <noreply@example.com> - 1.8.5-1.olsextra
-- OpenLiteSpeed v1.8.5 with PHPConfig LSIAPI patch
-- Adds set_php_config_value, set_php_config_flag, get_php_config to lsi_api_t
-- Patch verified against real OLS source (66 lines, patch -p1 clean apply)
+* Fri Apr 04 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-1.litehttpd
+- OpenLiteSpeed v1.8.5 with LiteHTTPD patches
+- Patch 0001: PHPConfig LSIAPI extensions
+- Patch 0002: RewriteRule execution
+- Patch 0003: readApacheConf startup hook
+- Patch 0004: Options -Indexes 403
