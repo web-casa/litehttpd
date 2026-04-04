@@ -179,7 +179,8 @@ jobs:
               set -e
               dnf -y install rpm-build gcc gcc-c++ cmake make autoconf automake libtool \
                 pcre-devel openssl-devel expat-devel zlib-devel bzip2-devel \
-                libxml2-devel curl-devel systemd-rpm-macros 2>&1 | tail -2
+                libxml2-devel curl-devel libcap-devel libaio-devel systemd-rpm-macros \
+                which git wget golang clang patch 2>&1 | tail -2
               mkdir -p /root/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
               cp /tmp/v1.8.5.tar.gz /root/rpmbuild/SOURCES/
               cp /src/patches/0001-lsiapi-phpconfig.patch /root/rpmbuild/SOURCES/
