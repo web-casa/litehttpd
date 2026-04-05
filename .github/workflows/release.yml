@@ -136,29 +136,14 @@ jobs:
           name: litehttpd-rpm-${{ matrix.arch_suffix }}
           path: output/litehttpd-*.rpm
 
-  # ── Build openlitespeed-litehttpd RPM (EL9, x86_64 + aarch64) ────────
+  # ── Build openlitespeed-litehttpd RPM (EL9, x86_64) ──────────────────
+  # NOTE: ARM64 disabled — QEMU-emulated OLS build exceeds 2h timeout.
+  #       Re-enable when native ARM64 runners are available.
   build-rpm-ols:
-    strategy:
-      matrix:
-        include:
-          - container: almalinux:9
-            platform: linux/amd64
-            arch_suffix: x86_64
-          - container: arm64v8/almalinux:9
-            platform: linux/arm64
-            arch_suffix: aarch64
-            qemu: true
-
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v5
-
-      - name: Set up QEMU for ARM builds
-        if: matrix.qemu
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
 
       - name: Download OLS source
         run: |
@@ -170,11 +155,10 @@ jobs:
         run: |
           mkdir -p output
           docker run --rm \
-            --platform ${{ matrix.platform }} \
             -v ${{ github.workspace }}:/src:ro \
             -v /tmp/v1.8.5.tar.gz:/tmp/v1.8.5.tar.gz:ro \
             -v ${{ github.workspace }}/output:/output \
-            ${{ matrix.container }} \
+            almalinux:9 \
             bash -c '
               set -e
               dnf -y install rpm-build gcc gcc-c++ cmake make autoconf automake libtool \
@@ -194,7 +178,7 @@ jobs:
       - name: Upload RPM
         uses: actions/upload-artifact@v5
         with:
-          name: openlitespeed-litehttpd-rpm-${{ matrix.arch_suffix }}
+          name: openlitespeed-litehttpd-rpm-x86_64
           path: output/openlitespeed-litehttpd-*.rpm
 
   # ── Run tests ──────────────────────────────────────────────────────
@@ -257,8 +241,7 @@ jobs:
             |---------|-------------|
             | `litehttpd-*.x86_64.rpm` | .htaccess module + litehttpd-confconv (x86_64) |
             | `litehttpd-*.aarch64.rpm` | .htaccess module + litehttpd-confconv (ARM64) |
-            | `openlitespeed-litehttpd-*.x86_64.rpm` | OLS with PHPConfig + Rewrite + readApacheConf patch (x86_64) |
-            | `openlitespeed-litehttpd-*.aarch64.rpm` | OLS with PHPConfig + Rewrite + readApacheConf patch (ARM64) |
+            | `openlitespeed-litehttpd-*.x86_64.rpm` | OLS with PHPConfig + Rewrite patch (x86_64) |
 
             ```bash
             # Install both (replaces stock OLS)
