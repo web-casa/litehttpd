@@ -199,6 +199,8 @@ jobs:
               cp /tmp/v1.8.5.tar.gz /root/rpmbuild/SOURCES/
               cp /src/patches/0001-lsiapi-phpconfig.patch /root/rpmbuild/SOURCES/
               cp /src/patches/0002-lsiapi-rewrite.patch /root/rpmbuild/SOURCES/
+              # 0003 is conceptual/reference only, not applied in rpmbuild
+              cp /src/patches/0004-autoindex-403.patch /root/rpmbuild/SOURCES/
               rpmbuild -bb --define "_topdir /root/rpmbuild" \
                 --define "dist .${{ matrix.dist_tag }}" \
                 /src/packaging/openlitespeed-litehttpd.spec

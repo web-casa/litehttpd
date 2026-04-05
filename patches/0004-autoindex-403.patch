@@ -21,7 +21,7 @@ diff --git a/src/http/httpreq.cpp b/src/http/httpreq.cpp
 index 3defd16..3c9801e 100644
 --- a/src/http/httpreq.cpp
 +++ b/src/http/httpreq.cpp
-@@ -2441,6 +2441,33 @@ int HttpReq::processPath(const char *pURI, int uriLen, char *pBuf,
+@@ -2441,6 +2441,53 @@ int HttpReq::processPath(const char *pURI, int uriLen, char *pBuf,
              *p = 0;
              if (m_pContext->isAutoIndexOn())
              {

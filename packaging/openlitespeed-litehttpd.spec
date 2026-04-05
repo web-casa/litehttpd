@@ -4,7 +4,7 @@
 Name:           openlitespeed-litehttpd
 Version:        %{ols_version}
 Release:        1.olsextra%{?dist}
-Summary:        OpenLiteSpeed with PHPConfig + RewriteRule LSIAPI patches
+Summary:        OpenLiteSpeed with PHPConfig + RewriteRule + readApacheConf + autoindex patches
 AutoReqProv:    no
 
 License:        GPLv3+
@@ -12,6 +12,8 @@ URL:            https://openlitespeed.org/
 Source0:        https://github.com/litespeedtech/openlitespeed/archive/v%{ols_version}.tar.gz
 Source1:        0001-lsiapi-phpconfig.patch
 Source2:        0002-lsiapi-rewrite.patch
+# Source3: 0003-readapacheconf.patch — conceptual/reference only, not applied
+Source4:        0004-autoindex-403.patch
 
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
@@ -57,6 +59,8 @@ dynamic .htaccess RewriteRule execution.
 %setup -q -n openlitespeed-%{ols_version}
 patch -p1 < %{SOURCE1}
 patch -p1 < %{SOURCE2}
+# Patch 0003 (readApacheConf) is conceptual/reference only — not applied here
+patch -p1 < %{SOURCE4}
 
 %build
 # ── Patch build.sh to fix rpmbuild compatibility ──
@@ -151,3 +155,5 @@ fi
 - OpenLiteSpeed v1.8.5 with LiteHTTPD patches
 - Patch 0001: PHPConfig LSIAPI extensions
 - Patch 0002: RewriteRule execution
+- Patch 0003: readApacheConf startup hook
+- Patch 0004: Options -Indexes returns 403
