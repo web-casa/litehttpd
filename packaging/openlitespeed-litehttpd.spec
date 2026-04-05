@@ -14,6 +14,10 @@ Source1:        0001-lsiapi-phpconfig.patch
 Source2:        0002-lsiapi-rewrite.patch
 Source3:        0003-readapacheconf.patch
 Source4:        0004-autoindex-403.patch
+Source5:        apacheconf_parser.c
+Source6:        apacheconf_parser.h
+Source7:        ols_config_writer.c
+Source8:        ols_config_writer.h
 
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
@@ -57,6 +61,12 @@ dynamic .htaccess RewriteRule execution.
 
 %prep
 %setup -q -n openlitespeed-%{ols_version}
+# Copy embedded Apache config parser/writer into OLS source tree
+cp %{SOURCE5} src/main/
+cp %{SOURCE6} src/main/
+cp %{SOURCE7} src/main/
+cp %{SOURCE8} src/main/
+# Apply patches
 patch -p1 < %{SOURCE1}
 patch -p1 < %{SOURCE2}
 patch -p1 < %{SOURCE3}

@@ -1,61 +1,50 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: litehttpd <noreply@web.casa>
-Date: Sat, 05 Apr 2026 20:00:00 +0800
-Subject: [PATCH 3/4] litehttpd: add readApacheConf startup directive
-
-Adds a readApacheConf directive to httpd_config.conf that runs
-litehttpd-confconv at OLS startup to convert an Apache httpd.conf
-into native OLS configuration (listeners, vhosts, contexts).
-
-Usage in /usr/local/lsws/conf/httpd_config.conf:
-
-  readApacheConf /etc/httpd/conf/httpd.conf portmap=80:8088,443:8443
-
-Implementation follows the same pattern as the existing 'include'
-directive in plainconf::loadConfFile(): intercept the keyword before
-parseLine(), fork/exec the external converter, then loadConfFile()
-the generated output directory.
-
-Modeled after CyberPanel's embedded readApacheConf, but uses an
-external converter binary instead of a built-in Apache parser —
-cleaner separation, independently updatable.
-
-Security: uses fork()+execv() (not system()) to prevent shell injection.
-The confconv binary path is derived from SERVERROOT/bin/, not PATH.
----
- src/main/plainconf.cpp | 100 +++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 100 insertions(+)
-
-diff --git a/src/main/plainconf.cpp b/src/main/plainconf.cpp
+--- a/src/main/CMakeLists.txt
++++ b/src/main/CMakeLists.txt
+@@ -10,6 +10,8 @@
+    httpconfigloader.cpp
+    httpserver.cpp
+    plainconf.cpp
++   apacheconf_parser.c
++   ols_config_writer.c
+    configctx.cpp
+    zconfclient.cpp
+    zconfmanager.cpp
 --- a/src/main/plainconf.cpp
 +++ b/src/main/plainconf.cpp
-@@ -38,6 +38,7 @@
+@@ -38,6 +38,17 @@
  #include <sys/stat.h>
  #include <sys/types.h>
  #include <unistd.h>
 +#include <sys/wait.h>
++
++/* litehttpd: embedded Apache config parser for readApacheConf */
++#ifdef __cplusplus
++extern "C" {
++#endif
++#include "apacheconf_parser.h"
++#include "ols_config_writer.h"
++#ifdef __cplusplus
++}
++#endif
  #include "mainserverconfig.h"
-
+ 
  //#define TEST_OUTPUT_PLAIN_CONF
-@@ -1482,6 +1483,105 @@
+@@ -1482,6 +1493,96 @@
                  free(pathc);
                  loadConfFile(achBuf);
              }
 +            else if (strncasecmp(p, "readapacheconf", 14) == 0
 +                     && (p[14] == ' ' || p[14] == '\t'))
 +            {
-+                /* litehttpd: readApacheConf /path/to/httpd.conf [opts...]
-+                 * Runs litehttpd-confconv at startup to convert Apache config
-+                 * to OLS native format, then loads the generated output.
-+                 * Modeled after CyberPanel's embedded readApacheConf, but
-+                 * uses external converter — cleaner separation. */
++                /* litehttpd: readApacheConf /path/to/httpd.conf [portmap=X:Y]
++                 * Parses Apache config IN-PROCESS (like LSWS/CyberPanel)
++                 * and writes OLS native config, then loads it. */
 +                const char *ra = p + 14;
 +                while (*ra == ' ' || *ra == '\t') ra++;
 +                if (*ra)
 +                {
-+                    /* Split: first token = Apache config path, rest = options */
 +                    char apachePath[4096] = {0};
-+                    char extraOpts[4096] = {0};
++                    char portmapArg[4096] = {0};
 +                    const char *sp = ra;
 +                    while (*sp && *sp != ' ' && *sp != '\t') sp++;
 +                    size_t pLen = (size_t)(sp - ra);
@@ -63,76 +52,69 @@ diff --git a/src/main/plainconf.cpp b/src/main/plainconf.cpp
 +                    memcpy(apachePath, ra, pLen);
 +                    while (*sp == ' ' || *sp == '\t') sp++;
 +                    if (*sp)
-+                        lstrncpy(extraOpts, sp, sizeof(extraOpts));
++                        lstrncpy(portmapArg, sp, sizeof(portmapArg));
 +
-+                    /* Build paths relative to SERVERROOT */
-+                    char confconvBin[4096];
 +                    char outputDir[4096];
-+                    snprintf(confconvBin, sizeof(confconvBin),
-+                             "%s/bin/litehttpd-confconv", rootPath.c_str());
 +                    snprintf(outputDir, sizeof(outputDir),
 +                             "%s/conf/apacheconf", rootPath.c_str());
 +
 +                    struct stat stBuf;
-+                    if (stat(confconvBin, &stBuf) != 0)
++                    if (stat(apachePath, &stBuf) != 0)
 +                    {
 +                        logToMem(LOG_LEVEL_ERR,
-+                            "readApacheConf: converter not found: %s",
-+                            confconvBin);
-+                    }
-+                    else if (stat(apachePath, &stBuf) != 0)
-+                    {
-+                        logToMem(LOG_LEVEL_ERR,
-+                            "readApacheConf: Apache config not found: %s",
-+                            apachePath);
++                            "readApacheConf: config not found: %s", apachePath);
 +                    }
 +                    else
 +                    {
-+                        mkdir(outputDir, 0755);
 +                        logToMem(LOG_LEVEL_INFO,
-+                            "readApacheConf: converting %s -> %s/ %s",
-+                            apachePath, outputDir, extraOpts);
++                            "readApacheConf: parsing %s (in-process)", apachePath);
 +
-+                        /* fork + execv: no shell, safe from injection */
-+                        const char *argv[8];
-+                        int ai = 0;
-+                        argv[ai++] = confconvBin;
-+                        argv[ai++] = "--input";
-+                        argv[ai++] = apachePath;
-+                        argv[ai++] = "--output";
-+                        argv[ai++] = outputDir;
-+                        if (extraOpts[0])
-+                            argv[ai++] = extraOpts;
-+                        argv[ai] = NULL;
++                        /* Parse Apache config in-process */
++                        ap_config_t apConf;
++                        memset(&apConf, 0, sizeof(apConf));
 +
-+                        pid_t pid = fork();
-+                        if (pid == 0)
++                        /* Apply portmap if specified (e.g. portmap=80:8088,443:8443) */
++                        if (strncmp(portmapArg, "portmap=", 8) == 0)
 +                        {
-+                            execv(confconvBin, (char *const *)argv);
-+                            _exit(127);
++                            const char *pm = portmapArg + 8;
++                            char pmBuf[4096];
++                            lstrncpy(pmBuf, pm, sizeof(pmBuf));
++                            char *tok = strtok(pmBuf, ",");
++                            while (tok && apConf.port_map_count < AP_MAX_PORTMAP)
++                            {
++                                int from = 0, to = 0;
++                                if (sscanf(tok, "%d:%d", &from, &to) == 2
++                                    && from > 0 && to > 0)
++                                {
++                                    apConf.port_from[apConf.port_map_count] = from;
++                                    apConf.port_to[apConf.port_map_count] = to;
++                                    apConf.port_map_count++;
++                                }
++                                tok = strtok(NULL, ",");
++                            }
 +                        }
-+                        else if (pid > 0)
++
++                        int rc = ap_parse_config(apachePath, &apConf);
++                        if (rc == 0)
 +                        {
-+                            int wstat = 0;
-+                            waitpid(pid, &wstat, 0);
-+                            if (WIFEXITED(wstat) && WEXITSTATUS(wstat) == 0)
++                            mkdir(outputDir, 0755);
++                            rc = ols_write_config(&apConf, outputDir);
++                            if (rc == 0)
 +                            {
 +                                logToMem(LOG_LEVEL_INFO,
-+                                    "readApacheConf: OK, loading %s/",
-+                                    outputDir);
++                                    "readApacheConf: converted %d vhost(s), "
++                                    "loading %s/", apConf.vhost_count, outputDir);
 +                                loadConfFile(outputDir);
 +                            }
 +                            else
 +                                logToMem(LOG_LEVEL_ERR,
-+                                    "readApacheConf: converter failed"
-+                                    " (exit=%d)",
-+                                    WIFEXITED(wstat) ?
-+                                        WEXITSTATUS(wstat) : -1);
++                                    "readApacheConf: failed to write OLS config");
 +                        }
 +                        else
 +                            logToMem(LOG_LEVEL_ERR,
-+                                "readApacheConf: fork failed: %s",
-+                                strerror(errno));
++                                "readApacheConf: failed to parse %s (rc=%d)",
++                                apachePath, rc);
++                        ap_config_free(&apConf);
 +                    }
 +                }
 +                else
@@ -140,8 +122,7 @@ diff --git a/src/main/plainconf.cpp b/src/main/plainconf.cpp
 +                        "readApacheConf: missing config path in %s:%d",
 +                        path, lineNumber);
 +            }
++
              else
              {
                  nMultiLineModeSignLen = checkMultiLineMode(p, sMultiLineModeSign,
---
-2.40.0
