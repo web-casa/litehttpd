@@ -1,5 +1,11 @@
 From: litehttpd
-Subject: [PATCH 0003] litehttpd: add readApacheConf startup hook
+Subject: [PATCH 0003] litehttpd: add readApacheConf startup hook [CONCEPTUAL]
+
+NOTE: This patch is a design document only — NOT applicable with patch(1).
+Targets PlainConf::configServer which does not exist in OLS 1.8.5
+(actual class is lowercase 'plainconf', no configServer method).
+Hunk header uses XXX placeholder line numbers. Excluded from rpmbuild.
+Needs reimplementation targeting plainconf::parseLine (src/main/plainconf.cpp).
 
 Adds readApacheConf directive to httpd_config.conf that triggers
 litehttpd-confconv at OLS startup to convert Apache configuration files
