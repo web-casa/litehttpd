@@ -18,9 +18,13 @@ int ols_write_config(const ap_config_t *config, const char *output_dir);
 int ols_write_vhost(const ap_vhost_t *vhost, const char *filepath);
 
 /* Detect best available lsphp binary.
- * handler_hint may be NULL; returns static string or NULL.
+ * handler_hint may be NULL; panel adjusts search paths.
+ * Returns static string or NULL.
  */
 const char *ols_detect_php(const char *handler_hint);
+
+/* Detect best available lsphp binary with panel-aware paths. */
+const char *ols_detect_php_ex(const char *handler_hint, panel_type_t panel);
 
 /* Map Apache SSLProtocol string to OLS bitmask.
  * Returns OLS sslProtocol numeric value.

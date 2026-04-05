@@ -16,6 +16,9 @@
 #define AP_MAX_FILE_SIZE    (10 * 1024 * 1024)  /* 10 MB */
 #define AP_MAX_PORTMAP      16
 #define AP_MAX_ENV_VARS     64
+#define AP_MAX_MACROS       64
+#define AP_MAX_MACRO_PARAMS 16
+#define AP_MAX_MACRO_BODY   (64 * 1024)
 
 /* Directory/Location context */
 typedef struct ap_context {
@@ -90,7 +93,32 @@ typedef struct ap_vhost {
     long  req_body_limit;       /* LimitRequestBody bytes */
     /* Environment variables: "name value" pairs (\n separated) */
     char *env_vars;
+    /* SSL extended (CA/OCSP/verify) */
+    char *ssl_ca_cert_file;     /* SSLCACertificateFile */
+    char *ssl_ca_cert_path;     /* SSLCACertificatePath */
+    char *ssl_ca_rev_file;      /* SSLCARevocationFile */
+    char *ssl_ocsp_responder;   /* SSLOCSPDefaultResponder */
+    int   ssl_verify_client;    /* 0=none, 1=optional, 2=require */
+    int   ssl_verify_depth;     /* SSLVerifyDepth (default 1) */
+    int   ssl_session_tickets;  /* SSLSessionTickets On=1, Off=0, -1=unset */
 } ap_vhost_t;
+
+/* Panel detection */
+typedef enum {
+    CP_NONE = 0,
+    CP_DIRECTADMIN = 1,
+    CP_INTERWORX = 2,
+    CP_CYBERCP = 3
+} panel_type_t;
+
+/* Macro definition (<Macro> / Use) */
+typedef struct ap_macro {
+    char *name;
+    char *params[AP_MAX_MACRO_PARAMS];   /* $param or @param names */
+    int   param_count;
+    char *body;                           /* accumulated body text */
+    int   body_len;
+} ap_macro_t;
 
 /* Top-level config */
 typedef struct ap_config {
@@ -110,10 +138,12 @@ typedef struct ap_config {
     char *doc_root;
     char *user;
     char *group;
+    /* Panel detection */
+    panel_type_t panel_type;
+    /* Macro definitions */
+    ap_macro_t macros[AP_MAX_MACROS];
+    int macro_count;
 } ap_config_t;
-
-/* Panel detection */
-typedef enum { CP_NONE = 0, CP_CPANEL, CP_PLESK, CP_DIRECTADMIN } panel_type_t;
 
 /* Detect hosting control panel. */
 panel_type_t ap_detect_panel(void);

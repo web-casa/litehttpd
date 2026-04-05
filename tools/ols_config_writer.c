@@ -122,21 +122,19 @@ int ols_map_ssl_protocol(const char *proto) {
 
 /* ---- PHP detection ---- */
 
-const char *ols_detect_php(const char *handler_hint) {
+const char *ols_detect_php_ex(const char *handler_hint, panel_type_t panel) {
     static char path_buf[256];
-    /* Try to extract PHP version from handler hint */
     int versions[] = { 84, 83, 82, 81, 80 };
     int target_ver = 0;
 
     if (handler_hint) {
-        /* Look for version patterns like "php8.3", "php83", "ea-php83" */
+        /* Normalized hint from parser is like "lsphp83" — extract version */
         const char *p = handler_hint;
         while (*p) {
             if ((*p == 'p' || *p == 'P') &&
                 (p[1] == 'h' || p[1] == 'H') &&
                 (p[2] == 'p' || p[2] == 'P')) {
                 p += 3;
-                /* Skip optional '-' */
                 if (*p == '-') p++;
                 int major = 0, minor = 0;
                 if (*p >= '0' && *p <= '9') {
@@ -152,6 +150,9 @@ const char *ols_detect_php(const char *handler_hint) {
             p++;
         }
     }
+
+    /* All panels use /usr/local/lsws/lsphpNN/bin/lsphp paths */
+    (void)panel; /* same paths for DA, CyberCP, Interworx, generic */
 
     /* Check for specific version first */
     if (target_ver > 0) {
@@ -170,6 +171,10 @@ const char *ols_detect_php(const char *handler_hint) {
     }
 
     return NULL;
+}
+
+const char *ols_detect_php(const char *handler_hint) {
+    return ols_detect_php_ex(handler_hint, CP_NONE);
 }
 
 /* ---- write listener block ---- */
@@ -193,8 +198,21 @@ static int ols_write_listener(FILE *fp, int port, int ssl, int mapped_port,
 
 /* ---- write context block ---- */
 
+/* Check if a Directory context path matches the vhost doc_root exactly. */
+static int ctx_is_docroot(const ap_context_t *ctx, const char *doc_root) {
+    if (!ctx || !doc_root) return 0;
+    if (strcasecmp(ctx->type, "directory") != 0) return 0;
+    /* Compare paths, ignoring trailing slash */
+    size_t dlen = strlen(doc_root);
+    size_t plen = strlen(ctx->path);
+    if (dlen > 0 && doc_root[dlen - 1] == '/') dlen--;
+    if (plen > 0 && ctx->path[plen - 1] == '/') plen--;
+    return (dlen == plen && strncmp(ctx->path, doc_root, dlen) == 0);
+}
+
 static void ols_write_context(FILE *fp, const ap_context_t *ctx,
-                              const char *doc_root) {
+                              const char *doc_root,
+                              const char *vhost_allow_override) {
     const char *uri = ctx->path;
     if (!uri || !uri[0]) return;
 
@@ -227,9 +245,13 @@ static void ols_write_context(FILE *fp, const ap_context_t *ctx,
 
     if (ctx->dir_index)
         fprintf(fp, "  indexFiles              %s\n", ctx->dir_index);
+    /* allowOverride: use explicit value, or inherit from vhost */
     if (ctx->allow_override)
         fprintf(fp, "  allowOverride           %d\n",
                 map_allow_override(ctx->allow_override));
+    else if (vhost_allow_override)
+        fprintf(fp, "  allowOverride           %d\n",
+                map_allow_override(vhost_allow_override));
 
     /* Access control */
     if (ctx->require_all == 0) {
@@ -428,6 +450,18 @@ int ols_write_vhost(const ap_vhost_t *vhost, const char *filepath) {
                     vhost->ssl_cipher_suite);
         if (vhost->ssl_stapling)
             fprintf(fp, "enableStapling            1\n");
+        if (vhost->ssl_ca_cert_file)
+            fprintf(fp, "CACertFile                %s\n", vhost->ssl_ca_cert_file);
+        if (vhost->ssl_ca_cert_path)
+            fprintf(fp, "CACertPath                %s\n", vhost->ssl_ca_cert_path);
+        if (vhost->ssl_ocsp_responder)
+            fprintf(fp, "OCSPResponder             %s\n", vhost->ssl_ocsp_responder);
+        if (vhost->ssl_verify_client > 0)
+            fprintf(fp, "clientVerify              %d\n", vhost->ssl_verify_client);
+        if (vhost->ssl_verify_client > 0 && vhost->ssl_verify_depth != 1)
+            fprintf(fp, "verifyDepth               %d\n", vhost->ssl_verify_depth);
+        if (vhost->ssl_session_tickets >= 0)
+            fprintf(fp, "enableSessionTickets      %d\n", vhost->ssl_session_tickets);
     }
 
     /* PHP INI overrides */
@@ -577,20 +611,56 @@ int ols_write_vhost(const ap_vhost_t *vhost, const char *filepath) {
         free(pages);
     }
 
-    /* Default root context */
+    /* Find docroot-matching Directory context to merge into root */
+    const ap_context_t *docroot_ctx = NULL;
+    for (int i = 0; i < vhost->context_count; i++) {
+        if (ctx_is_docroot(&vhost->contexts[i], doc_root)) {
+            docroot_ctx = &vhost->contexts[i];
+            break;
+        }
+    }
+
+    /* Default root context (merged with docroot Directory if found) */
     fprintf(fp, "\ncontext / {\n");
-    fprintf(fp, "  allowBrowse             1\n");
+    if (docroot_ctx && docroot_ctx->allow_browse >= 0)
+        fprintf(fp, "  allowBrowse             %d\n", docroot_ctx->allow_browse);
+    else
+        fprintf(fp, "  allowBrowse             1\n");
     fprintf(fp, "  location                %s\n", doc_root);
+    if (docroot_ctx && docroot_ctx->dir_index)
+        fprintf(fp, "  indexFiles              %s\n", docroot_ctx->dir_index);
+    if (docroot_ctx && docroot_ctx->allow_override)
+        fprintf(fp, "  allowOverride           %d\n",
+                map_allow_override(docroot_ctx->allow_override));
+    else if (vhost->allow_override)
+        fprintf(fp, "  allowOverride           %d\n", ao);
     if (vhost->rewrite_enabled) {
         fprintf(fp, "  rewrite {\n");
         fprintf(fp, "    enable                1\n");
         fprintf(fp, "  }\n");
     }
+    /* Merge docroot context access control */
+    if (docroot_ctx) {
+        if (docroot_ctx->require_all == 0) {
+            fprintf(fp, "  accessControl {\n");
+            fprintf(fp, "    deny                  *\n");
+            fprintf(fp, "  }\n");
+        } else if (docroot_ctx->access_deny || docroot_ctx->access_allow) {
+            fprintf(fp, "  accessControl {\n");
+            if (docroot_ctx->access_allow)
+                fprintf(fp, "    allow                 %s\n", docroot_ctx->access_allow);
+            if (docroot_ctx->access_deny)
+                fprintf(fp, "    deny                  %s\n", docroot_ctx->access_deny);
+            fprintf(fp, "  }\n");
+        }
+    }
     fprintf(fp, "}\n");
 
-    /* Additional contexts from <Directory>/<Location> blocks */
+    /* Additional contexts from <Directory>/<Location> blocks (skip merged docroot) */
     for (int i = 0; i < vhost->context_count; i++) {
-        ols_write_context(fp, &vhost->contexts[i], doc_root);
+        if (ctx_is_docroot(&vhost->contexts[i], doc_root)) continue;
+        ols_write_context(fp, &vhost->contexts[i], doc_root,
+                          vhost->allow_override);
     }
 
     /* Alias contexts */

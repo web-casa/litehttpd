@@ -143,10 +143,14 @@ long ap_parse_expires_duration(const char *duration) {
 
 panel_type_t ap_detect_panel(void) {
     struct stat st;
-    if (stat("/usr/local/cpanel", &st) == 0) return CP_CPANEL;
-    if (stat("/etc/apache2/plesk.conf.d", &st) == 0 ||
-        stat("/etc/httpd/conf/plesk.conf.d", &st) == 0) return CP_PLESK;
-    if (stat("/usr/local/directadmin", &st) == 0) return CP_DIRECTADMIN;
+    if (stat("/usr/local/directadmin", &st) == 0 &&
+        stat("/etc/httpd/conf/extra/directadmin-vhosts.conf", &st) == 0)
+        return CP_DIRECTADMIN;
+    if (stat("/usr/local/interworx", &st) == 0 &&
+        stat("/etc/httpd/conf.d/iworx.conf", &st) == 0)
+        return CP_INTERWORX;
+    if (stat("/usr/local/CyberCP", &st) == 0)
+        return CP_CYBERCP;
     return CP_NONE;
 }
 
@@ -267,6 +271,8 @@ static void ap_context_free(ap_context_t *ctx) {
 
 static void ap_vhost_init(ap_vhost_t *vh) {
     memset(vh, 0, sizeof(*vh));
+    vh->ssl_session_tickets = -1;
+    vh->ssl_verify_depth = 1;
 }
 
 static void ap_vhost_free(ap_vhost_t *vh) {
@@ -298,6 +304,10 @@ static void ap_vhost_free(ap_vhost_t *vh) {
     safe_free(&vh->suexec_user);
     safe_free(&vh->suexec_group);
     safe_free(&vh->env_vars);
+    safe_free(&vh->ssl_ca_cert_file);
+    safe_free(&vh->ssl_ca_cert_path);
+    safe_free(&vh->ssl_ca_rev_file);
+    safe_free(&vh->ssl_ocsp_responder);
     for (int i = 0; i < vh->context_count; i++)
         ap_context_free(&vh->contexts[i]);
 }
@@ -403,12 +413,41 @@ static void ap_parse_options_vhost(const char *value, ap_vhost_t *vh) {
 static void ap_detect_php(const char *handler, ap_vhost_t *vh) {
     if (!handler) return;
     /* Check for PHP-related handler patterns */
-    if (strcasestr(handler, "php") ||
-        strcasestr(handler, "x-httpd-php") ||
-        strcasestr(handler, "fcgi") ||
-        strcasestr(handler, "proxy:unix:") ||
-        strcasestr(handler, "proxy:fcgi:")) {
-        safe_free(&vh->php_handler);
+    if (!strcasestr(handler, "php") &&
+        !strcasestr(handler, "x-httpd-php") &&
+        !strcasestr(handler, "fcgi") &&
+        !strcasestr(handler, "proxy:unix:") &&
+        !strcasestr(handler, "proxy:fcgi:"))
+        return;
+
+    /* Try to extract version number from patterns like php8.3, php83, lsphp83 */
+    int major = 0, minor = 0;
+    const char *p = handler;
+    while (*p) {
+        /* Look for "php" prefix (case-insensitive) */
+        if ((p[0] == 'p' || p[0] == 'P') &&
+            (p[1] == 'h' || p[1] == 'H') &&
+            (p[2] == 'p' || p[2] == 'P')) {
+            const char *v = p + 3;
+            if (*v == '-') v++;  /* skip optional dash */
+            if (*v >= '5' && *v <= '9') {
+                major = *v - '0'; v++;
+                if (*v == '.') v++;
+                if (*v >= '0' && *v <= '9') {
+                    minor = *v - '0';
+                }
+                break;
+            }
+        }
+        p++;
+    }
+
+    safe_free(&vh->php_handler);
+    if (major > 0) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "lsphp%d%d", major, minor);
+        vh->php_handler = strdup(buf);
+    } else {
         vh->php_handler = strdup(handler);
     }
 }
@@ -729,6 +768,55 @@ static int ap_parse_line(char *line, ap_config_t *config,
                 /* Transparent: just continue */
                 return 0;
             }
+            if (strcasecmp(tag, "Macro") == 0) {
+                /* <Macro name $p1 $p2 ...> */
+                if (config->macro_count >= AP_MAX_MACROS) {
+                    fprintf(stderr, "litehttpd-confconv: too many macros (max %d)\n",
+                            AP_MAX_MACROS);
+                    /* skip to </Macro> */
+                    while (fgets(line, AP_MAX_LINE, fp)) {
+                        char *t = trim(line);
+                        if (t[0] == '<' && t[1] == '/' &&
+                            strcasestr(t, "Macro")) break;
+                    }
+                    return 0;
+                }
+                ap_macro_t *macro = &config->macros[config->macro_count];
+                memset(macro, 0, sizeof(*macro));
+                /* Parse name and params from args */
+                char *ap = a;
+                char *mname = next_word(&ap);
+                if (mname)
+                    macro->name = strdup(mname);
+                /* Parse params ($xxx or @xxx) */
+                char *param;
+                while ((param = next_word(&ap)) != NULL &&
+                       macro->param_count < AP_MAX_MACRO_PARAMS) {
+                    if (param[0] == '$' || param[0] == '@')
+                        macro->params[macro->param_count++] = strdup(param);
+                }
+                /* Read body until </Macro> */
+                macro->body = malloc(AP_MAX_MACRO_BODY);
+                if (!macro->body) return -1;
+                macro->body[0] = '\0';
+                macro->body_len = 0;
+                char mline[AP_MAX_LINE];
+                while (fgets(mline, sizeof(mline), fp)) {
+                    char *mt = trim(mline);
+                    if (mt[0] == '<' && mt[1] == '/' &&
+                        strcasestr(mt, "Macro")) break;
+                    int len = (int)strlen(mt);
+                    if (macro->body_len + len + 2 < AP_MAX_MACRO_BODY) {
+                        if (macro->body_len > 0)
+                            macro->body[macro->body_len++] = '\n';
+                        memcpy(macro->body + macro->body_len, mt, len);
+                        macro->body_len += len;
+                        macro->body[macro->body_len] = '\0';
+                    }
+                }
+                config->macro_count++;
+                return 0;
+            }
             /* Unknown block: skip to close */
             while (fgets(line, AP_MAX_LINE, fp)) {
                 char *t = trim(line);
@@ -1025,6 +1113,63 @@ static int ap_parse_line(char *line, ap_config_t *config,
         return 0;
     }
 
+    if (streqi(directive, "SSLCACertificateFile")) {
+        if (current_vhost) {
+            safe_free(&current_vhost->ssl_ca_cert_file);
+            current_vhost->ssl_ca_cert_file = strdup(value);
+        }
+        return 0;
+    }
+
+    if (streqi(directive, "SSLCACertificatePath")) {
+        if (current_vhost) {
+            safe_free(&current_vhost->ssl_ca_cert_path);
+            current_vhost->ssl_ca_cert_path = strdup(value);
+        }
+        return 0;
+    }
+
+    if (streqi(directive, "SSLCARevocationFile")) {
+        if (current_vhost) {
+            safe_free(&current_vhost->ssl_ca_rev_file);
+            current_vhost->ssl_ca_rev_file = strdup(value);
+        }
+        return 0;
+    }
+
+    if (streqi(directive, "SSLOCSPDefaultResponder")) {
+        if (current_vhost) {
+            safe_free(&current_vhost->ssl_ocsp_responder);
+            current_vhost->ssl_ocsp_responder = strdup(value);
+        }
+        return 0;
+    }
+
+    if (streqi(directive, "SSLVerifyClient")) {
+        if (current_vhost) {
+            if (streqi(value, "require"))
+                current_vhost->ssl_verify_client = 2;
+            else if (streqi(value, "optional") ||
+                     streqi(value, "optional_no_ca"))
+                current_vhost->ssl_verify_client = 1;
+            else
+                current_vhost->ssl_verify_client = 0;
+        }
+        return 0;
+    }
+
+    if (streqi(directive, "SSLVerifyDepth")) {
+        if (current_vhost)
+            current_vhost->ssl_verify_depth = atoi(value);
+        return 0;
+    }
+
+    if (streqi(directive, "SSLSessionTickets")) {
+        if (current_vhost)
+            current_vhost->ssl_session_tickets = strcasestr(value, "on") ? 1 : 0;
+        return 0;
+    }
+
     /* ---- Proxy ---- */
 
     if (streqi(directive, "ProxyPass")) {
@@ -1184,6 +1329,80 @@ static int ap_parse_line(char *line, ap_config_t *config,
         return 0;
     }
 
+    /* ---- Use (macro expansion) ---- */
+
+    if (streqi(directive, "Use")) {
+        char *p2 = (char *)value;
+        char *mname = next_word(&p2);
+        if (!mname) return 0;
+        /* Find macro by name */
+        ap_macro_t *macro = NULL;
+        for (int i = 0; i < config->macro_count; i++) {
+            if (config->macros[i].name &&
+                strcasecmp(config->macros[i].name, mname) == 0) {
+                macro = &config->macros[i];
+                break;
+            }
+        }
+        if (!macro) {
+            fprintf(stderr, "litehttpd-confconv: warning: unknown macro '%s'\n",
+                    mname);
+            return 0;
+        }
+        /* Collect args */
+        char *args[AP_MAX_MACRO_PARAMS];
+        int argc = 0;
+        char *arg;
+        while ((arg = next_word(&p2)) != NULL && argc < AP_MAX_MACRO_PARAMS)
+            args[argc++] = arg;
+        /* Expand body: replace $param/@param with corresponding arg */
+        char *expanded = malloc(AP_MAX_MACRO_BODY);
+        if (!expanded) return -1;
+        const char *src = macro->body;
+        int elen = 0;
+        while (*src && elen < AP_MAX_MACRO_BODY - 1) {
+            if (*src == '$' || *src == '@') {
+                /* Check if this matches a param */
+                int matched = 0;
+                for (int i = 0; i < macro->param_count && i < argc; i++) {
+                    int plen = (int)strlen(macro->params[i]);
+                    if (strncmp(src, macro->params[i], plen) == 0 &&
+                        (src[plen] == '\0' || src[plen] == '\n' ||
+                         isspace((unsigned char)src[plen]) ||
+                         src[plen] == '/' || src[plen] == '"')) {
+                        int alen = (int)strlen(args[i]);
+                        if (elen + alen < AP_MAX_MACRO_BODY - 1) {
+                            memcpy(expanded + elen, args[i], alen);
+                            elen += alen;
+                        }
+                        src += plen;
+                        matched = 1;
+                        break;
+                    }
+                }
+                if (!matched)
+                    expanded[elen++] = *src++;
+            } else {
+                expanded[elen++] = *src++;
+            }
+        }
+        expanded[elen] = '\0';
+        /* Re-parse expanded lines */
+        char *saveptr = NULL;
+        char *eline = strtok_r(expanded, "\n", &saveptr);
+        while (eline) {
+            char lbuf[AP_MAX_LINE];
+            strncpy(lbuf, eline, sizeof(lbuf) - 1);
+            lbuf[sizeof(lbuf) - 1] = '\0';
+            char *trimmed = trim(lbuf);
+            if (trimmed[0] && trimmed[0] != '#')
+                ap_parse_line(trimmed, config, current_vhost, fp, depth);
+            eline = strtok_r(NULL, "\n", &saveptr);
+        }
+        free(expanded);
+        return 0;
+    }
+
     /* ---- Closing tags for transparent blocks ---- */
     if (directive[0] == '<' || streqi(directive, "</IfModule>") ||
         streqi(directive, "</IfDefine>")) {
@@ -1238,6 +1457,8 @@ int ap_parse_config(const char *path, ap_config_t *config) {
     if (!path || !config) return -1;
     memset(config, 0, sizeof(*config));
 
+    config->panel_type = ap_detect_panel();
+
     struct stat st;
     if (stat(path, &st) != 0) {
         fprintf(stderr, "litehttpd-confconv: cannot stat %s: %s\n",
@@ -1266,6 +1487,12 @@ void ap_config_free(ap_config_t *config) {
     if (!config) return;
     for (int i = 0; i < config->vhost_count; i++)
         ap_vhost_free(&config->vhosts[i]);
+    for (int i = 0; i < config->macro_count; i++) {
+        safe_free(&config->macros[i].name);
+        for (int j = 0; j < config->macros[i].param_count; j++)
+            safe_free(&config->macros[i].params[j]);
+        safe_free(&config->macros[i].body);
+    }
     safe_free(&config->server_root);
     safe_free(&config->server_name);
     safe_free(&config->server_admin);
