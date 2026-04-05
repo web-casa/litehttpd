@@ -1425,6 +1425,102 @@ static int on_uri_map(lsi_session_t *session)
         }
     }
 
+    /* ErrorDocument 404 pre-check: if the requested static file does not exist
+     * and the .htaccess has an ErrorDocument 404 directive, handle it here
+     * in URI_MAP where status changes and redirects are still effective.
+     * This mirrors how exec_redirect works for 301/302 → LSI_DENY.
+     *
+     * Only applies when the URI is not a directory (no trailing slash) and
+     * does not contain a query string (we check the plain file path). */
+    {
+        /* Build the physical path for the requested URI */
+        const char *q = uri;
+        int plain_len = uri_len;
+        while (plain_len > 0 && q[plain_len - 1] != '?') plain_len--;
+        if (plain_len > 0) plain_len--; /* strip '?' */
+        else plain_len = uri_len;       /* no query string */
+
+        /* Skip directory requests */
+        if (plain_len > 0 && uri[plain_len - 1] != '/') {
+            char phys_path[4096];
+            snprintf(phys_path, sizeof(phys_path), "%.*s%.*s",
+                     doc_root_len, doc_root, plain_len, uri);
+
+            /* Check if file does NOT exist */
+            if (!lsi_session_file_exists(session, phys_path)) {
+                /* Find ErrorDocument 404 in directives */
+                const htaccess_directive_t *d;
+                for (d = directives; d; d = d->next) {
+                    if (d->type != DIR_ERROR_DOCUMENT)
+                        continue;
+                    if (d->data.error_doc.error_code != 404 || !d->value)
+                        continue;
+
+                    const char *val = d->value;
+                    int vlen = (int)strlen(val);
+
+                    /* External URL → 302 redirect (same pattern as exec_redirect).
+                     * IMPORTANT: set headers BEFORE freeing directives, because
+                     * val points into d->value which is freed by directives_free. */
+                    if (strncasecmp(val, "http://", 7) == 0 ||
+                        strncasecmp(val, "https://", 8) == 0) {
+                        if (!memchr(val, '\r', vlen) &&
+                            !memchr(val, '\n', vlen)) {
+                            lsi_session_set_status(session, 302);
+                            lsi_session_set_resp_header(session,
+                                "Location", 8, val, vlen);
+                            free(target_dir);
+                            htaccess_directives_free(directives);
+                            lsi_session_end_resp(session);
+                            return LSI_DENY;
+                        }
+                    }
+
+                    /* Local path → read file, serve as 404 with custom body.
+                     * Read file BEFORE freeing directives (val into d->value). */
+                    if (val[0] == '/') {
+                        char err_path[4096];
+                        snprintf(err_path, sizeof(err_path), "%.*s%s",
+                                 doc_root_len, doc_root, val);
+                        FILE *fp = fopen(err_path, "r");
+                        if (fp) {
+                            char fbuf[65536];
+                            size_t n = fread(fbuf, 1, sizeof(fbuf) - 1, fp);
+                            fclose(fp);
+                            if (n > 0) {
+                                lsi_session_set_status(session, 404);
+                                lsi_session_set_resp_content_type(
+                                    session, "text/html", 9);
+                                lsi_session_set_resp_body(session, fbuf, (int)n);
+                                free(target_dir);
+                                htaccess_directives_free(directives);
+                                lsi_session_end_resp(session);
+                                return LSI_DENY;
+                            }
+                        }
+                    }
+
+                    /* Quoted inline text → serve as 404 with custom body.
+                     * Copy text before freeing directives. */
+                    if (val[0] == '"') {
+                        const char *text = val + 1;
+                        int tlen = vlen - 1;
+                        if (tlen > 0 && text[tlen - 1] == '"') tlen--;
+                        if (tlen > 0) {
+                            lsi_session_set_status(session, 404);
+                            lsi_session_set_resp_body(session, text, tlen);
+                            free(target_dir);
+                            htaccess_directives_free(directives);
+                            lsi_session_end_resp(session);
+                            return LSI_DENY;
+                        }
+                    }
+                    break; /* Only one ErrorDocument 404 */
+                }
+            }
+        }
+    }
+
     free(target_dir);
     /* Cache directives for reuse in on_send_resp_header (same request) */
     req_cache_store(session, directives);
@@ -1874,7 +1970,13 @@ static int on_send_resp_header(lsi_session_t *session)
         content_type = "application/octet-stream";
     exec_expires(session, directives, content_type);
 
-    /* (f) ErrorDocument directives */
+    /* (f) ErrorDocument directives.
+     * NOTE: HTTP_BEGIN always fires with status=200 (before URI_MAP sets the
+     * final error status). The on_http_begin error-code check never triggers
+     * for normal errors. ErrorDocument processing must happen here in
+     * SEND_RESP_HEADER where the final error status is available.
+     * Limitation: local URI paths cannot replace OLS's built-in error body
+     * because OLS fixes Content-Length before this hook fires. */
     for (dir = directives; dir != NULL; dir = dir->next) {
         if (dir->type != DIR_ERROR_DOCUMENT)
             continue;
