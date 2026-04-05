@@ -1253,7 +1253,7 @@ TEST(ApacheConfParser, SetEnvParsing) {
 TEST(ApacheConfParser, PanelDetection) {
     /* Just verify the function is callable and returns a valid enum.
      * In CI environments, no panel dirs will exist. */
-    panel_type_t panel = ap_detect_panel();
+    panel_type_t panel = ap_detect_panel(NULL);
     EXPECT_GE((int)panel, 0);
     EXPECT_LE((int)panel, 3);
 }

@@ -141,15 +141,20 @@ long ap_parse_expires_duration(const char *duration) {
 
 /* ---- Panel detection ---- */
 
-panel_type_t ap_detect_panel(void) {
+panel_type_t ap_detect_panel(const char *config_path) {
     struct stat st;
     if (stat("/usr/local/directadmin", &st) == 0 &&
-        stat("/etc/httpd/conf/extra/directadmin-vhosts.conf", &st) == 0)
+        stat("/etc/httpd/conf/extra/directadmin-vhosts.conf", &st) == 0 &&
+        (!config_path || strncmp(config_path, "/etc/httpd/conf/", 16) == 0))
         return CP_DIRECTADMIN;
     if (stat("/usr/local/interworx", &st) == 0 &&
-        stat("/etc/httpd/conf.d/iworx.conf", &st) == 0)
+        stat("/etc/httpd/conf.d/iworx.conf", &st) == 0 &&
+        (!config_path || strncmp(config_path, "/etc/httpd/conf/", 16) == 0))
         return CP_INTERWORX;
-    if (stat("/usr/local/CyberCP", &st) == 0)
+    if (stat("/usr/local/CyberCP", &st) == 0 &&
+        (!config_path ||
+         strncmp(config_path, "/usr/local/apache/conf/", 23) == 0 ||
+         strncmp(config_path, "/etc/apache2/conf/", 18) == 0))
         return CP_CYBERCP;
     return CP_NONE;
 }
@@ -727,6 +732,9 @@ static int ap_process_include(const char *pattern, int is_optional,
     return 0;
 }
 
+/* Recursive macro expansion depth guard */
+static int s_macro_depth = 0;
+
 /* ---- main line dispatcher ---- */
 
 static int ap_parse_line(char *line, ap_config_t *config,
@@ -1159,8 +1167,12 @@ static int ap_parse_line(char *line, ap_config_t *config,
     }
 
     if (streqi(directive, "SSLVerifyDepth")) {
-        if (current_vhost)
-            current_vhost->ssl_verify_depth = atoi(value);
+        if (current_vhost) {
+            char *endp;
+            long v = strtol(value, &endp, 10);
+            if (endp != value && v >= 0 && v <= 255)
+                current_vhost->ssl_verify_depth = (int)v;
+        }
         return 0;
     }
 
@@ -1332,6 +1344,12 @@ static int ap_parse_line(char *line, ap_config_t *config,
     /* ---- Use (macro expansion) ---- */
 
     if (streqi(directive, "Use")) {
+        if (s_macro_depth >= AP_MAX_INCLUDE_DEPTH) {
+            fprintf(stderr, "litehttpd-confconv: macro expansion depth limit "
+                    "reached (%d), skipping Use directive\n",
+                    AP_MAX_INCLUDE_DEPTH);
+            return 0;
+        }
         char *p2 = (char *)value;
         char *mname = next_word(&p2);
         if (!mname) return 0;
@@ -1349,12 +1367,40 @@ static int ap_parse_line(char *line, ap_config_t *config,
                     mname);
             return 0;
         }
-        /* Collect args */
+        /* Collect args with quote-aware parsing */
         char *args[AP_MAX_MACRO_PARAMS];
         int argc = 0;
-        char *arg;
-        while ((arg = next_word(&p2)) != NULL && argc < AP_MAX_MACRO_PARAMS)
-            args[argc++] = arg;
+        {
+            char *ap = p2;
+            while (*ap && argc < AP_MAX_MACRO_PARAMS) {
+                while (*ap && isspace((unsigned char)*ap)) ap++;
+                if (!*ap) break;
+                char *arg_start;
+                if (*ap == '"' || *ap == '\'') {
+                    char quote = *ap++;
+                    arg_start = ap;
+                    while (*ap && *ap != quote) {
+                        if (*ap == '\\' && ap[1]) ap++; /* skip escaped char */
+                        ap++;
+                    }
+                    if (*ap == quote) *ap++ = '\0';
+                } else {
+                    arg_start = ap;
+                    while (*ap && !isspace((unsigned char)*ap)) ap++;
+                    if (*ap) *ap++ = '\0';
+                }
+                args[argc++] = arg_start;
+            }
+        }
+        if (argc < macro->param_count) {
+            fprintf(stderr, "litehttpd-confconv: warning: macro '%s' expects %d "
+                    "args, got %d; padding with empty strings\n",
+                    mname, macro->param_count, argc);
+        } else if (argc > macro->param_count) {
+            fprintf(stderr, "litehttpd-confconv: warning: macro '%s' expects %d "
+                    "args, got %d; extra args ignored\n",
+                    mname, macro->param_count, argc);
+        }
         /* Expand body: replace $param/@param with corresponding arg */
         char *expanded = malloc(AP_MAX_MACRO_BODY);
         if (!expanded) return -1;
@@ -1364,15 +1410,19 @@ static int ap_parse_line(char *line, ap_config_t *config,
             if (*src == '$' || *src == '@') {
                 /* Check if this matches a param */
                 int matched = 0;
-                for (int i = 0; i < macro->param_count && i < argc; i++) {
+                for (int i = 0; i < macro->param_count; i++) {
                     int plen = (int)strlen(macro->params[i]);
                     if (strncmp(src, macro->params[i], plen) == 0 &&
                         (src[plen] == '\0' || src[plen] == '\n' ||
                          isspace((unsigned char)src[plen]) ||
-                         src[plen] == '/' || src[plen] == '"')) {
-                        int alen = (int)strlen(args[i]);
+                         src[plen] == '/' || src[plen] == '"' ||
+                         src[plen] == '>' || src[plen] == ')' ||
+                         src[plen] == ',' || src[plen] == ';' ||
+                         src[plen] == '=')) {
+                        const char *replacement = (i < argc) ? args[i] : "";
+                        int alen = (int)strlen(replacement);
                         if (elen + alen < AP_MAX_MACRO_BODY - 1) {
-                            memcpy(expanded + elen, args[i], alen);
+                            memcpy(expanded + elen, replacement, alen);
                             elen += alen;
                         }
                         src += plen;
@@ -1387,18 +1437,23 @@ static int ap_parse_line(char *line, ap_config_t *config,
             }
         }
         expanded[elen] = '\0';
-        /* Re-parse expanded lines */
-        char *saveptr = NULL;
-        char *eline = strtok_r(expanded, "\n", &saveptr);
-        while (eline) {
-            char lbuf[AP_MAX_LINE];
-            strncpy(lbuf, eline, sizeof(lbuf) - 1);
-            lbuf[sizeof(lbuf) - 1] = '\0';
-            char *trimmed = trim(lbuf);
-            if (trimmed[0] && trimmed[0] != '#')
-                ap_parse_line(trimmed, config, current_vhost, fp, depth);
-            eline = strtok_r(NULL, "\n", &saveptr);
+        /* Re-parse expanded text via stream so block directives work */
+        s_macro_depth++;
+        FILE *mem_fp = fmemopen(expanded, elen, "r");
+        if (mem_fp) {
+            ap_parse_stream(mem_fp, config, current_vhost, depth + 1);
+            fclose(mem_fp);
+        } else {
+            /* Fallback: tmpfile */
+            FILE *tmp_fp = tmpfile();
+            if (tmp_fp) {
+                fwrite(expanded, 1, elen, tmp_fp);
+                rewind(tmp_fp);
+                ap_parse_stream(tmp_fp, config, current_vhost, depth + 1);
+                fclose(tmp_fp);
+            }
         }
+        s_macro_depth--;
         free(expanded);
         return 0;
     }
@@ -1457,7 +1512,7 @@ int ap_parse_config(const char *path, ap_config_t *config) {
     if (!path || !config) return -1;
     memset(config, 0, sizeof(*config));
 
-    config->panel_type = ap_detect_panel();
+    config->panel_type = ap_detect_panel(path);
 
     struct stat st;
     if (stat(path, &st) != 0) {

@@ -145,8 +145,11 @@ typedef struct ap_config {
     int macro_count;
 } ap_config_t;
 
-/* Detect hosting control panel. */
-panel_type_t ap_detect_panel(void);
+/* Detect hosting control panel.
+ * config_path may be NULL; when provided, restricts detection to panels
+ * whose expected config directories match the path prefix.
+ */
+panel_type_t ap_detect_panel(const char *config_path);
 
 /* Parse Apache expires duration string to seconds.
  * Input: "access plus 7 days", "access plus 1 hour", etc.

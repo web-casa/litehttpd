@@ -198,6 +198,34 @@ static int ols_write_listener(FILE *fp, int port, int ssl, int mapped_port,
 
 /* ---- write context block ---- */
 
+/* Find a parent context for the given context (path prefix match).
+ * Returns the parent context, or NULL if none found.
+ * Only considers "directory" type contexts.
+ */
+static const ap_context_t *ctx_find_parent(const ap_context_t *ctx,
+                                           const ap_vhost_t *vhost) {
+    if (!ctx || !ctx->path || strcasecmp(ctx->type, "directory") != 0)
+        return NULL;
+    const ap_context_t *best = NULL;
+    size_t best_len = 0;
+    size_t clen = strlen(ctx->path);
+    for (int i = 0; i < vhost->context_count; i++) {
+        const ap_context_t *cand = &vhost->contexts[i];
+        if (cand == ctx) continue;
+        if (strcasecmp(cand->type, "directory") != 0) continue;
+        size_t plen = strlen(cand->path);
+        if (plen >= clen) continue; /* not shorter, not a parent */
+        if (strncmp(ctx->path, cand->path, plen) == 0 &&
+            (cand->path[plen - 1] == '/' || ctx->path[plen] == '/')) {
+            if (plen > best_len) {
+                best = cand;
+                best_len = plen;
+            }
+        }
+    }
+    return best;
+}
+
 /* Check if a Directory context path matches the vhost doc_root exactly. */
 static int ctx_is_docroot(const ap_context_t *ctx, const char *doc_root) {
     if (!ctx || !doc_root) return 0;
@@ -212,7 +240,8 @@ static int ctx_is_docroot(const ap_context_t *ctx, const char *doc_root) {
 
 static void ols_write_context(FILE *fp, const ap_context_t *ctx,
                               const char *doc_root,
-                              const char *vhost_allow_override) {
+                              const char *vhost_allow_override,
+                              const ap_vhost_t *vhost) {
     const char *uri = ctx->path;
     if (!uri || !uri[0]) return;
 
@@ -253,8 +282,14 @@ static void ols_write_context(FILE *fp, const ap_context_t *ctx,
         fprintf(fp, "  allowOverride           %d\n",
                 map_allow_override(vhost_allow_override));
 
-    /* Access control */
-    if (ctx->require_all == 0) {
+    /* Access control — inherit denied from parent if not explicitly overridden */
+    int effective_deny = (ctx->require_all == 0);
+    if (!effective_deny && ctx->require_all == -1 && vhost) {
+        const ap_context_t *parent = ctx_find_parent(ctx, vhost);
+        if (parent && parent->require_all == 0)
+            effective_deny = 1;
+    }
+    if (effective_deny) {
         fprintf(fp, "  accessControl {\n");
         fprintf(fp, "    deny                  *\n");
         fprintf(fp, "  }\n");
@@ -454,6 +489,8 @@ int ols_write_vhost(const ap_vhost_t *vhost, const char *filepath) {
             fprintf(fp, "CACertFile                %s\n", vhost->ssl_ca_cert_file);
         if (vhost->ssl_ca_cert_path)
             fprintf(fp, "CACertPath                %s\n", vhost->ssl_ca_cert_path);
+        if (vhost->ssl_ca_rev_file)
+            fprintf(fp, "CRLFile                   %s\n", vhost->ssl_ca_rev_file);
         if (vhost->ssl_ocsp_responder)
             fprintf(fp, "OCSPResponder             %s\n", vhost->ssl_ocsp_responder);
         if (vhost->ssl_verify_client > 0)
@@ -660,7 +697,7 @@ int ols_write_vhost(const ap_vhost_t *vhost, const char *filepath) {
     for (int i = 0; i < vhost->context_count; i++) {
         if (ctx_is_docroot(&vhost->contexts[i], doc_root)) continue;
         ols_write_context(fp, &vhost->contexts[i], doc_root,
-                          vhost->allow_override);
+                          vhost->allow_override, vhost);
     }
 
     /* Alias contexts */
