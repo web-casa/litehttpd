@@ -1,118 +1,147 @@
-From: litehttpd
-Subject: [PATCH 0003] litehttpd: add readApacheConf startup hook [CONCEPTUAL]
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: litehttpd <noreply@web.casa>
+Date: Sat, 05 Apr 2026 20:00:00 +0800
+Subject: [PATCH 3/4] litehttpd: add readApacheConf startup directive
 
-NOTE: This patch is a design document only — NOT applicable with patch(1).
-Targets PlainConf::configServer which does not exist in OLS 1.8.5
-(actual class is lowercase 'plainconf', no configServer method).
-Hunk header uses XXX placeholder line numbers. Excluded from rpmbuild.
-Needs reimplementation targeting plainconf::parseLine (src/main/plainconf.cpp).
+Adds a readApacheConf directive to httpd_config.conf that runs
+litehttpd-confconv at OLS startup to convert an Apache httpd.conf
+into native OLS configuration (listeners, vhosts, contexts).
 
-Adds readApacheConf directive to httpd_config.conf that triggers
-litehttpd-confconv at OLS startup to convert Apache configuration files
-into native OLS format.
+Usage in /usr/local/lsws/conf/httpd_config.conf:
 
-Usage:
-  # In /usr/local/lsws/conf/httpd_config.conf, add:
   readApacheConf /etc/httpd/conf/httpd.conf portmap=80:8088,443:8443
 
-This is a CONCEPTUAL patch -- it documents the intended integration
-point in OpenLiteSpeed. The actual patch requires OLS source code
-to apply.
+Implementation follows the same pattern as the existing 'include'
+directive in plainconf::loadConfFile(): intercept the keyword before
+parseLine(), fork/exec the external converter, then loadConfFile()
+the generated output directory.
 
+Modeled after CyberPanel's embedded readApacheConf, but uses an
+external converter binary instead of a built-in Apache parser —
+cleaner separation, independently updatable.
+
+Security: uses fork()+execv() (not system()) to prevent shell injection.
+The confconv binary path is derived from SERVERROOT/bin/, not PATH.
 ---
- src/main/plainconf.cpp | 30 ++++++++++++++++++++++++++++++
- 1 file changed, 30 insertions(+)
+ src/main/plainconf.cpp | 100 +++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 100 insertions(+)
 
 diff --git a/src/main/plainconf.cpp b/src/main/plainconf.cpp
-index 0000000..0000001 100644
 --- a/src/main/plainconf.cpp
 +++ b/src/main/plainconf.cpp
-@@ -XXX,6 +XXX,36 @@ void PlainConf::configServer(XmlNode *pRoot)
-     // ... existing server configuration code ...
+@@ -38,6 +38,7 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <unistd.h>
++#include <sys/wait.h>
+ #include "mainserverconfig.h"
 
-+    // litehttpd: readApacheConf support
-+    // Converts Apache httpd.conf to OLS config at startup time
-+    const char *pApacheConf = pRoot->getChildValue("readApacheConf");
-+    if (pApacheConf && pApacheConf[0])
-+    {
-+        // Extract config path (first word) and options (rest)
-+        char sConfPath[4096];
-+        char sOptions[4096] = {0};
-+        const char *pSpace = strchr(pApacheConf, ' ');
-+        if (pSpace)
-+        {
-+            size_t pathLen = pSpace - pApacheConf;
-+            if (pathLen >= sizeof(sConfPath)) pathLen = sizeof(sConfPath) - 1;
-+            memcpy(sConfPath, pApacheConf, pathLen);
-+            sConfPath[pathLen] = '\0';
-+            snprintf(sOptions, sizeof(sOptions), "%s", pSpace + 1);
-+        }
-+        else
-+        {
-+            snprintf(sConfPath, sizeof(sConfPath), "%s", pApacheConf);
-+        }
+ //#define TEST_OUTPUT_PLAIN_CONF
+@@ -1482,6 +1483,105 @@
+                 free(pathc);
+                 loadConfFile(achBuf);
+             }
++            else if (strncasecmp(p, "readapacheconf", 14) == 0
++                     && (p[14] == ' ' || p[14] == '\t'))
++            {
++                /* litehttpd: readApacheConf /path/to/httpd.conf [opts...]
++                 * Runs litehttpd-confconv at startup to convert Apache config
++                 * to OLS native format, then loads the generated output.
++                 * Modeled after CyberPanel's embedded readApacheConf, but
++                 * uses external converter — cleaner separation. */
++                const char *ra = p + 14;
++                while (*ra == ' ' || *ra == '\t') ra++;
++                if (*ra)
++                {
++                    /* Split: first token = Apache config path, rest = options */
++                    char apachePath[4096] = {0};
++                    char extraOpts[4096] = {0};
++                    const char *sp = ra;
++                    while (*sp && *sp != ' ' && *sp != '\t') sp++;
++                    size_t pLen = (size_t)(sp - ra);
++                    if (pLen >= sizeof(apachePath)) pLen = sizeof(apachePath) - 1;
++                    memcpy(apachePath, ra, pLen);
++                    while (*sp == ' ' || *sp == '\t') sp++;
++                    if (*sp)
++                        lstrncpy(extraOpts, sp, sizeof(extraOpts));
 +
-+        const char *pHome = MainServerConfig::getInstance().getServerRoot();
-+        char sBin[4096];
-+        char sOutDir[4096];
-+        snprintf(sBin, sizeof(sBin), "%s/modules/litehttpd-confconv", pHome);
-+        snprintf(sOutDir, sizeof(sOutDir), "%s/conf/apacheconf", pHome);
++                    /* Build paths relative to SERVERROOT */
++                    char confconvBin[4096];
++                    char outputDir[4096];
++                    snprintf(confconvBin, sizeof(confconvBin),
++                             "%s/bin/litehttpd-confconv", rootPath.c_str());
++                    snprintf(outputDir, sizeof(outputDir),
++                             "%s/conf/apacheconf", rootPath.c_str());
 +
-+        /* Use fork+execve to avoid shell injection via sConfPath/sOptions.
-+         * The argv array passes arguments directly without shell parsing. */
-+        const char *argv[16];
-+        int argc_idx = 0;
-+        argv[argc_idx++] = sBin;
-+        argv[argc_idx++] = "--input";
-+        argv[argc_idx++] = sConfPath;
-+        argv[argc_idx++] = "--output";
-+        argv[argc_idx++] = sOutDir;
-+        if (sOptions[0])
-+            argv[argc_idx++] = sOptions;
-+        argv[argc_idx] = NULL;
++                    struct stat stBuf;
++                    if (stat(confconvBin, &stBuf) != 0)
++                    {
++                        logToMem(LOG_LEVEL_ERR,
++                            "readApacheConf: converter not found: %s",
++                            confconvBin);
++                    }
++                    else if (stat(apachePath, &stBuf) != 0)
++                    {
++                        logToMem(LOG_LEVEL_ERR,
++                            "readApacheConf: Apache config not found: %s",
++                            apachePath);
++                    }
++                    else
++                    {
++                        mkdir(outputDir, 0755);
++                        logToMem(LOG_LEVEL_INFO,
++                            "readApacheConf: converting %s -> %s/ %s",
++                            apachePath, outputDir, extraOpts);
 +
-+        LOG_D(("readApacheConf: running %s --input %s --output %s %s",
-+               sBin, sConfPath, sOutDir, sOptions));
++                        /* fork + execv: no shell, safe from injection */
++                        const char *argv[8];
++                        int ai = 0;
++                        argv[ai++] = confconvBin;
++                        argv[ai++] = "--input";
++                        argv[ai++] = apachePath;
++                        argv[ai++] = "--output";
++                        argv[ai++] = outputDir;
++                        if (extraOpts[0])
++                            argv[ai++] = extraOpts;
++                        argv[ai] = NULL;
 +
-+        pid_t pid = fork();
-+        int iRet = -1;
-+        if (pid == 0)
-+        {
-+            /* Child: redirect stderr to stdout, exec */
-+            dup2(STDOUT_FILENO, STDERR_FILENO);
-+            execv(sBin, (char *const *)argv);
-+            _exit(127);
-+        }
-+        else if (pid > 0)
-+        {
-+            int status = 0;
-+            waitpid(pid, &status, 0);
-+            iRet = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-+        }
-+        if (iRet == 0)
-+        {
-+            char sPath[4096];
-+
-+            // Load generated vhosts configuration
-+            snprintf(sPath, sizeof(sPath), "%s/conf/apacheconf/vhosts.conf", pHome);
-+            struct stat st;
-+            if (stat(sPath, &st) == 0)
-+                loadConfigFile(pRoot, sPath);
-+
-+            // Load generated listeners configuration
-+            snprintf(sPath, sizeof(sPath), "%s/conf/apacheconf/listeners.conf", pHome);
-+            if (stat(sPath, &st) == 0)
-+                loadConfigFile(pRoot, sPath);
-+
-+            LOG_D(("readApacheConf: successfully loaded converted config"));
-+        }
-+        else
-+        {
-+            LOG_W(("readApacheConf: litehttpd-confconv failed with exit code %d", iRet));
-+        }
-+    }
-+
-     // ... rest of server configuration ...
- }
++                        pid_t pid = fork();
++                        if (pid == 0)
++                        {
++                            execv(confconvBin, (char *const *)argv);
++                            _exit(127);
++                        }
++                        else if (pid > 0)
++                        {
++                            int wstat = 0;
++                            waitpid(pid, &wstat, 0);
++                            if (WIFEXITED(wstat) && WEXITSTATUS(wstat) == 0)
++                            {
++                                logToMem(LOG_LEVEL_INFO,
++                                    "readApacheConf: OK, loading %s/",
++                                    outputDir);
++                                loadConfFile(outputDir);
++                            }
++                            else
++                                logToMem(LOG_LEVEL_ERR,
++                                    "readApacheConf: converter failed"
++                                    " (exit=%d)",
++                                    WIFEXITED(wstat) ?
++                                        WEXITSTATUS(wstat) : -1);
++                        }
++                        else
++                            logToMem(LOG_LEVEL_ERR,
++                                "readApacheConf: fork failed: %s",
++                                strerror(errno));
++                    }
++                }
++                else
++                    logToMem(LOG_LEVEL_ERR,
++                        "readApacheConf: missing config path in %s:%d",
++                        path, lineNumber);
++            }
+             else
+             {
+                 nMultiLineModeSignLen = checkMultiLineMode(p, sMultiLineModeSign,
 --
 2.40.0
