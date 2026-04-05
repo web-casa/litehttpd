@@ -2,9 +2,9 @@
  * htaccess_exec_error_doc.h - ErrorDocument directive executor
  *
  * Implements execution of ErrorDocument directives supporting three modes:
- * - Local file path (starts with /)
- * - External URL redirect (starts with http:// or https://)
- * - Quoted text message (starts with ")
+ * - External URL redirect (starts with http:// or https://): 302 redirect
+ * - Quoted text message (starts with "): set response body directly
+ * - Local file path (starts with /): sets OLS_ERROR_DOC_URI env hint
  *
  * Validates: Requirements 8.1, 8.2, 8.3, 8.4
  */
@@ -26,8 +26,9 @@ extern "C" {
  *
  * - External URL (http:// or https://): Sets status to 302 and Location header.
  * - Quoted text (starts with "): Strips quotes and sets response body.
- * - Local file path (starts with /): Logs that we would serve the file.
- *   If the file doesn't exist, falls back to OLS default and logs a warning.
+ * - Local file path (starts with /): Sets OLS_ERROR_DOC_URI env hint.
+ *   The actual handling is done in on_uri_map (mod_htaccess.c) where
+ *   status changes take effect, not in exec_error_document directly.
  *
  * @param session  LSIAPI session handle.
  * @param dir      Directive with type DIR_ERROR_DOCUMENT.
