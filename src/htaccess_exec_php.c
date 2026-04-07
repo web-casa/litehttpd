@@ -105,18 +105,16 @@ int exec_php_flag(lsi_session_t *session, const htaccess_directive_t *dir)
 
 int exec_php_admin_value(lsi_session_t *session, const htaccess_directive_t *dir)
 {
-    if (!session || !dir || !dir->name || !dir->value)
-        return LSI_ERROR;
-
-    return lsi_session_set_php_ini(session, dir->name, dir->value,
-                                   PHP_INI_TYPE_ADMIN_VALUE);
+    (void)session; (void)dir;
+    /* H7: php_admin_value is not allowed in .htaccess for security.
+     * It could override disable_functions, open_basedir, etc. */
+    return 0;
 }
 
 int exec_php_admin_flag(lsi_session_t *session, const htaccess_directive_t *dir)
 {
-    if (!session || !dir || !dir->name || !dir->value)
-        return LSI_ERROR;
-
-    return lsi_session_set_php_ini(session, dir->name, dir->value,
-                                   PHP_INI_TYPE_ADMIN_FLAG);
+    (void)session; (void)dir;
+    /* H7: php_admin_flag is not allowed in .htaccess for security.
+     * It could override disable_functions, open_basedir, etc. */
+    return 0;
 }

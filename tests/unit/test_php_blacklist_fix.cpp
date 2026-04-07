@@ -179,16 +179,15 @@ TEST_F(PhpBlacklistFixTest, DisableClassesRejected)
 }
 
 /* ------------------------------------------------------------------ */
-/*  php_admin_value/php_admin_flag CAN set system-level settings       */
+/*  php_admin_value/php_admin_flag BLOCKED from .htaccess (security)   */
 /* ------------------------------------------------------------------ */
 
-TEST_F(PhpBlacklistFixTest, AdminValueBypassesBlacklist)
+TEST_F(PhpBlacklistFixTest, AdminValueBlockedFromHtaccess)
 {
     auto *dir = make_php_dir(DIR_PHP_ADMIN_VALUE, "disable_functions", "exec");
     EXPECT_EQ(exec_php_admin_value(session_.handle(), dir), LSI_OK);
-    auto &records = session_.get_php_ini_records();
-    ASSERT_EQ(records.size(), 1u);
-    EXPECT_EQ(records[0].name, "disable_functions");
-    EXPECT_TRUE(records[0].is_admin);
+    /* php_admin_value silently ignored in .htaccess — prevents override
+     * of disable_functions, open_basedir, etc. */
+    EXPECT_TRUE(session_.get_php_ini_records().empty());
     free_dir(dir);
 }

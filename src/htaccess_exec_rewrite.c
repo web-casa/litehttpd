@@ -206,6 +206,15 @@ char *rebuild_rewrite_text(const htaccess_directive_t *directives, int *out_len)
 
         /* Emit RewriteMap definitions */
         if (d->type == DIR_REWRITE_MAP && d->data.rewrite_map.map_name) {
+            /* H6: Only allow safe map types from .htaccess */
+            const char *mt = d->data.rewrite_map.map_type;
+            if (mt && strcmp(mt, "txt") != 0 &&
+                strcmp(mt, "rnd") != 0 &&
+                strcmp(mt, "int") != 0 &&
+                strcmp(mt, "dbm") != 0) {
+                /* Reject unsafe map type (e.g. prg:, fastdbd:) */
+                continue;
+            }
             if (textbuf_append_str(&tb, "RewriteMap ") != 0) goto fail;
             if (textbuf_append_str(&tb, d->data.rewrite_map.map_name) != 0) goto fail;
             if (d->data.rewrite_map.map_type) {

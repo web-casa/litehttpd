@@ -24,6 +24,11 @@ int exec_directory_index(lsi_session_t *session,
     char *tok = strtok_r(list, " \t", &saveptr);
 
     while (tok) {
+        /* Reject path traversal attempts */
+        if (strstr(tok, "..")) {
+            tok = strtok_r(NULL, " \t", &saveptr);
+            continue;
+        }
         /* Build full filesystem path: target_dir + "/" + filename */
         size_t tok_len = strlen(tok);
         size_t need_slash = (dir_len > 0 && target_dir[dir_len - 1] != '/') ? 1 : 0;

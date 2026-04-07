@@ -1,23 +1,5 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: litehttpd <noreply@github.com>
-Date: Wed, 02 Apr 2026 23:00:00 +0800
-Subject: [PATCH 2/4] litehttpd: add RewriteRule LSIAPI extensions
-
-Adds function pointers to lsi_api_t for:
-- parse_rewrite_rules: parse RewriteRule/RewriteCond text into handle
-- exec_rewrite_rules: execute parsed rules against session (with redirect)
-- free_rewrite_rules: cleanup handle
-- getStatusCode: public getter for RewriteEngine status code
-
-Must be applied AFTER 0001-lsiapi-phpconfig.patch.
-
-Key implementation details:
-- Uses HttpContext tmpCtx for parseRules (was NULL -> segfault)
-- Detects REWRITE_REDIR on HttpReq for redirect handling
-- Converts enum status code via indexToCode for module return value
----
---- a/include/ls.h	2026-04-05 01:16:22.294098242 +0800
-+++ b/include/ls.h	2026-04-05 01:17:33.642880332 +0800
+--- a/include/ls.h
++++ b/include/ls.h
 @@ -3995,6 +3995,12 @@
                            const char *value, int value_len,
                            int op);
@@ -31,8 +13,8 @@ Key implementation details:
  };
  
  /**
---- a/src/http/rewriteengine.h	2026-04-05 01:16:22.292767365 +0800
-+++ b/src/http/rewriteengine.h	2026-04-05 01:17:33.643464622 +0800
+--- a/src/http/rewriteengine.h
++++ b/src/http/rewriteengine.h
 @@ -113,6 +113,7 @@
                         const HttpContext *pContext, const HttpContext *pRootContext);
      const char *getResultURI()     {   return m_pSourceURL;    }
@@ -41,8 +23,8 @@ Key implementation details:
  
      void clearUnparsedRuleBuf()     {   m_qsLen = 0;            }
      int appendUnparsedRule(AutoStr2 &sDirective, char *pBegin,
---- a/src/lsiapi/lsiapilib.cpp	2026-04-05 01:16:22.294313825 +0800
-+++ b/src/lsiapi/lsiapilib.cpp	2026-04-05 01:17:33.646322324 +0800
+--- a/src/lsiapi/lsiapilib.cpp
++++ b/src/lsiapi/lsiapilib.cpp
 @@ -38,6 +38,8 @@
  #include <http/reqparser.h>
  #include <http/clientinfo.h>
@@ -52,7 +34,7 @@ Key implementation details:
  
  #include <log4cxx/logger.h>
  #include <lsiapi/envmanager.h>
-@@ -3826,6 +3828,92 @@
+@@ -3829,6 +3831,95 @@
      pApi->get_php_config = nullptr;
      pApi->set_req_header = nullptr;
  
@@ -60,6 +42,7 @@ Key implementation details:
 +    pApi->parse_rewrite_rules = [](const char *rules_text,
 +                                    int text_len) -> void * {
 +        if (!rules_text || text_len <= 0)
++        if (text_len > 1024 * 1024) return NULL; /* 1MB max */
 +            return NULL;
 +        char *buf = (char *)malloc(text_len + 1);
 +        if (!buf) return NULL;
@@ -90,10 +73,12 @@ Key implementation details:
 +            return -1;
 +        HttpSession *pSession = (HttpSession *)session;
 +        HttpReq *pReq = pSession->getReq();
++        if (!pReq) return -1;
 +        RewriteRuleList *pList = (RewriteRuleList *)handle;
 +
 +        /* Get context from the current request */
 +        const HttpContext *pCtx = pReq->getContext();
++        if (!pCtx) return -1;
 +
 +        /* processRuleSet returns:
 +         *   -3  = URL rewritten internally
@@ -145,5 +130,3 @@ Key implementation details:
      g_lsiapi_ts = g_lsiapi;
  
      pApi = &g_lsiapi_ts;
--- 
-2.47.3

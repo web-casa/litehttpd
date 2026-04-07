@@ -8,6 +8,18 @@
  * Both modes use mtime-based invalidation: a get() with different
  * mtime/size/inode returns a miss (-1).
  *
+ * Threading model: OLS uses a single-threaded event loop per worker
+ * process. Each worker has its own address space, so the cache (both
+ * native ls_hash and fallback djb2) is per-worker and never accessed
+ * concurrently by multiple threads. No synchronization is required.
+ * The native ls_hash backend is also inherently per-worker since it
+ * lives in process-local heap memory (unlike ls_shmhash which is
+ * cross-process). The fallback djb2 hash uses module-static globals
+ * that are likewise per-process.
+ *
+ * If OLS ever moves to a multi-threaded worker model, this cache
+ * would need a mutex or rwlock around get/put/destroy operations.
+ *
  * Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.6
  */
 #include "htaccess_cache.h"

@@ -107,15 +107,19 @@ long ap_parse_expires_duration(const char *duration) {
 
         /* Parse unit */
         if (strncasecmp(p, "year", 4) == 0) {
+            if (num > LONG_MAX / 31536000) return 0; /* overflow protection */
             total_seconds += num * 365 * 86400;
             p += 4;
         } else if (strncasecmp(p, "month", 5) == 0) {
+            if (num > LONG_MAX / 2592000) return 0; /* overflow protection */
             total_seconds += num * 30 * 86400;
             p += 5;
         } else if (strncasecmp(p, "week", 4) == 0) {
+            if (num > LONG_MAX / 604800) return 0; /* overflow protection */
             total_seconds += num * 7 * 86400;
             p += 4;
         } else if (strncasecmp(p, "day", 3) == 0) {
+            if (num > LONG_MAX / 86400) return 0; /* overflow protection */
             total_seconds += num * 86400;
             p += 3;
         } else if (strncasecmp(p, "hour", 4) == 0) {
@@ -711,6 +715,38 @@ static int ap_process_include(const char *pattern, int is_optional,
             fprintf(stderr, "litehttpd-confconv: rejecting path with '..': %s\n",
                     g.gl_pathv[i]);
             continue;
+        }
+
+        /* Symlink / escape check: canonicalize and verify under server_root
+         * or under the directory of the include pattern itself. */
+        char resolved[PATH_MAX];
+        if (realpath(g.gl_pathv[i], resolved) == NULL) {
+            if (!is_optional)
+                fprintf(stderr, "litehttpd-confconv: cannot resolve: %s\n",
+                        g.gl_pathv[i]);
+            continue;
+        }
+        if (config->server_root) {
+            /* Also allow files under the pattern's parent directory */
+            char pat_dir[PATH_MAX];
+            strncpy(pat_dir, pattern, sizeof(pat_dir) - 1);
+            pat_dir[sizeof(pat_dir) - 1] = '\0';
+            char *slash = strrchr(pat_dir, '/');
+            if (slash) *slash = '\0';
+            char resolved_pat_dir[PATH_MAX];
+            int under_server_root = (strncmp(resolved, config->server_root,
+                                             strlen(config->server_root)) == 0);
+            int under_pat_dir = 0;
+            if (realpath(pat_dir, resolved_pat_dir) != NULL) {
+                under_pat_dir = (strncmp(resolved, resolved_pat_dir,
+                                         strlen(resolved_pat_dir)) == 0);
+            }
+            if (!under_server_root && !under_pat_dir) {
+                fprintf(stderr,
+                        "litehttpd-confconv: Include path outside server root: %s\n",
+                        resolved);
+                continue;
+            }
         }
 
         struct stat st;

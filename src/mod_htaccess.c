@@ -865,6 +865,11 @@ static int exec_if_child_response(lsi_session_t *session,
  */
 static int on_uri_map(lsi_session_t *session)
 {
+    /* Clear any stale per-request cache from a previous request.
+     * OLS may recycle session pointers, so a stale entry keyed by the
+     * same pointer value could leak directives from a prior request. */
+    req_cache_clear();
+
     /* Reset per-request state */
     exec_header_reset_shadow();
 
@@ -1479,6 +1484,11 @@ static int on_uri_map(lsi_session_t *session)
                     /* Local path → read file, serve as 404 with custom body.
                      * Read file BEFORE freeing directives (val into d->value). */
                     if (val[0] == '/') {
+                        /* Reject path traversal */
+                        if (strstr(val, "..")) {
+                            /* skip this ErrorDocument — path traversal attempt */
+                            break;
+                        }
                         char err_path[4096];
                         snprintf(err_path, sizeof(err_path), "%.*s%s",
                                  doc_root_len, doc_root, val);

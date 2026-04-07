@@ -373,22 +373,15 @@ TEST_F(CompatTest, PHPConfig_ValuesAndAdminProtection) {
     }
 
     auto &records = session_.get_php_ini_records();
-    /* upload_max_filesize, post_max_size are PHP_INI_PERDIR → accepted by php_value
-       All 6 directives produce records:
-       upload_max_filesize, post_max_size, max_execution_time, display_errors (user)
-       + open_basedir, allow_url_fopen (admin) = 6 */
-    EXPECT_EQ(records.size(), 6u);
+    /* php_admin_value/flag are now blocked from .htaccess (security fix H7).
+       Only the 4 user-level directives produce records:
+       upload_max_filesize, post_max_size, max_execution_time, display_errors */
+    EXPECT_EQ(records.size(), 4u);
 
-    /* Verify admin values are marked as admin level */
-    bool found_admin = false;
+    /* Verify NO admin-level records exist (they're blocked) */
     for (auto &r : records) {
-        if (r.name == "open_basedir") {
-            found_admin = true;
-            EXPECT_EQ(r.is_admin, 1);
-            EXPECT_EQ(r.value, "/var/www/html");
-        }
+        EXPECT_FALSE(r.is_admin) << "php_admin_* should be blocked: " << r.name;
     }
-    EXPECT_TRUE(found_admin);
 
     htaccess_directives_free(head);
 }

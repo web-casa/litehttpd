@@ -59,6 +59,21 @@ brute_force_record_t *shm_get_record(const char *ip);
 int shm_update_record(const char *ip, const brute_force_record_t *record);
 
 /**
+ * Atomically increment the attempt_count for an IP record.
+ *
+ * Performs the entire read-modify-write under a single lock to prevent
+ * concurrent processes from losing increments (TOCTOU race).
+ * If no record exists, creates one with attempt_count=1.
+ *
+ * @param ip   Client IP address string.
+ * @param now  Current time (for new record creation).
+ * @param out  If non-NULL, receives a copy of the record after increment.
+ * @return 0 on success, -1 on failure.
+ */
+int shm_atomic_increment(const char *ip, time_t now,
+                         brute_force_record_t *out);
+
+/**
  * Remove all records whose window has expired.
  *
  * A record is considered expired when:

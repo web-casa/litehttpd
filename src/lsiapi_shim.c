@@ -29,6 +29,24 @@ extern __thread const lsi_api_t *g_api;
 #define GUARD_API_VOID() do { if (!g_api) return; } while(0)
 
 /* ------------------------------------------------------------------ */
+/*  CRLF injection guard for header values                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Check if a header value contains CR or LF characters.
+ * Returns 1 if CRLF found (reject), 0 if safe.
+ */
+static int contains_crlf(const char *s, int len)
+{
+    if (!s) return 0;
+    for (int i = 0; i < len; i++) {
+        if (s[i] == '\r' || s[i] == '\n')
+            return 1;
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /*  Request URI                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -96,6 +114,8 @@ int lsi_session_set_req_header(lsi_session_t *session,
      */
     if (!g_api || !name || name_len <= 0)
         return -1;
+    if (contains_crlf(val, val_len) || contains_crlf(name, name_len))
+        return -1;
 
     /* Build HTTP_<NAME> env key (uppercase, hyphens → underscores) */
     char env_name[512];
@@ -158,6 +178,8 @@ int lsi_session_set_resp_header(lsi_session_t *session,
                                 const char *val, int val_len)
 {
     GUARD_API_INT();
+    if (contains_crlf(val, val_len) || contains_crlf(name, name_len))
+        return -1;
     return g_api->set_resp_header((const lsi_session_t *)session,
                                    LSI_RSPHDR_UNKNOWN,
                                    name, name_len, val, val_len,
@@ -168,6 +190,8 @@ int lsi_session_set_resp_content_type(lsi_session_t *session,
                                        const char *val, int val_len)
 {
     GUARD_API_INT();
+    if (contains_crlf(val, val_len))
+        return -1;
     /* Remove existing Content-Type first (OLS native MIME mapping may
      * have set one via the engine, which LSI_HEADEROP_SET alone doesn't
      * replace — it adds a second header instead).
@@ -217,6 +241,8 @@ int lsi_session_add_resp_header(lsi_session_t *session,
                                 const char *val, int val_len)
 {
     GUARD_API_INT();
+    if (contains_crlf(val, val_len) || contains_crlf(name, name_len))
+        return -1;
     return g_api->set_resp_header((const lsi_session_t *)session,
                                    LSI_RSPHDR_UNKNOWN,
                                    name, name_len, val, val_len,
@@ -228,6 +254,8 @@ int lsi_session_append_resp_header(lsi_session_t *session,
                                    const char *val, int val_len)
 {
     GUARD_API_INT();
+    if (contains_crlf(val, val_len) || contains_crlf(name, name_len))
+        return -1;
     return g_api->set_resp_header((const lsi_session_t *)session,
                                    LSI_RSPHDR_UNKNOWN,
                                    name, name_len, val, val_len,

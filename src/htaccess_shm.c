@@ -240,6 +240,94 @@ static void builtin_shm_destroy(void)
 }
 
 /* ================================================================== */
+/*  Atomic increment for brute force (avoids get+modify+put race)      */
+/* ================================================================== */
+
+/**
+ * Atomically increment the attempt_count for an IP record.
+ *
+ * For native SHM mode, the entire read-modify-write is performed under
+ * a single shmhash lock, preventing concurrent processes from losing
+ * increments (the classic TOCTOU race between shm_get + shm_update).
+ *
+ * For the built-in fallback, the operation is inherently single-process
+ * safe because OLS workers are single-threaded event loops.
+ *
+ * If no record exists for the IP, a new record is created with
+ * attempt_count=1 and first_attempt=now.
+ *
+ * @param ip   Client IP address string.
+ * @param now  Current time (used for new record creation).
+ * @param out  If non-NULL, receives a copy of the record after increment.
+ * @return 0 on success, -1 on failure.
+ */
+static int native_shm_atomic_increment(const char *ip, time_t now,
+                                        brute_force_record_t *out)
+{
+    const ols_native_api_t *api = ols_native_api_get();
+    if (!g_shm_ht || !api || !ip) return -1;
+
+    api->shmhash_lock(g_shm_ht);
+
+    ls_shmoff_t val_off = 0;
+    ls_shmoff_t off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip), &val_off);
+    if (off > 0 && val_off > 0) {
+        brute_force_record_t *rec = (brute_force_record_t *)
+            api->shmhash_off2ptr(g_shm_ht, val_off);
+        if (rec) {
+            rec->attempt_count++;
+            if (out)
+                memcpy(out, rec, sizeof(brute_force_record_t));
+        }
+    } else {
+        /* Entry doesn't exist yet — shmhash_get may have created a zeroed
+         * slot. Write initial record. */
+        off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip), &val_off);
+        if (off > 0 && val_off > 0) {
+            brute_force_record_t *rec = (brute_force_record_t *)
+                api->shmhash_off2ptr(g_shm_ht, val_off);
+            if (rec) {
+                memset(rec, 0, sizeof(brute_force_record_t));
+                strncpy(rec->ip, ip, sizeof(rec->ip) - 1);
+                rec->ip[sizeof(rec->ip) - 1] = '\0';
+                rec->attempt_count = 1;
+                rec->first_attempt = now;
+                if (out)
+                    memcpy(out, rec, sizeof(brute_force_record_t));
+            }
+        }
+    }
+
+    api->shmhash_unlock(g_shm_ht);
+    return 0;
+}
+
+static int builtin_shm_atomic_increment(const char *ip, time_t now,
+                                         brute_force_record_t *out)
+{
+    if (!g_store || !ip) return -1;
+
+    brute_force_record_t *rec = builtin_shm_get(ip);
+    if (rec) {
+        rec->attempt_count++;
+        if (out)
+            memcpy(out, rec, sizeof(brute_force_record_t));
+        return 0;
+    }
+
+    /* No record — create new one */
+    brute_force_record_t new_rec;
+    memset(&new_rec, 0, sizeof(new_rec));
+    strncpy(new_rec.ip, ip, sizeof(new_rec.ip) - 1);
+    new_rec.ip[sizeof(new_rec.ip) - 1] = '\0';
+    new_rec.attempt_count = 1;
+    new_rec.first_attempt = now;
+    if (out)
+        memcpy(out, &new_rec, sizeof(brute_force_record_t));
+    return builtin_shm_update(ip, &new_rec);
+}
+
+/* ================================================================== */
 /*  Public API — dispatches to native or built-in                      */
 /* ================================================================== */
 
@@ -274,6 +362,14 @@ int shm_update_record(const char *ip, const brute_force_record_t *record)
     if (g_use_native_shm)
         return native_shm_update(ip, record);
     return builtin_shm_update(ip, record);
+}
+
+int shm_atomic_increment(const char *ip, time_t now,
+                         brute_force_record_t *out)
+{
+    if (g_use_native_shm)
+        return native_shm_atomic_increment(ip, now, out);
+    return builtin_shm_atomic_increment(ip, now, out);
 }
 
 int shm_cleanup_expired(time_t now)

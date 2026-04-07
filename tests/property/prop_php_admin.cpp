@@ -126,6 +126,9 @@ protected:
 /*  **Validates: Requirements 5.3, 5.4**                               */
 /* ------------------------------------------------------------------ */
 
+/* php_admin_value/flag are now blocked from .htaccess (security fix H7).
+ * Verify they produce NO records when called from .htaccess context. */
+
 RC_GTEST_FIXTURE_PROP(PhpAdminPropertyFixture,
                       PhpAdminValueNotOverriddenByPhpValue,
                       ())
@@ -134,57 +137,22 @@ RC_GTEST_FIXTURE_PROP(PhpAdminPropertyFixture,
     auto adminValue  = *gen::phpIniValue();
     auto childValue  = *gen::phpIniValue();
 
-    /* Parent directory: php_admin_value sets the setting at admin level */
+    /* php_admin_value is silently ignored in .htaccess */
     auto *adminDir = make_php_dir(DIR_PHP_ADMIN_VALUE, settingName, adminValue);
     int rc1 = exec_php_admin_value(session_.handle(), adminDir);
     RC_ASSERT(rc1 == LSI_OK);
 
-    /* Child directory: php_value tries to override the same setting */
+    /* php_value still works normally */
     auto *childDir = make_php_dir(DIR_PHP_VALUE, settingName, childValue);
     int rc2 = exec_php_value(session_.handle(), childDir);
     RC_ASSERT(rc2 == LSI_OK);
 
-    /* Inspect the PHP ini records */
+    /* Only the php_value record should exist (admin was blocked) */
     const auto &records = session_.get_php_ini_records();
-    RC_ASSERT(records.size() >= 1);
-
-    /* The admin-level record should exist with is_admin=true */
-    bool found_admin = false;
-    for (const auto &rec : records) {
-        if (rec.name == settingName && rec.is_admin) {
-            RC_ASSERT(rec.value == adminValue);
-            found_admin = true;
-        }
-    }
-    RC_ASSERT(found_admin);
-
-    /* The child php_value record should be at user level (is_admin=false) */
-    bool found_user = false;
-    for (const auto &rec : records) {
-        if (rec.name == settingName && !rec.is_admin) {
-            RC_ASSERT(rec.value == childValue);
-            found_user = true;
-        }
-    }
-    RC_ASSERT(found_user);
-
-    /*
-     * Key property: the admin record (is_admin=1) and user record (is_admin=0)
-     * are both present. The LSIAPI layer (lsi_session_set_php_ini) is
-     * responsible for ensuring admin-level settings take precedence.
-     * We verify the admin call used is_admin=1 and the user call used
-     * is_admin=0, which is the contract that ensures non-overridability.
-     */
-
-    /* Verify the first record is admin-level (parent executed first) */
+    RC_ASSERT(records.size() == 1);
     RC_ASSERT(records[0].name == settingName);
-    RC_ASSERT(records[0].is_admin == true);
-    RC_ASSERT(records[0].value == adminValue);
-
-    /* Verify the second record is user-level (child executed second) */
-    RC_ASSERT(records[1].name == settingName);
-    RC_ASSERT(records[1].is_admin == false);
-    RC_ASSERT(records[1].value == childValue);
+    RC_ASSERT(records[0].is_admin == false);
+    RC_ASSERT(records[0].value == childValue);
 
     free_php_dir(adminDir);
     free_php_dir(childDir);
@@ -201,29 +169,22 @@ RC_GTEST_FIXTURE_PROP(PhpAdminPropertyFixture,
     std::string adminVal = adminFlag ? "on" : "off";
     std::string childVal = childFlag ? "on" : "off";
 
-    /* Parent directory: php_admin_flag sets the setting at admin level */
+    /* php_admin_flag is silently ignored in .htaccess */
     auto *adminDir = make_php_dir(DIR_PHP_ADMIN_FLAG, settingName, adminVal);
     int rc1 = exec_php_admin_flag(session_.handle(), adminDir);
     RC_ASSERT(rc1 == LSI_OK);
 
-    /* Child directory: php_flag tries to override the same setting */
+    /* php_flag still works normally */
     auto *childDir = make_php_dir(DIR_PHP_FLAG, settingName, childVal);
     int rc2 = exec_php_flag(session_.handle(), childDir);
     RC_ASSERT(rc2 == LSI_OK);
 
-    /* Inspect the PHP ini records */
+    /* Only the php_flag record should exist (admin was blocked) */
     const auto &records = session_.get_php_ini_records();
-    RC_ASSERT(records.size() >= 2);
-
-    /* Admin record: is_admin=true, value matches parent */
+    RC_ASSERT(records.size() == 1);
     RC_ASSERT(records[0].name == settingName);
-    RC_ASSERT(records[0].is_admin == true);
-    RC_ASSERT(records[0].value == adminVal);
-
-    /* User record: is_admin=false, value matches child */
-    RC_ASSERT(records[1].name == settingName);
-    RC_ASSERT(records[1].is_admin == false);
-    RC_ASSERT(records[1].value == childVal);
+    RC_ASSERT(records[0].is_admin == false);
+    RC_ASSERT(records[0].value == childVal);
 
     free_php_dir(adminDir);
     free_php_dir(childDir);

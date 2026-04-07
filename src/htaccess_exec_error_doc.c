@@ -73,6 +73,12 @@ int exec_error_document(lsi_session_t *session, const htaccess_directive_t *dir)
      * In OLS, set_uri_internal in the response phase is too late.
      * Store as env hint for OLS's native error page mechanism. */
     if (value[0] == '/') {
+        /* Reject path traversal */
+        if (strstr(value, "..")) {
+            lsi_log(session, LSI_LOG_WARN,
+                    "ErrorDocument: rejecting path traversal in '%s'", value);
+            return -1;
+        }
         lsi_session_set_env(session, "OLS_ERROR_DOC_URI",
                             17, value, value_len);
         return 0;

@@ -226,7 +226,9 @@ int exec_brute_force(lsi_session_t *session,
                     /* BF_ACTION_THROTTLE: progressive delay + 429 */
                     int excess = cur_count - allowed_attempts + 1;
                     if (excess < 1) excess = 1;
-                    int progressive_ms = throttle_ms * excess;
+                    long long delay = (long long)throttle_ms * excess;
+                    if (delay > 30000) delay = 30000; /* cap at 30s */
+                    int progressive_ms = (int)delay;
                     if (progressive_ms > BF_MAX_THROTTLE_MS)
                         progressive_ms = BF_MAX_THROTTLE_MS;
                     char ms_str[32];
