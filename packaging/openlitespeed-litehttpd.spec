@@ -32,7 +32,11 @@ BuildRequires:  wget
 BuildRequires:  golang
 BuildRequires:  clang
 BuildRequires:  patch
+%if 0%{?el10}
+BuildRequires:  pcre2-devel
+%else
 BuildRequires:  pcre-devel
+%endif
 BuildRequires:  openssl-devel
 BuildRequires:  expat-devel
 BuildRequires:  zlib-devel
@@ -46,7 +50,11 @@ BuildRequires:  systemd-rpm-macros
 Provides:       openlitespeed = %{ols_version}
 Conflicts:      openlitespeed
 
+%if 0%{?el10}
+Requires:       pcre2
+%else
 Requires:       pcre
+%endif
 Requires:       openssl-libs
 Requires:       expat
 Requires:       zlib
