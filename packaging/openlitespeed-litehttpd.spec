@@ -36,6 +36,7 @@ BuildRequires:  wget
 BuildRequires:  clang
 BuildRequires:  patch
 BuildRequires:  perl
+BuildRequires:  golang
 BuildRequires:  systemd-rpm-macros
 
 Provides:       openlitespeed = %{ols_version}

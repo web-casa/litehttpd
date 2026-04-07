@@ -187,10 +187,11 @@ jobs:
                   echo "WARNING: glibc versionlock failed — binary may require newer glibc"
                 fi
                 dnf -y install rpm-build gcc gcc-c++ cmake make autoconf automake libtool \
-                  systemd-rpm-macros which git wget clang patch perl 2>&1 | tail -2
+                  systemd-rpm-macros which git wget clang patch perl golang 2>&1 | tail -2
               else
                 yum -y install rpm-build gcc gcc-c++ cmake3 make autoconf automake libtool \
                   systemd-rpm-macros which git wget clang patch perl 2>&1 | tail -2
+                yum -y install golang 2>&1 | tail -1 || true
                 command -v cmake || ln -s /usr/bin/cmake3 /usr/bin/cmake 2>/dev/null || true
               fi
 
