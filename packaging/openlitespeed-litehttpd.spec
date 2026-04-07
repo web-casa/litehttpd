@@ -102,11 +102,11 @@ cd openlitespeed-%{ols_version}
 sed -i 's/^\s*preparelibquic\s*$/# preparelibquic (skipped for rpmbuild)/' build.sh
 
 # 2. Skip lsrecaptcha Go build (Go 1.21+ dropped legacy GOPATH mode)
-sed -i '/^cd src\/modules\/lsrecaptcha$/,/^cd \.\.\/\.\.\/\.\.\/$/s/^/#/' build.sh
+sed -i '/cd src\/modules\/lsrecaptcha/,/cd \.\.\/.\.\/\.\.\//s/^/#/' build.sh
+grep -q '^#.*lsrecaptcha' build.sh || { echo "FATAL: lsrecaptcha skip sed failed"; exit 1; }
 
 # 3. Skip third-party clone in build.sh (already built above)
-sed -i '/if \[ ! -d third-party \]/,/^fi$/s/^/#/' build.sh
-# Verify the sed took effect
+sed -i '/! -d third-party/,/^fi$/s/^/#/' build.sh
 grep -q '^#.*third-party' build.sh || { echo "FATAL: third-party skip sed failed"; exit 1; }
 
 # 4. Disable cmake GIT_SUBMODULE (tarball is not a git repo)

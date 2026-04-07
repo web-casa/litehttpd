@@ -179,9 +179,13 @@ jobs:
               # All third-party libraries are built from source via
               # litespeedtech/third-party, matching official LiteSpeed approach.
               if command -v dnf &>/dev/null; then
-                dnf -y install dnf-plugins-core 2>&1 | tail -1
-                # Lock glibc to keep minimum version requirement low
-                dnf versionlock add glibc glibc-devel glibc-headers glibc-common 2>/dev/null || true
+                dnf -y install dnf-plugins-core
+                # Lock glibc to keep minimum version requirement low.
+                # versionlock may not be available on all distros (e.g. EL10
+                # minimal) — warn but continue if it fails.
+                if ! dnf versionlock add glibc glibc-devel glibc-headers glibc-common 2>/dev/null; then
+                  echo "WARNING: glibc versionlock failed — binary may require newer glibc"
+                fi
                 dnf -y install rpm-build gcc gcc-c++ cmake make autoconf automake libtool \
                   systemd-rpm-macros which git wget clang patch perl 2>&1 | tail -2
               else
