@@ -35,7 +35,7 @@ BuildRequires:  git
 BuildRequires:  wget
 BuildRequires:  clang
 BuildRequires:  patch
-BuildRequires:  golang
+BuildRequires:  perl
 BuildRequires:  systemd-rpm-macros
 
 Provides:       openlitespeed = %{ols_version}
@@ -75,16 +75,21 @@ patch -p1 < %{SOURCE4}
 
 %build
 # ── Build third-party static libraries (like official LiteSpeed) ──
-# This clones litespeedtech/third-party and compiles:
-#   pcre-8.45, BoringSSL, expat, zlib, brotli, udns, libmaxminddb,
-#   lmdb, curl, libxml2, yajl, libmodsecurity, bcrypt, ip2location
-# All as static libraries (.a) linked into the OLS binary.
+# ── Build third-party static libraries (like official LiteSpeed) ──
+# Clones litespeedtech/third-party and compiles pcre-8.45, BoringSSL,
+# expat, zlib, brotli, udns, libmaxminddb, lmdb, curl, libxml2, yajl,
+# libmodsecurity, bcrypt, ip2location as static libraries (.a).
+# NOTE: Requires network access. CI runs in Docker with full network.
+# For offline builds, pre-populate ../third-party/ before rpmbuild.
 cd ..
 if [ ! -d third-party ]; then
     git clone https://github.com/litespeedtech/third-party.git
     mkdir -p third-party/lib64
     cd third-party/script/
-    # Skip lsrecaptcha — Go 1.21+ dropped legacy GOPATH mode
+    # build_ols.sh has BUILD_LIBS list. The original list includes
+    # "unittest-cpp" which no longer exists; upstream replaced it with
+    # "bcrypt". This sed ensures compatibility with older third-party
+    # snapshots that still reference unittest-cpp.
     sed -i -e "s/unittest-cpp/bcrypt/g" ./build_ols.sh
     ./build_ols.sh
     cd ../..
@@ -92,16 +97,19 @@ fi
 cd openlitespeed-%{ols_version}
 
 # ── Patch build.sh for rpmbuild compatibility ──
-# 1. Skip preparelibquic: submodules already populated
-sed -i 's/^preparelibquic$/# preparelibquic (skipped for rpmbuild)/' build.sh
 
-# 2. Skip lsrecaptcha Go build
+# 1. Skip preparelibquic: lsquic submodule already populated in tarball
+sed -i 's/^\s*preparelibquic\s*$/# preparelibquic (skipped for rpmbuild)/' build.sh
+
+# 2. Skip lsrecaptcha Go build (Go 1.21+ dropped legacy GOPATH mode)
 sed -i '/^cd src\/modules\/lsrecaptcha$/,/^cd \.\.\/\.\.\/\.\.\/$/s/^/#/' build.sh
 
-# 3. Skip third-party clone (already done above)
-sed -i '/^if \[ ! -d third-party \]/,/^fi$/s/^/#/' build.sh
+# 3. Skip third-party clone in build.sh (already built above)
+sed -i '/if \[ ! -d third-party \]/,/^fi$/s/^/#/' build.sh
+# Verify the sed took effect
+grep -q '^#.*third-party' build.sh || { echo "FATAL: third-party skip sed failed"; exit 1; }
 
-# 4. Disable cmake GIT_SUBMODULE
+# 4. Disable cmake GIT_SUBMODULE (tarball is not a git repo)
 sed -i 's/-DMOD_LUA=\$MOD_LUA/-DMOD_LUA=$MOD_LUA -DGIT_SUBMODULE=OFF/' build.sh
 
 bash build.sh
@@ -148,7 +156,7 @@ done
 
 %pre
 getent group lsadm > /dev/null || groupadd -r lsadm
-lsadm_gid=$(grep ^lsadm: /etc/group | awk -F : '{ print $3; }') 2>/dev/null
+lsadm_gid=$(getent group lsadm 2>/dev/null | awk -F : '{ print $3; }')
 getent passwd lsadm > /dev/null || \
     useradd -g ${lsadm_gid:-lsadm} -d / -r -s /sbin/nologin -c "lsadm" lsadm >/dev/null 2>&1
 getent group nogroup > /dev/null || groupadd -r nogroup
