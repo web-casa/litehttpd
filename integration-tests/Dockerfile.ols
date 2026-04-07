@@ -1,8 +1,9 @@
-## Stage 1: Build patched OLS from source (optional, for RewriteRule support)
+## Stage 1: Build patched OLS from source (static, like official LiteSpeed)
 FROM ubuntu:22.04 AS ols-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ cmake make wget ca-certificates patch git \
+    autoconf automake libtool which clang perl golang \
     libpcre3-dev libexpat1-dev zlib1g-dev libxml2-dev libaio-dev \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -13,31 +14,54 @@ RUN git clone --depth 1 --recurse-submodules --branch v${OLS_VERSION} \
 
 WORKDIR /tmp/openlitespeed-${OLS_VERSION}
 
+# Copy embedded Apache config parser/writer into OLS source tree (needed by patch 0003)
+COPY tools/apacheconf_parser.c tools/apacheconf_parser.h \
+     tools/ols_config_writer.c tools/ols_config_writer.h \
+     src/main/
+
+# Apply all 4 patches
 COPY patches/0001-lsiapi-phpconfig.patch /tmp/
 COPY patches/0002-lsiapi-rewrite.patch /tmp/
+COPY patches/0003-readapacheconf.patch /tmp/
 COPY patches/0004-autoindex-403.patch /tmp/
 RUN patch -p1 < /tmp/0001-lsiapi-phpconfig.patch && \
     patch -p1 < /tmp/0002-lsiapi-rewrite.patch && \
+    patch -p1 < /tmp/0003-readapacheconf.patch && \
     patch -p1 < /tmp/0004-autoindex-403.patch
 
-RUN mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_INSTALL_PREFIX=/usr/local/lsws \
-          .. && \
-    make -j$(nproc) && \
-    make install DESTDIR=/opt/ols-install
+# Build third-party static libraries (like official LiteSpeed approach)
+RUN cd /tmp && \
+    git clone https://github.com/litespeedtech/third-party.git && \
+    mkdir -p third-party/lib64 && \
+    cd third-party/script/ && \
+    sed -i -e "s/unittest-cpp/bcrypt/g" ./build_ols.sh && \
+    ./build_ols.sh
+
+# Build OLS using build.sh (like official packaging)
+RUN sed -i 's/^\s*preparelibquic\s*$/# preparelibquic (skipped)/' build.sh && \
+    sed -i '/cd src\/modules\/lsrecaptcha/,/cd \.\.\/.\.\/\.\.\//s/^/#/' build.sh && \
+    sed -i '/! -d third-party/,/^fi$/s/^/#/' build.sh && \
+    sed -i 's/-DMOD_LUA=\$MOD_LUA/-DMOD_LUA=$MOD_LUA -DGIT_SUBMODULE=OFF/' build.sh && \
+    bash build.sh || true && \
+    if [ ! -e dist/bin/openlitespeed ]; then \
+        make -C build -j$(nproc) openlitespeed 2>&1 | tail -5 && \
+        mkdir -p dist/bin dist/modules && \
+        cp build/src/openlitespeed dist/bin/ 2>/dev/null || true; \
+    fi && \
+    [ -e dist/bin/openlitespeed ] && \
+    cp dist/bin/openlitespeed /tmp/openlitespeed-patched
 
 ## Stage 2: Runtime image with patched OLS
 FROM litespeedtech/openlitespeed:latest
 
 # Replace OLS binary with patched version
-COPY --from=ols-builder /opt/ols-install/usr/local/lsws/bin/openlitespeed \
+COPY --from=ols-builder /tmp/openlitespeed-patched \
                          /usr/local/lsws/bin/openlitespeed
 
 # Install additional PHP extensions and tools needed by the 4 test apps.
 # The base image ships lsphp83 with mysql/curl/intl/opcache/redis already.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl unzip wget bzip2 mariadb-client \
+        curl unzip wget bzip2 mariadb-client binutils \
     && rm -rf /var/lib/apt/lists/*
 
 # Ensure CLI php points to the installed lsphp

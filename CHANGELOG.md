@@ -2,7 +2,7 @@
 
 All notable changes to litehttpd will be documented in this file.
 
-## [2.0.0] - 2026-04-01
+## [2.0.0] - 2026-04-08
 
 ### Added
 - Phase 7a: WordPress uploads PHP protection, ErrorDocument 401 security, adaptive cache
@@ -13,10 +13,19 @@ All notable changes to litehttpd will be documented in this file.
 - Phase 9: RemoveType, RemoveHandler, Action directives
 - Phase 10: litehttpd-confconv Apache-to-OLS config converter (40 directives)
 - Phase 11: litehttpd-confconv extended (60+ directives, OLS patch, hot reload)
+- Phase 12: readApacheConf embedded in-process Apache config parser (like LSWS/CyberPanel)
 - Phase 13a: Complete ap_expr AST engine (&&, ||, !, parens, -ipmatch, functions)
+- confconv: Panel detection (DirectAdmin, InterWorx, CyberCP)
+- confconv: SSL extended directives (SSLVerifyClient, SSLVerifyDepth, SSLSessionTickets, SSLOCSPDefaultResponder, SSLCACertificateFile/Path, SSLCARevocationFile)
+- confconv: Macro support (<Macro>/<Use> with $param/@param substitution)
+- confconv: PHP path mapping (version extraction, normalized lsphpXY format)
+- confconv: Context inheritance (docroot Directory merging, allowOverride inheritance)
 - OLS Patch 0003: readApacheConf startup integration
+- OLS Patch 0004: Options -Indexes returns 403 (match Apache autoindex behavior)
+- Full static build matching official LiteSpeed (BoringSSL, pcre-8.45, all libs from source)
+- EL8/EL9/EL10 RPM builds verified
 - Property-based test generators for all 80 directive types
-- 1017 total tests (786 unit + 124 property + 52 compat + 55 confconv)
+- 1036 total tests (786 unit + 124 property + 52 compat + 55 confconv + 19 new)
 
 ### Fixed
 - PHPConfig type mapping (1=VALUE, 2=FLAG, 3=ADMIN_VALUE, 4=ADMIN_FLAG)
@@ -27,15 +36,33 @@ All notable changes to litehttpd will be documented in this file.
 - IPv4-mapped IPv6 ACL bypass prevention
 - Expression engine TLS buffer aliasing fix
 - Multiple Codex review security fixes (7 rounds)
+- ErrorDocument use-after-free in URI_MAP handler
+- Macro parameter boundary (delimiters for <Directory $path>)
+- Block-bearing macros (fmemopen in-memory stream parsing)
+- Context inheritance security (parent Require denied propagation)
+- Recursive macro protection (depth limit 16)
+- SSLCARevocationFile emission (CRLFile output)
+- SSLVerifyDepth validation (strtol + range check)
+- Panel detection config path checks
 
 ### Security
 - 4 rounds of manual security audit + 7 rounds of Codex automated review
+- Codex full codebase review: 7 HIGH + 11 MEDIUM + 4 LOW findings fixed
 - All CRITICAL and HIGH findings resolved
 - Thread-local regex and negative stat caching for performance hardening
 - Header injection protection (CRLF filtering)
 - ExecCGI/cgi-script execution blocked via AllowOverride
 - Environment variable blacklist (SERVER_SOFTWARE, PATH, etc.)
 - .htaccess file size limit enforcement
+- ErrorDocument path traversal blocked (reject ".." in local paths)
+- SHM brute-force atomic increment (prevent race condition)
+- Request cache stale data prevention (clear at on_uri_map entry)
+- Include symlink traversal blocked (realpath + server_root check)
+- RewriteMap unsafe types blocked (allowlist: txt/rnd/int/dbm only)
+- php_admin_value/flag blocked from .htaccess (prevent disable_functions override)
+- CRLF injection guard on all header setters
+- DirectoryIndex path traversal blocked
+- Brute force throttle overflow protection
 
 ## [1.0.0] - 2026-03-15
 

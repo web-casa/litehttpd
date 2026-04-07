@@ -22,7 +22,7 @@ export OLS_HOST="${OLS_HOST:-http://localhost:8088}"
 export OLS_CONTAINER="${OLS_CONTAINER:-ols-integ}"
 export DB_CONTAINER="${DB_CONTAINER:-ols-integ-db}"
 
-ALL_APPS=(wordpress laravel nextcloud drupal)
+ALL_APPS=(htaccess-features wordpress laravel nextcloud drupal)
 APPS_TO_RUN=()
 DO_BUILD=false
 TOTAL_PASS=0
@@ -42,12 +42,12 @@ for arg in "$@"; do
             echo ">>> Done."
             exit 0
             ;;
-        wordpress|laravel|nextcloud|drupal)
+        htaccess-features|wordpress|laravel|nextcloud|drupal)
             APPS_TO_RUN+=("$arg")
             ;;
         *)
             echo "Unknown argument: $arg"
-            echo "Usage: $0 [--build] [--down] [wordpress|laravel|nextcloud|drupal]"
+            echo "Usage: $0 [--build] [--down] [htaccess-features|wordpress|laravel|nextcloud|drupal]"
             exit 1
             ;;
     esac

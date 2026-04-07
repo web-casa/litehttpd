@@ -26,7 +26,8 @@ Apache .htaccess compatibility module for OpenLiteSpeed, plus the `litehttpd-con
 - **WordPress uploads PHP protection** and **brute-force protection** (8 directives)
 - **AllowOverride** category filtering (AuthConfig, FileInfo, Indexes, Limit, Options)
 - **HTACCESS\_VHROOT** three-level `.htaccess` merging
-- **litehttpd-confconv**: Apache `httpd.conf` to OLS config converter (60+ directives)
+- **litehttpd-confconv**: Apache `httpd.conf` to OLS config converter (65+ directives, panel detection, Macro support, SSL extended)
+- **readApacheConf**: Embedded Apache config parser in OLS binary (like CyberPanel/LSWS)
 
 ## Quick Start
 
@@ -109,6 +110,10 @@ cmake --build build -j$(nproc)
 #   build/litehttpd-confconv      -- the config converter
 ```
 
+### Build
+
+EL8/EL9/EL10 RPMs with fully static linking (BoringSSL, pcre, all deps from source).
+
 ### Build without tests
 
 ```bash
@@ -118,7 +123,7 @@ cmake --build build -j$(nproc)
 
 ## Testing
 
-The project includes 1017 tests across four test suites:
+The project includes 1036 tests across four test suites:
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
