@@ -148,7 +148,9 @@ jobs:
           - container: almalinux:9
             dist_tag: el9
             pkg_cmd: dnf
-          - container: almalinux:10
+          # EL10: build on EL9 container (same as official LiteSpeed approach
+          # — they compile on RHEL8 and repackage for all distros)
+          - container: almalinux:9
             dist_tag: el10
             pkg_cmd: dnf
 
