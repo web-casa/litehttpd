@@ -3,8 +3,8 @@
 
 Name:           openlitespeed-litehttpd
 Version:        %{ols_version}
-Release:        1.olsextra%{?dist}
-Summary:        OpenLiteSpeed with PHPConfig + RewriteRule + readApacheConf + autoindex patches
+Release:        2.olsextra%{?dist}
+Summary:        OpenLiteSpeed with LiteHTTPD patches (fully static, like official)
 AutoReqProv:    no
 
 License:        GPLv3+
@@ -19,6 +19,10 @@ Source6:        apacheconf_parser.h
 Source7:        ols_config_writer.c
 Source8:        ols_config_writer.h
 
+# ── Build tools only — all libraries compiled from third-party sources ──
+# Matches official LiteSpeed approach: NO system -devel packages.
+# pcre, BoringSSL, expat, zlib, brotli, udns, etc. all built statically
+# from litespeedtech/third-party repository.
 BuildRequires:  gcc
 BuildRequires:  gcc-c++
 BuildRequires:  cmake >= 3.14
@@ -29,43 +33,32 @@ BuildRequires:  libtool
 BuildRequires:  which
 BuildRequires:  git
 BuildRequires:  wget
-BuildRequires:  golang
 BuildRequires:  clang
 BuildRequires:  patch
-%if 0%{?el10}
-BuildRequires:  pcre2-devel
-%else
-BuildRequires:  pcre-devel
-%endif
-BuildRequires:  openssl-devel
-BuildRequires:  expat-devel
-BuildRequires:  zlib-devel
-BuildRequires:  bzip2-devel
-BuildRequires:  libxml2-devel
-BuildRequires:  curl-devel
-BuildRequires:  libcap-devel
-BuildRequires:  libaio-devel
+BuildRequires:  golang
 BuildRequires:  systemd-rpm-macros
 
 Provides:       openlitespeed = %{ols_version}
 Conflicts:      openlitespeed
 
+# Runtime deps — match official OLS RPM (no library deps, all static)
+Requires:       /bin/sh
+Requires:       libnsl
+Requires:       openssl
 %if 0%{?el10}
-Requires:       pcre2
-%else
-Requires:       pcre
+Requires:       libxcrypt-compat
 %endif
-Requires:       openssl-libs
-Requires:       expat
-Requires:       zlib
 
 %description
-OpenLiteSpeed %{ols_version} with PHPConfig + RewriteRule LSIAPI patches applied.
-Adds set_php_config_value/set_php_config_flag/get_php_config to lsi_api_t,
-enabling litehttpd module to pass php_value/php_flag directives to lsphp
-via the native PHPConfig::buildLsapiEnv() path.
-Also adds parse_rewrite_rules/exec_rewrite_rules/free_rewrite_rules for
-dynamic .htaccess RewriteRule execution.
+OpenLiteSpeed %{ols_version} with LiteHTTPD patches applied.
+All third-party libraries (BoringSSL, pcre, expat, zlib, brotli, etc.)
+are statically compiled from source, matching the official LiteSpeed build.
+
+Patches:
+- 0001: PHPConfig LSIAPI extensions (php_value/php_flag)
+- 0002: RewriteRule execution (parse/exec/free)
+- 0003: readApacheConf embedded parser (in-process Apache config conversion)
+- 0004: Options -Indexes returns 403 (match Apache behavior)
 
 %prep
 %setup -q -n openlitespeed-%{ols_version}
@@ -81,29 +74,41 @@ patch -p1 < %{SOURCE3}
 patch -p1 < %{SOURCE4}
 
 %build
-# ── Patch build.sh to fix rpmbuild compatibility ──
-#
-# 1. Skip preparelibquic: lsquic submodule is already populated in the
-#    tarball (git clone --recurse-submodules). The function would delete
-#    and re-clone it, which breaks symlinks in some rpmbuild layouts.
+# ── Build third-party static libraries (like official LiteSpeed) ──
+# This clones litespeedtech/third-party and compiles:
+#   pcre-8.45, BoringSSL, expat, zlib, brotli, udns, libmaxminddb,
+#   lmdb, curl, libxml2, yajl, libmodsecurity, bcrypt, ip2location
+# All as static libraries (.a) linked into the OLS binary.
+cd ..
+if [ ! -d third-party ]; then
+    git clone https://github.com/litespeedtech/third-party.git
+    mkdir -p third-party/lib64
+    cd third-party/script/
+    # Skip lsrecaptcha — Go 1.21+ dropped legacy GOPATH mode
+    sed -i -e "s/unittest-cpp/bcrypt/g" ./build_ols.sh
+    ./build_ols.sh
+    cd ../..
+fi
+cd openlitespeed-%{ols_version}
+
+# ── Patch build.sh for rpmbuild compatibility ──
+# 1. Skip preparelibquic: submodules already populated
 sed -i 's/^preparelibquic$/# preparelibquic (skipped for rpmbuild)/' build.sh
 
-# 2. Skip lsrecaptcha Go build: Go 1.21+ (EL9) dropped legacy GOPATH mode
-#    that build.sh relies on. lsrecaptcha is a captcha helper, not needed.
+# 2. Skip lsrecaptcha Go build
 sed -i '/^cd src\/modules\/lsrecaptcha$/,/^cd \.\.\/\.\.\/\.\.\/$/s/^/#/' build.sh
 
-# 3. Disable cmake GIT_SUBMODULE: tarball is not a git repo, this avoids
-#    cmake trying to run `git submodule update --force` during configure.
+# 3. Skip third-party clone (already done above)
+sed -i '/^if \[ ! -d third-party \]/,/^fi$/s/^/#/' build.sh
+
+# 4. Disable cmake GIT_SUBMODULE
 sed -i 's/-DMOD_LUA=\$MOD_LUA/-DMOD_LUA=$MOD_LUA -DGIT_SUBMODULE=OFF/' build.sh
 
 bash build.sh
 [ -e dist/bin/openlitespeed ] || exit 1
 
 %install
-# Follow the same pattern as official & OpenMandriva specs:
-# patch ols.conf SERVERROOT -> buildroot, then run install.sh
 sed -i "s#SERVERROOT=%{install_dir}#SERVERROOT=%{buildroot}%{install_dir}#" ols.conf
-# Disable lsphp download — we don't bundle PHP
 sed -i -e 's:USE_LSPHP7=yes:USE_LSPHP7=no:g' install.sh
 bash install.sh
 
@@ -130,10 +135,9 @@ chmod 0755 %{buildroot}/etc/init.d/lsws 2>/dev/null || true
 # Mark as RPM install
 echo 'RPM' > %{buildroot}%{install_dir}/PLAT
 
-# Clean up buildroot prefix leaked into installed text files (must be LAST)
+# Clean up buildroot prefix leaked into installed text files
 grep -rl "%{buildroot}" %{buildroot} 2>/dev/null | \
     xargs -r sed -i "s#%{buildroot}##g"
-# Fix absolute symlinks that point into buildroot
 find %{buildroot} -type l | while read link; do
     target=$(readlink "$link")
     case "$target" in *%{buildroot}*)
@@ -144,9 +148,10 @@ done
 
 %pre
 getent group lsadm > /dev/null || groupadd -r lsadm
-getent group nogroup > /dev/null || groupadd -r nogroup
+lsadm_gid=$(grep ^lsadm: /etc/group | awk -F : '{ print $3; }') 2>/dev/null
 getent passwd lsadm > /dev/null || \
-    useradd -g lsadm -d / -r -s /sbin/nologin -c "lsadm" lsadm >/dev/null 2>&1
+    useradd -g ${lsadm_gid:-lsadm} -d / -r -s /sbin/nologin -c "lsadm" lsadm >/dev/null 2>&1
+getent group nogroup > /dev/null || groupadd -r nogroup
 exit 0
 
 %post
@@ -169,9 +174,17 @@ fi
 %{_unitdir}/lshttpd.service
 
 %changelog
+* Mon Apr 07 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-2.olsextra
+- Switch to fully static build (match official LiteSpeed approach)
+- All third-party libs built from source via litespeedtech/third-party
+- No more system -devel package dependencies
+- Binary now ~9MB (was 37MB with dynamic linking)
+- EL10 fully supported (pcre1 statically compiled)
+- Add libxcrypt-compat requirement for EL10
+
 * Sat Apr 04 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-1.olsextra
 - OpenLiteSpeed v1.8.5 with LiteHTTPD patches
 - Patch 0001: PHPConfig LSIAPI extensions
 - Patch 0002: RewriteRule execution
-- Patch 0003: readApacheConf startup hook
+- Patch 0003: readApacheConf embedded parser
 - Patch 0004: Options -Indexes returns 403
