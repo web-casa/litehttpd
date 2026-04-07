@@ -58,35 +58,65 @@ EOF
 /usr/local/lsws/bin/lswsctrl restart
 ```
 
-## litehttpd-confconv: Apache to OLS Config Converter
+## Apache Config Conversion
 
-Convert Apache `httpd.conf` / virtual host configurations to OpenLiteSpeed format:
+LiteHTTPD provides two ways to convert Apache `httpd.conf` to OLS format, using the same parser (65+ directives, panel detection, Macro support, SSL extended):
+
+### readApacheConf (recommended for production)
+
+Add one line to OLS config -- Apache config is parsed **in-process** at startup (like CyberPanel/LSWS):
+
+```
+# In /usr/local/lsws/conf/httpd_config.conf:
+readApacheConf /etc/httpd/conf/httpd.conf portmap=80:8088,443:8443
+```
+
+OLS starts, parses the Apache config, generates native OLS vhost/listener configs, and loads them automatically. No external tools, no fork/exec.
+
+### litehttpd-confconv CLI (for migration, debugging, CI)
+
+Standalone tool for manual conversion, change detection, and hot-reload:
 
 ```bash
-# Convert a single Apache config
-litehttpd-confconv /etc/httpd/conf/httpd.conf -o /usr/local/lsws/conf/httpd_config.conf
+# One-time conversion
+litehttpd-confconv --input /etc/httpd/conf/httpd.conf \
+                   --output /usr/local/lsws/conf/apacheconf/ \
+                   portmap=80:8088,443:8443
 
-# Preview changes without writing
-litehttpd-confconv /etc/httpd/conf/httpd.conf --dry-run
+# Check if Apache config changed (for CI/scripts)
+litehttpd-confconv --check /etc/httpd/conf/httpd.conf --state /var/run/confconv.state
+# Exit: 0=changed, 1=unchanged, 2=error
+
+# Watch mode (auto-reconvert on changes)
+litehttpd-confconv --watch /etc/httpd/conf/httpd.conf --interval 60 \
+                   --output /usr/local/lsws/conf/apacheconf/
 ```
+
+Both use the same parser. `readApacheConf` is for "set and forget" production use; the CLI is for migration previews, debugging, CI pipelines, and llstack integration.
 
 ## OLS Patches
 
-Three patches extend the OLS LSIAPI for full functionality:
+Four patches extend OLS for full functionality:
 
 | Patch | Description |
 |-------|-------------|
-| `0001-lsiapi-phpconfig.patch` | PHPConfig + `set_req_header` LSIAPI extensions |
-| `0002-lsiapi-rewrite.patch` | RewriteRule engine LSIAPI extensions |
-| `0003-readapacheconf.patch` | `readApacheConf` startup integration |
+| `0001-lsiapi-phpconfig.patch` | PHPConfig LSIAPI extensions (php_value/php_flag to lsphp) |
+| `0002-lsiapi-rewrite.patch` | RewriteRule engine LSIAPI extensions (parse/exec/free) |
+| `0003-readapacheconf.patch` | Embedded Apache config parser + readApacheConf directive |
+| `0004-autoindex-403.patch` | Options -Indexes returns 403 (match Apache behavior) |
 
-Apply to OLS source before building:
+Apply to OLS 1.8.5 source before building:
 
 ```bash
-cd openlitespeed-1.8.x/
+cd openlitespeed-1.8.5/
+# Copy confconv parser/writer into OLS source tree (needed by patch 0003)
+cp /path/to/apacheconf_parser.{c,h} src/main/
+cp /path/to/ols_config_writer.{c,h} src/main/
+# Apply patches
 patch -p1 < 0001-lsiapi-phpconfig.patch
 patch -p1 < 0002-lsiapi-rewrite.patch
 patch -p1 < 0003-readapacheconf.patch
+patch -p1 < 0004-autoindex-403.patch
 ```
 
 Without patches, the module still works with stock OLS -- `php_value`/`php_flag` will use environment variable fallback, and RewriteRule will be parsed but not executed.
