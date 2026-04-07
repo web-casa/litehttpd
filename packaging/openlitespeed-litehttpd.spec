@@ -3,7 +3,7 @@
 
 Name:           openlitespeed-litehttpd
 Version:        %{ols_version}
-Release:        2.olsextra%{?dist}
+Release:        2.litehttpd%{?dist}
 Summary:        OpenLiteSpeed with LiteHTTPD patches (fully static, like official)
 AutoReqProv:    no
 
@@ -182,7 +182,7 @@ fi
 %{_unitdir}/lshttpd.service
 
 %changelog
-* Mon Apr 07 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-2.olsextra
+* Tue Apr 07 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-2.litehttpd
 - Switch to fully static build (match official LiteSpeed approach)
 - All third-party libs built from source via litespeedtech/third-party
 - No more system -devel package dependencies
@@ -190,7 +190,7 @@ fi
 - EL10 fully supported (pcre1 statically compiled)
 - Add libxcrypt-compat requirement for EL10
 
-* Sat Apr 04 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-1.olsextra
+* Sat Apr 04 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-1.litehttpd
 - OpenLiteSpeed v1.8.5 with LiteHTTPD patches
 - Patch 0001: PHPConfig LSIAPI extensions
 - Patch 0002: RewriteRule execution
