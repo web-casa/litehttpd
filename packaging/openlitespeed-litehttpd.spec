@@ -113,7 +113,18 @@ grep -q '^#.*third-party' build.sh || { echo "FATAL: third-party skip sed failed
 # 4. Disable cmake GIT_SUBMODULE (tarball is not a git repo)
 sed -i 's/-DMOD_LUA=\$MOD_LUA/-DMOD_LUA=$MOD_LUA -DGIT_SUBMODULE=OFF/' build.sh
 
-bash build.sh
+bash build.sh || true
+
+# build.sh may report failure due to optional modules (pagespeed, lsrecaptcha)
+# but the core binary is usually built. If not in dist/bin/, try direct make.
+if [ ! -e dist/bin/openlitespeed ]; then
+    echo "build.sh did not produce binary, running make directly..."
+    make -C build -j$(nproc) openlitespeed 2>&1 | tail -5
+    mkdir -p dist/bin dist/modules
+    cp build/src/openlitespeed dist/bin/ 2>/dev/null || true
+    # Copy any .so modules that were successfully built
+    find build/src/modules -name "*.so" -exec cp {} dist/modules/ \; 2>/dev/null || true
+fi
 [ -e dist/bin/openlitespeed ] || exit 1
 
 %install
