@@ -144,28 +144,29 @@ if [ "$PATCH_CHECK" -lt 1 ]; then
     echo "After rebuild: set_php_config_value: $PATCH_CHECK"
     [ "$PATCH_CHECK" -lt 1 ] && echo "FATAL: Patches still missing!" && exit 1
 fi
-# Save patched binary to a safe location (shell vars don't survive across RPM phases)
-cp dist/bin/openlitespeed /tmp/openlitespeed-patched
-echo "=== Saved patched binary to /tmp/openlitespeed-patched ==="
+# Save patched binary to build dir (not /tmp, avoids race on shared hosts)
+SAVE_DIR=%{_builddir}/litehttpd-artifacts
+mkdir -p $SAVE_DIR
+cp dist/bin/openlitespeed $SAVE_DIR/openlitespeed-patched
+echo "=== Saved patched binary ==="
 
 # ── Build litehttpd_htaccess.so module in same EL8 environment ──
-# This ensures .so ABI matches the OLS binary exactly.
+# Pinned to the same version tag for reproducibility and supply-chain safety.
 echo "=== Building litehttpd module ==="
-cd /tmp
-git clone --quiet --depth 1 https://github.com/web-casa/litehttpd.git litehttpd-module 2>&1 | tail -1 || true
-if [ -d litehttpd-module/src ]; then
-    cd litehttpd-module
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS="-O2 -DNDEBUG" 2>&1 | tail -3
-    cmake --build build --target litehttpd_htaccess -j$(nproc) 2>&1 | tail -3
-    if [ -f build/litehttpd_htaccess.so ]; then
-        strip build/litehttpd_htaccess.so
-        cp build/litehttpd_htaccess.so /tmp/litehttpd_htaccess.so
-        echo "=== Module .so built: $(ls -lh /tmp/litehttpd_htaccess.so | awk '{print $5}') ==="
-    else
-        echo "WARNING: Module build failed, .so will not be included"
-    fi
-    cd /tmp
+cd %{_builddir}
+git clone --quiet --depth 1 --branch v%{version} \
+    https://github.com/web-casa/litehttpd.git litehttpd-module 2>&1 | tail -1
+if [ ! -d litehttpd-module/src ]; then
+    # Fallback: try main branch if version tag doesn't exist yet
+    git clone --quiet --depth 1 https://github.com/web-casa/litehttpd.git litehttpd-module 2>&1 | tail -1
 fi
+cd litehttpd-module
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS="-O2 -DNDEBUG" 2>&1 | tail -3
+cmake --build build --target litehttpd_htaccess -j$(nproc) 2>&1 | tail -3
+[ -f build/litehttpd_htaccess.so ] || { echo "FATAL: Module build failed!"; exit 1; }
+strip build/litehttpd_htaccess.so
+cp build/litehttpd_htaccess.so $SAVE_DIR/litehttpd_htaccess.so
+echo "=== Module .so built: $(ls -lh $SAVE_DIR/litehttpd_htaccess.so | awk '{print $5}') ==="
 
 %install
 sed -i "s#SERVERROOT=%{install_dir}#SERVERROOT=%{buildroot}%{install_dir}#" ols.conf
@@ -211,17 +212,16 @@ find %{buildroot} -type l | while read link; do
 done
 
 # CRITICAL: Restore patched binary LAST — after all cleanup steps.
-cp -f /tmp/openlitespeed-patched %{buildroot}%{install_dir}/bin/openlitespeed
-cp -f /tmp/openlitespeed-patched dist/bin/openlitespeed 2>/dev/null || true
-cp -f /tmp/openlitespeed-patched build/src/openlitespeed 2>/dev/null || true
+SAVE_DIR=%{_builddir}/litehttpd-artifacts
+cp -f $SAVE_DIR/openlitespeed-patched %{buildroot}%{install_dir}/bin/openlitespeed
+cp -f $SAVE_DIR/openlitespeed-patched dist/bin/openlitespeed 2>/dev/null || true
+cp -f $SAVE_DIR/openlitespeed-patched build/src/openlitespeed 2>/dev/null || true
 chmod 755 %{buildroot}%{install_dir}/bin/openlitespeed
 
 # Install bundled module .so (built in same EL8 environment)
-if [ -f /tmp/litehttpd_htaccess.so ]; then
-    cp -f /tmp/litehttpd_htaccess.so %{buildroot}%{install_dir}/modules/litehttpd_htaccess.so
-    chmod 755 %{buildroot}%{install_dir}/modules/litehttpd_htaccess.so
-    echo "=== Module .so installed into RPM ==="
-fi
+cp -f $SAVE_DIR/litehttpd_htaccess.so %{buildroot}%{install_dir}/modules/litehttpd_htaccess.so
+chmod 755 %{buildroot}%{install_dir}/modules/litehttpd_htaccess.so
+echo "=== Module .so installed into RPM ==="
 P1=$(strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "set_php_config_value")
 P2=$(strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "parse_rewrite_rules")
 P3=$(strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "readApacheConf")
@@ -244,26 +244,28 @@ exit 0
 CONF=%{install_dir}/conf/httpd_config.conf
 VHCONF=%{install_dir}/conf/vhosts/Example/vhconf.conf
 
-# 1. Configure lsphp83 path (if extProcessor lsphp exists)
-if [ -f "$CONF" ]; then
+# Only apply default tuning on fresh install ($1 == 1), not upgrade ($1 == 2)
+if [ "$1" -eq 1 ] && [ -f "$CONF" ]; then
+    # 1. Configure lsphp83 path
     sed -i 's|path.*fcgi-bin/lsphp5|path                            $SERVER_ROOT/lsphp83/bin/lsphp|' "$CONF" 2>/dev/null || true
     sed -i 's|path.*fcgi-bin/lsphp|path                            $SERVER_ROOT/lsphp83/bin/lsphp|' "$CONF" 2>/dev/null || true
-    # 2. PHP worker pool (10 children for production performance)
+    # 2. PHP worker pool
     if ! grep -q "PHP_LSAPI_CHILDREN" "$CONF" 2>/dev/null; then
         sed -i '/extProcessor lsphp/,/}/s/}$/  env                     PHP_LSAPI_CHILDREN=10\n  env                     LSAPI_AVOID_FORK=200M\n}/' "$CONF" 2>/dev/null || true
     fi
 fi
 
-# 3. Auto-enable litehttpd module (bundled .so)
+# 3. Auto-enable litehttpd module (safe on fresh + upgrade)
 if [ -f "$CONF" ] && [ -f "%{install_dir}/modules/litehttpd_htaccess.so" ]; then
     if ! grep -q "litehttpd_htaccess" "$CONF" 2>/dev/null; then
         printf '\nmodule litehttpd_htaccess {\n  ls_enabled 1\n}\n' >> "$CONF"
     fi
 fi
 
-# 4. Enable rewrite + index.php in default vhost
-if [ -f "$VHCONF" ]; then
-    sed -i 's/enable 0/enable 1/g' "$VHCONF" 2>/dev/null || true
+# 4. Enable rewrite + index.php (only on fresh install)
+if [ "$1" -eq 1 ] && [ -f "$VHCONF" ]; then
+    # Narrow: only enable rewrite inside the rewrite block
+    sed -i '/^rewrite {/,/^}/s/enable 0/enable 1/' "$VHCONF" 2>/dev/null || true
     sed -i 's/indexFiles index.html/indexFiles index.php, index.html/' "$VHCONF" 2>/dev/null || true
 fi
 
