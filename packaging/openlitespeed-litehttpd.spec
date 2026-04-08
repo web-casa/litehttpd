@@ -148,6 +148,25 @@ fi
 cp dist/bin/openlitespeed /tmp/openlitespeed-patched
 echo "=== Saved patched binary to /tmp/openlitespeed-patched ==="
 
+# ── Build litehttpd_htaccess.so module in same EL8 environment ──
+# This ensures .so ABI matches the OLS binary exactly.
+echo "=== Building litehttpd module ==="
+cd /tmp
+git clone --quiet --depth 1 https://github.com/web-casa/litehttpd.git litehttpd-module 2>&1 | tail -1 || true
+if [ -d litehttpd-module/src ]; then
+    cd litehttpd-module
+    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS="-O2 -DNDEBUG" 2>&1 | tail -3
+    cmake --build build --target litehttpd_htaccess -j$(nproc) 2>&1 | tail -3
+    if [ -f build/litehttpd_htaccess.so ]; then
+        strip build/litehttpd_htaccess.so
+        cp build/litehttpd_htaccess.so /tmp/litehttpd_htaccess.so
+        echo "=== Module .so built: $(ls -lh /tmp/litehttpd_htaccess.so | awk '{print $5}') ==="
+    else
+        echo "WARNING: Module build failed, .so will not be included"
+    fi
+    cd /tmp
+fi
+
 %install
 sed -i "s#SERVERROOT=%{install_dir}#SERVERROOT=%{buildroot}%{install_dir}#" ols.conf
 sed -i -e 's:USE_LSPHP7=yes:USE_LSPHP7=no:g' install.sh
@@ -192,11 +211,17 @@ find %{buildroot} -type l | while read link; do
 done
 
 # CRITICAL: Restore patched binary LAST — after all cleanup steps.
-# Also overwrite the BUILD dir copy so brp-strip doesn't pull the stock version.
 cp -f /tmp/openlitespeed-patched %{buildroot}%{install_dir}/bin/openlitespeed
 cp -f /tmp/openlitespeed-patched dist/bin/openlitespeed 2>/dev/null || true
 cp -f /tmp/openlitespeed-patched build/src/openlitespeed 2>/dev/null || true
 chmod 755 %{buildroot}%{install_dir}/bin/openlitespeed
+
+# Install bundled module .so (built in same EL8 environment)
+if [ -f /tmp/litehttpd_htaccess.so ]; then
+    cp -f /tmp/litehttpd_htaccess.so %{buildroot}%{install_dir}/modules/litehttpd_htaccess.so
+    chmod 755 %{buildroot}%{install_dir}/modules/litehttpd_htaccess.so
+    echo "=== Module .so installed into RPM ==="
+fi
 P1=$(strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "set_php_config_value")
 P2=$(strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "parse_rewrite_rules")
 P3=$(strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "readApacheConf")
@@ -229,7 +254,14 @@ if [ -f "$CONF" ]; then
     fi
 fi
 
-# 3. Enable rewrite + index.php in default vhost
+# 3. Auto-enable litehttpd module (bundled .so)
+if [ -f "$CONF" ] && [ -f "%{install_dir}/modules/litehttpd_htaccess.so" ]; then
+    if ! grep -q "litehttpd_htaccess" "$CONF" 2>/dev/null; then
+        printf '\nmodule litehttpd_htaccess {\n  ls_enabled 1\n}\n' >> "$CONF"
+    fi
+fi
+
+# 4. Enable rewrite + index.php in default vhost
 if [ -f "$VHCONF" ]; then
     sed -i 's/enable 0/enable 1/g' "$VHCONF" 2>/dev/null || true
     sed -i 's/indexFiles index.html/indexFiles index.php, index.html/' "$VHCONF" 2>/dev/null || true
