@@ -233,21 +233,40 @@ ctest --test-dir build --output-on-failure
 
 ## Performance
 
-### Benchmark Results (v2.0.0, Linode 4C/8G EL9, WordPress, PHP 8.3)
+### Benchmark Results (v2.0.0, Linode 4C/8G EL9, WordPress, PHP 8.3, MariaDB 10.11)
 
-| Metric | Apache 2.4 | OLS-Thin | OLS-Full | Stock OLS |
-|--------|-----------|----------|----------|-----------|
-| Static RPS | 24,066 | 54,383 | **54,769** | 33,399 |
-| PHP RPS (wp-login) | 267 | 282 | **323** | 72 |
-| Static vs Apache | 1.0x | **2.3x** | **2.3x** | 1.4x |
-| PHP vs Apache | 1.0x | **1.1x** | **1.2x** | 0.3x |
-| .htaccess features | 10/10 | 9/10 | 9/10 | 4/10 |
+#### Functional Compatibility
+
+| Test | Apache | OLS-Thin | OLS-Full | Stock OLS |
+|------|--------|----------|----------|-----------|
+| WordPress Home | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 |
+| Pretty Permalink | ✅ 200 | ✅ 200 | ✅ 200 | ✅ 200 |
+| Security Headers (nosniff, X-Frame) | ✅ | ✅ | ✅ | ❌ |
+| wp-config.php blocked | ✅ 403 | ✅ 403 | ✅ 403 | ❌ 200 |
+| xmlrpc.php blocked | ✅ 403 | ✅ 403 | ✅ 403 | ❌ 405 |
+| .htaccess blocked | ✅ 403 | ✅ 403 | ✅ 403 | ✅ 403 |
+| **Pass rate** | **10/10** | **10/10** | **10/10** | **6/10** |
+
+#### Performance
+
+| Metric | Apache | OLS-Thin | OLS-Full | Stock OLS |
+|--------|--------|----------|----------|-----------|
+| Static RPS | 23,256 | 49,242 | **57,037** | 69,920 |
+| PHP RPS (wp-login) | **284** | 111 | 124 | 111 |
+| Permalink RPS | **74** | 4.2 | 2.8 | 2.1 |
+| Server RSS | 97 MB | **44 MB** | **47 MB** | 42 MB |
+| Total Memory | 793 MB | **670 MB** | 773 MB | 717 MB |
+| Process count | 8 | 9 | 11 | 19 |
 
 - **OLS-Thin**: Stock OLS + litehttpd_htaccess.so module (70+ directives)
-- **OLS-Full**: Patched OLS (4 patches) + module (80 directives, RewriteRule execution, php_value)
-- **Stock OLS**: No .htaccess support (no module)
+- **OLS-Full**: Patched OLS (4 patches, source-compiled) + module (80 directives)
+- **Stock OLS**: No .htaccess module, native vhost rewrite only
 
-> The 1 missing feature (Pretty Permalink) is not a module limitation -- OLS defaults to `rewrite { enable 0 }` in vhost config. Setting `enable 1` resolves it. See [Troubleshooting](#troubleshooting).
+**Key findings**:
+- OLS-Full static performance is **2.5x Apache** with **half the memory** (47 MB vs 97 MB)
+- OLS-Thin and OLS-Full achieve **100% Apache .htaccess compatibility** (10/10)
+- Apache PHP-FPM (`pm=static`, 10 children) outperforms OLS lsphp default fork mode -- configure `PHP_LSAPI_CHILDREN=10` to improve
+- Permalink (rewrite + PHP routing) is slow across all OLS engines (2-4 rps) -- this is an OLS architectural limitation where native rewrite + PHP routing has higher overhead than Apache mod_rewrite
 
 Previous benchmark (5-engine, 19 WP plugins): [tests/e2e/vps-5engine/benchmark-results.md](tests/e2e/vps-5engine/benchmark-results.md)
 
