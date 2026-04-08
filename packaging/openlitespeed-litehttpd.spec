@@ -127,10 +127,35 @@ if [ ! -e dist/bin/openlitespeed ]; then
 fi
 [ -e dist/bin/openlitespeed ] || exit 1
 
+# Verify patches survived the build (CRITICAL: build.sh/install.sh can overwrite)
+echo "=== Verifying patches in compiled binary ==="
+PATCH_CHECK=$(strings dist/bin/openlitespeed | grep -c "set_php_config_value")
+echo "set_php_config_value: $PATCH_CHECK occurrences"
+if [ "$PATCH_CHECK" -lt 1 ]; then
+    echo "WARNING: Patch 0001 (PHPConfig) not found in binary!"
+    echo "Attempting to rebuild from cmake..."
+    make -C build -j$(nproc) openlitespeed 2>&1 | tail -5
+    cp build/src/openlitespeed dist/bin/openlitespeed
+    PATCH_CHECK=$(strings dist/bin/openlitespeed | grep -c "set_php_config_value")
+    echo "After rebuild: set_php_config_value: $PATCH_CHECK"
+    [ "$PATCH_CHECK" -lt 1 ] && echo "FATAL: Patches still missing!" && exit 1
+fi
+# Save the verified patched binary path
+PATCHED_BIN="$(pwd)/dist/bin/openlitespeed"
+
 %install
 sed -i "s#SERVERROOT=%{install_dir}#SERVERROOT=%{buildroot}%{install_dir}#" ols.conf
 sed -i -e 's:USE_LSPHP7=yes:USE_LSPHP7=no:g' install.sh
 bash install.sh
+
+# CRITICAL FIX: install.sh may overwrite the patched binary with a stock one.
+# Force-copy the verified patched binary after install.
+if [ -n "$PATCHED_BIN" ] && [ -f "$PATCHED_BIN" ]; then
+    cp -f "$PATCHED_BIN" %{buildroot}%{install_dir}/bin/openlitespeed
+    echo "=== Patched binary restored after install.sh ==="
+    strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "set_php_config_value" | \
+        xargs -I{} echo "Final binary: set_php_config_value={}"
+fi
 
 # Systemd unit
 mkdir -p %{buildroot}%{_unitdir}
@@ -176,6 +201,26 @@ exit 0
 
 %post
 %systemd_post lshttpd.service
+
+# ── LiteHTTPD post-install tuning ──
+CONF=%{install_dir}/conf/httpd_config.conf
+VHCONF=%{install_dir}/conf/vhosts/Example/vhconf.conf
+
+# 1. Configure lsphp83 path (if extProcessor lsphp exists)
+if [ -f "$CONF" ]; then
+    sed -i 's|path.*fcgi-bin/lsphp5|path                            $SERVER_ROOT/lsphp83/bin/lsphp|' "$CONF" 2>/dev/null || true
+    sed -i 's|path.*fcgi-bin/lsphp|path                            $SERVER_ROOT/lsphp83/bin/lsphp|' "$CONF" 2>/dev/null || true
+    # 2. PHP worker pool (10 children for production performance)
+    if ! grep -q "PHP_LSAPI_CHILDREN" "$CONF" 2>/dev/null; then
+        sed -i '/extProcessor lsphp/,/}/s/}$/  env                     PHP_LSAPI_CHILDREN=10\n  env                     LSAPI_AVOID_FORK=200M\n}/' "$CONF" 2>/dev/null || true
+    fi
+fi
+
+# 3. Enable rewrite + index.php in default vhost
+if [ -f "$VHCONF" ]; then
+    sed -i 's/enable 0/enable 1/g' "$VHCONF" 2>/dev/null || true
+    sed -i 's/indexFiles index.html/indexFiles index.php, index.html/' "$VHCONF" 2>/dev/null || true
+fi
 
 %preun
 if [ $1 = 0 ]; then

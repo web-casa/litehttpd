@@ -225,6 +225,18 @@ jobs:
               find /root/rpmbuild/RPMS -name "openlitespeed-litehttpd-*.rpm" ! -name "*debug*" \
                 -exec cp {} /output/ \;
               ls -lh /output/
+
+              # Verify all 4 patches are in the installed binary
+              BIN=/root/rpmbuild/BUILDROOT/*/usr/local/lsws/bin/openlitespeed
+              if ls $BIN 1>/dev/null 2>&1; then
+                P1=$(strings $BIN | grep -c "set_php_config_value")
+                P2=$(strings $BIN | grep -c "parse_rewrite_rules")
+                P3=$(strings $BIN | grep -c "readApacheConf")
+                P4=$(strings $BIN | grep -c "indexes_disabled")
+                echo "Patch verification: P1=$P1 P2=$P2 P3=$P3 P4=$P4"
+                [ "$P1" -ge 1 ] && [ "$P2" -ge 1 ] && [ "$P3" -ge 1 ] || \
+                  { echo "FATAL: Patches missing from RPM binary!"; exit 1; }
+              fi
             '
 
       - name: Upload RPM
