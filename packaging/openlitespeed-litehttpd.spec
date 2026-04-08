@@ -88,7 +88,9 @@ patch -p1 < %{SOURCE4}
 # For offline builds, pre-populate ../third-party/ before rpmbuild.
 cd ..
 if [ ! -d third-party ]; then
-    git clone https://github.com/litespeedtech/third-party.git
+    # Pin to OLS version tag for reproducibility (falls back to HEAD if no tag)
+    git clone --depth 1 --branch v%{ols_version} https://github.com/litespeedtech/third-party.git 2>/dev/null || \
+    git clone --depth 1 https://github.com/litespeedtech/third-party.git
     mkdir -p third-party/lib64
     cd third-party/script/
     # build_ols.sh has BUILD_LIBS list. The original list includes
@@ -156,10 +158,7 @@ echo "=== Building litehttpd module ==="
 cd %{_builddir}
 git clone --quiet --depth 1 --branch v%{version} \
     https://github.com/web-casa/litehttpd.git litehttpd-module 2>&1 | tail -1
-if [ ! -d litehttpd-module/src ]; then
-    # Fallback: try main branch if version tag doesn't exist yet
-    git clone --quiet --depth 1 https://github.com/web-casa/litehttpd.git litehttpd-module 2>&1 | tail -1
-fi
+[ -d litehttpd-module/src ] || { echo "FATAL: Failed to clone litehttpd v%{version}"; exit 1; }
 cd litehttpd-module
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS="-O2 -DNDEBUG" 2>&1 | tail -3
 cmake --build build --target litehttpd_htaccess -j$(nproc) 2>&1 | tail -3
@@ -196,13 +195,10 @@ chmod 0755 %{buildroot}/etc/init.d/lsws 2>/dev/null || true
 # Mark as RPM install
 echo 'RPM' > %{buildroot}%{install_dir}/PLAT
 
-# Clean up buildroot prefix leaked into installed TEXT files
-# IMPORTANT: exclude binary files (ELF) — sed on binaries corrupts them
-grep -rl "%{buildroot}" %{buildroot} 2>/dev/null | \
-    while read f; do
-        case "$(file -b "$f")" in ELF*) continue ;; esac
-        sed -i "s#%{buildroot}##g" "$f"
-    done
+# Clean up buildroot prefix leaked into installed text files
+# -I skips binary files (ELF, gzip, images, etc.) — sed on binaries corrupts them
+grep -rlI "%{buildroot}" %{buildroot} 2>/dev/null | \
+    xargs -r sed -i "s#%{buildroot}##g"
 find %{buildroot} -type l | while read link; do
     target=$(readlink "$link")
     case "$target" in *%{buildroot}*)
