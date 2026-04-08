@@ -2,6 +2,32 @@
 
 All notable changes to litehttpd will be documented in this file.
 
+## [2.0.3] - 2026-04-09
+
+### Fixed
+- Pin litehttpd + third-party git clones to version tags (supply-chain safety)
+- Module build failure is now FATAL (was silently skipped)
+- Use %{_builddir} instead of /tmp for inter-phase artifacts (no race condition)
+- Binary-safe buildroot cleanup (grep -rlI skips all binary formats)
+- %post uses idempotent grep guards for both install AND upgrade
+- Rewrite enable sed narrowed to rewrite{} block only
+
+## [2.0.2] - 2026-04-09
+
+### Added
+- litehttpd_htaccess.so module bundled inside OLS RPM
+- RPM %post auto-enables module in httpd_config.conf
+- One RPM install = patched OLS + module + auto-configured
+
+## [2.0.1] - 2026-04-08
+
+### Fixed
+- RPM now contains all 4 patches (was only patch 0003)
+  Root cause: rpmbuild __spec_install_post replaced patched binary
+  Fix: disable post-processing + save/restore patched binary
+- All RPMs built on AlmaLinux 8 (glibc 2.28) for EL8/9/10 compatibility
+- RPM %post auto-configures rewrite enable, indexFiles, PHP workers
+
 ## [2.0.0] - 2026-04-08
 
 ### Added

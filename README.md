@@ -31,20 +31,36 @@ Apache .htaccess compatibility module for OpenLiteSpeed, plus the `litehttpd-con
 
 ## Quick Start
 
-### LiteHTTPD-Full (RPM, EL 9)
+### LiteHTTPD-Full (RPM, EL 8/9/10)
+
+One RPM installs everything: patched OLS + litehttpd module + auto-configuration.
 
 ```bash
-# Install patched OLS + module
-dnf install ./openlitespeed-litehttpd-*.$(uname -m).rpm
-dnf install ./litehttpd-*.$(uname -m).rpm
-systemctl restart lsws
+# Install patched OLS (includes bundled module, auto-configured)
+rpm -ivh openlitespeed-litehttpd-1.8.5-2.litehttpd.el9.x86_64.rpm
+
+# Install lsphp83 (from LiteSpeed repo)
+dnf install lsphp83 lsphp83-common lsphp83-mysqlnd lsphp83-gd \
+    lsphp83-mbstring lsphp83-xml lsphp83-pdo lsphp83-opcache
+
+# Restart OLS
+/usr/local/lsws/bin/lswsctrl restart
 ```
 
-### LiteHTTPD-Thin (any OLS)
+The RPM `%post` automatically:
+- Enables the litehttpd module in `httpd_config.conf`
+- Configures lsphp83 path and `PHP_LSAPI_CHILDREN=10`
+- Enables vhost rewrite (for WordPress permalinks)
+- Adds `index.php` to indexFiles
+
+### LiteHTTPD-Thin (stock OLS, any platform)
+
+For stock (unpatched) OLS. Download the `.so` matching your OS:
 
 ```bash
-# Copy module to stock OLS
-cp litehttpd_htaccess.so /usr/local/lsws/modules/
+# Download module for your platform (el8/el9/el10/ubuntu22, x86_64/aarch64)
+curl -LO https://github.com/web-casa/litehttpd/releases/latest/download/litehttpd_htaccess-el9-x86_64.so
+cp litehttpd_htaccess-el9-x86_64.so /usr/local/lsws/modules/litehttpd_htaccess.so
 
 # Enable module
 cat >> /usr/local/lsws/conf/httpd_config.conf <<'EOF'
@@ -56,15 +72,14 @@ EOF
 
 # Enable rewrite in vhost (required for WordPress permalinks)
 VHCONF=/usr/local/lsws/conf/vhosts/Example/vhconf.conf
-sed -i 's/enable                  0/enable                  1/' $VHCONF
-# Add index.php to indexFiles
+sed -i '/^rewrite {/,/^}/s/enable 0/enable 1/' $VHCONF
 sed -i 's/indexFiles index.html/indexFiles index.php, index.html/' $VHCONF
 
 # Restart OLS
 /usr/local/lsws/bin/lswsctrl restart
 ```
 
-> **Important**: OLS defaults to `rewrite { enable 0 }` in vhost config. You must set `enable 1` for `.htaccess` RewriteRule (WordPress permalinks, Laravel routing, etc.) to work. Also ensure `indexFiles` includes `index.php`.
+> **Note**: Thin mode supports 70+ directives. RewriteRule and php_value are parsed but not executed (requires Full mode patches).
 
 ## Apache Config Conversion
 
