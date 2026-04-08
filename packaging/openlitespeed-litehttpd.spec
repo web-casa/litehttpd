@@ -1,5 +1,9 @@
 %global ols_version  1.8.5
 %global install_dir  /usr/local/lsws
+%define debug_package %{nil}
+# Disable all brp-* post-install processing to prevent binary replacement
+%define __spec_install_post %{nil}
+%define __os_install_post %{nil}
 
 Name:           openlitespeed-litehttpd
 Version:        %{ols_version}
@@ -140,22 +144,14 @@ if [ "$PATCH_CHECK" -lt 1 ]; then
     echo "After rebuild: set_php_config_value: $PATCH_CHECK"
     [ "$PATCH_CHECK" -lt 1 ] && echo "FATAL: Patches still missing!" && exit 1
 fi
-# Save the verified patched binary path
-PATCHED_BIN="$(pwd)/dist/bin/openlitespeed"
+# Save patched binary to a safe location (shell vars don't survive across RPM phases)
+cp dist/bin/openlitespeed /tmp/openlitespeed-patched
+echo "=== Saved patched binary to /tmp/openlitespeed-patched ==="
 
 %install
 sed -i "s#SERVERROOT=%{install_dir}#SERVERROOT=%{buildroot}%{install_dir}#" ols.conf
 sed -i -e 's:USE_LSPHP7=yes:USE_LSPHP7=no:g' install.sh
 bash install.sh
-
-# CRITICAL FIX: install.sh may overwrite the patched binary with a stock one.
-# Force-copy the verified patched binary after install.
-if [ -n "$PATCHED_BIN" ] && [ -f "$PATCHED_BIN" ]; then
-    cp -f "$PATCHED_BIN" %{buildroot}%{install_dir}/bin/openlitespeed
-    echo "=== Patched binary restored after install.sh ==="
-    strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "set_php_config_value" | \
-        xargs -I{} echo "Final binary: set_php_config_value={}"
-fi
 
 # Systemd unit
 mkdir -p %{buildroot}%{_unitdir}
@@ -180,9 +176,13 @@ chmod 0755 %{buildroot}/etc/init.d/lsws 2>/dev/null || true
 # Mark as RPM install
 echo 'RPM' > %{buildroot}%{install_dir}/PLAT
 
-# Clean up buildroot prefix leaked into installed text files
+# Clean up buildroot prefix leaked into installed TEXT files
+# IMPORTANT: exclude binary files (ELF) — sed on binaries corrupts them
 grep -rl "%{buildroot}" %{buildroot} 2>/dev/null | \
-    xargs -r sed -i "s#%{buildroot}##g"
+    while read f; do
+        case "$(file -b "$f")" in ELF*) continue ;; esac
+        sed -i "s#%{buildroot}##g" "$f"
+    done
 find %{buildroot} -type l | while read link; do
     target=$(readlink "$link")
     case "$target" in *%{buildroot}*)
@@ -190,6 +190,19 @@ find %{buildroot} -type l | while read link; do
         ln -snf "$newtarget" "$link"
     ;; esac
 done
+
+# CRITICAL: Restore patched binary LAST — after all cleanup steps.
+# Also overwrite the BUILD dir copy so brp-strip doesn't pull the stock version.
+cp -f /tmp/openlitespeed-patched %{buildroot}%{install_dir}/bin/openlitespeed
+cp -f /tmp/openlitespeed-patched dist/bin/openlitespeed 2>/dev/null || true
+cp -f /tmp/openlitespeed-patched build/src/openlitespeed 2>/dev/null || true
+chmod 755 %{buildroot}%{install_dir}/bin/openlitespeed
+P1=$(strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "set_php_config_value")
+P2=$(strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "parse_rewrite_rules")
+P3=$(strings %{buildroot}%{install_dir}/bin/openlitespeed | grep -c "readApacheConf")
+echo "=== Final binary verification: P1=$P1 P2=$P2 P3=$P3 ==="
+[ "$P1" -ge 1 ] && [ "$P2" -ge 1 ] && [ "$P3" -ge 1 ] || \
+    { echo "FATAL: Patches missing!"; exit 1; }
 
 %pre
 getent group lsadm > /dev/null || groupadd -r lsadm
