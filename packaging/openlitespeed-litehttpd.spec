@@ -241,32 +241,40 @@ exit 0
 %systemd_post lshttpd.service
 
 # ── LiteHTTPD post-install tuning ──
+# Strategy: use grep guards (idempotent) instead of $1==1.
+# This ensures both fresh install AND upgrades get correct config,
+# while preserving user customizations (grep won't match modified values).
 CONF=%{install_dir}/conf/httpd_config.conf
 VHCONF=%{install_dir}/conf/vhosts/Example/vhconf.conf
 
-# Only apply default tuning on fresh install ($1 == 1), not upgrade ($1 == 2)
-if [ "$1" -eq 1 ] && [ -f "$CONF" ]; then
-    # 1. Configure lsphp83 path
+if [ -f "$CONF" ]; then
+    # 1. Fix lsphp path: only if still pointing to old fcgi-bin/lsphp
+    #    (user who changed to custom path won't match, so preserved)
     sed -i 's|path.*fcgi-bin/lsphp5|path                            $SERVER_ROOT/lsphp83/bin/lsphp|' "$CONF" 2>/dev/null || true
-    sed -i 's|path.*fcgi-bin/lsphp|path                            $SERVER_ROOT/lsphp83/bin/lsphp|' "$CONF" 2>/dev/null || true
-    # 2. PHP worker pool
+    sed -i 's|path.*fcgi-bin/lsphp\b|path                            $SERVER_ROOT/lsphp83/bin/lsphp|' "$CONF" 2>/dev/null || true
+
+    # 2. PHP worker pool: only add if not present (grep guard)
     if ! grep -q "PHP_LSAPI_CHILDREN" "$CONF" 2>/dev/null; then
         sed -i '/extProcessor lsphp/,/}/s/}$/  env                     PHP_LSAPI_CHILDREN=10\n  env                     LSAPI_AVOID_FORK=200M\n}/' "$CONF" 2>/dev/null || true
     fi
-fi
 
-# 3. Auto-enable litehttpd module (safe on fresh + upgrade)
-if [ -f "$CONF" ] && [ -f "%{install_dir}/modules/litehttpd_htaccess.so" ]; then
-    if ! grep -q "litehttpd_htaccess" "$CONF" 2>/dev/null; then
-        printf '\nmodule litehttpd_htaccess {\n  ls_enabled 1\n}\n' >> "$CONF"
+    # 3. Auto-enable litehttpd module: only if not already mentioned (grep guard)
+    if [ -f "%{install_dir}/modules/litehttpd_htaccess.so" ]; then
+        if ! grep -q "litehttpd_htaccess" "$CONF" 2>/dev/null; then
+            printf '\nmodule litehttpd_htaccess {\n  ls_enabled 1\n}\n' >> "$CONF"
+        fi
     fi
 fi
 
-# 4. Enable rewrite + index.php (only on fresh install)
-if [ "$1" -eq 1 ] && [ -f "$VHCONF" ]; then
-    # Narrow: only enable rewrite inside the rewrite block
+if [ -f "$VHCONF" ]; then
+    # 4. Enable rewrite: only inside "rewrite {" block, only if still "enable 0"
+    #    (user who set enable 1 already won't be touched)
     sed -i '/^rewrite {/,/^}/s/enable 0/enable 1/' "$VHCONF" 2>/dev/null || true
-    sed -i 's/indexFiles index.html/indexFiles index.php, index.html/' "$VHCONF" 2>/dev/null || true
+
+    # 5. Add index.php to indexFiles: only if not already present
+    if ! grep -q "index.php" "$VHCONF" 2>/dev/null; then
+        sed -i 's/indexFiles index.html/indexFiles index.php, index.html/' "$VHCONF" 2>/dev/null || true
+    fi
 fi
 
 %preun
