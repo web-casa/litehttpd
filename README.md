@@ -54,9 +54,17 @@ module litehttpd_htaccess {
 }
 EOF
 
+# Enable rewrite in vhost (required for WordPress permalinks)
+VHCONF=/usr/local/lsws/conf/vhosts/Example/vhconf.conf
+sed -i 's/enable                  0/enable                  1/' $VHCONF
+# Add index.php to indexFiles
+sed -i 's/indexFiles index.html/indexFiles index.php, index.html/' $VHCONF
+
 # Restart OLS
 /usr/local/lsws/bin/lswsctrl restart
 ```
+
+> **Important**: OLS defaults to `rewrite { enable 0 }` in vhost config. You must set `enable 1` for `.htaccess` RewriteRule (WordPress permalinks, Laravel routing, etc.) to work. Also ensure `indexFiles` includes `index.php`.
 
 ## Apache Config Conversion
 
@@ -225,17 +233,23 @@ ctest --test-dir build --output-on-failure
 
 ## Performance
 
-### Benchmark Results (4C/8G, WordPress 6.9 + 19 plugins)
+### Benchmark Results (v2.0.0, Linode 4C/8G EL9, WordPress, PHP 8.3)
 
-| Metric | Apache 2.4 | LiteHTTPD | Stock OLS | LSWS 6.3.5 |
-|--------|-----------|-----------|-----------|------------|
-| Static RPS (no htaccess) | 11,082 | 22,104 | 23,242 | 24,786 |
-| Static RPS (200-line htaccess) | 10,618 | 21,960 | 18,883 | 20,306 |
-| .htaccess overhead | -4.2% | **-0.7%** | -18.8% | -18.1% |
-| Baseline memory | 969 MB | 676 MB | 663 MB | 819 MB |
-| .htaccess compatibility | 100% | **90%+** | 44% | 100% |
+| Metric | Apache 2.4 | OLS-Thin | OLS-Full | Stock OLS |
+|--------|-----------|----------|----------|-----------|
+| Static RPS | 24,066 | 54,383 | **54,769** | 33,399 |
+| PHP RPS (wp-login) | 267 | 282 | **323** | 72 |
+| Static vs Apache | 1.0x | **2.3x** | **2.3x** | 1.4x |
+| PHP vs Apache | 1.0x | **1.1x** | **1.2x** | 0.3x |
+| .htaccess features | 10/10 | 9/10 | 9/10 | 4/10 |
 
-Full results: [tests/e2e/vps-5engine/benchmark-results.md](tests/e2e/vps-5engine/benchmark-results.md)
+- **OLS-Thin**: Stock OLS + litehttpd_htaccess.so module (70+ directives)
+- **OLS-Full**: Patched OLS (4 patches) + module (80 directives, RewriteRule execution, php_value)
+- **Stock OLS**: No .htaccess support (no module)
+
+> The 1 missing feature (Pretty Permalink) is not a module limitation -- OLS defaults to `rewrite { enable 0 }` in vhost config. Setting `enable 1` resolves it. See [Troubleshooting](#troubleshooting).
+
+Previous benchmark (5-engine, 19 WP plugins): [tests/e2e/vps-5engine/benchmark-results.md](tests/e2e/vps-5engine/benchmark-results.md)
 
 ### PHP Performance Tuning
 
@@ -258,6 +272,45 @@ extProcessor lsphp {
 | Apache PHP-FPM (pm=dynamic) | ~16 rps | Pre-forked pool (reference) |
 
 > **Note**: Stock OLS and LSWS may show very high PHP RPS (20K-35K) in benchmarks due to built-in page caching (LSCache). This is the cache module returning stored responses, not actual PHP execution. LiteHTTPD does not include a page cache module — use LiteSpeed Cache WordPress plugin with OLS native cache module for equivalent behavior.
+
+## Troubleshooting
+
+### WordPress permalinks return 404
+
+OLS defaults to `rewrite { enable 0 }` in vhost config. The `.htaccess` RewriteRule is parsed by litehttpd but OLS's rewrite engine won't execute it unless vhost-level rewrite is enabled.
+
+**Fix**: Edit your vhost config (e.g., `/usr/local/lsws/conf/vhosts/Example/vhconf.conf`):
+
+```
+rewrite {
+  enable                  1    # <-- change from 0 to 1
+  logLevel                0
+}
+```
+
+Then restart OLS: `/usr/local/lsws/bin/lswsctrl restart`
+
+### PHP files return 403 "access denied"
+
+OLS needs a `scriptHandler` mapping PHP to lsphp. Check that your `httpd_config.conf` has:
+
+```
+scriptHandler {
+    add lsapi:lsphp php    # name must match extProcessor name
+}
+```
+
+And the `extProcessor lsphp` path points to the correct lsphp binary (e.g., `$SERVER_ROOT/lsphp83/bin/lsphp`).
+
+### Directory index returns 404 (e.g., /wordpress/)
+
+OLS default `indexFiles` only includes `index.html`. Add `index.php`:
+
+```
+index {
+    indexFiles index.php, index.html
+}
+```
 
 ## Project
 
