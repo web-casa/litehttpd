@@ -154,17 +154,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # All three built on EL8 (glibc 2.28) — matching official LiteSpeed.
+          # This ensures the binary works on EL8/9/10 (only needs GLIBC_2.28).
+          # Official LiteSpeed uses RHEL8 build host for all distros.
           - container: almalinux:8
             dist_tag: el8
             pkg_cmd: yum
-          - container: almalinux:9
+          - container: almalinux:8
             dist_tag: el9
-            pkg_cmd: dnf
-          # EL10: build on EL9 container (same as official LiteSpeed approach
-          # — they compile on RHEL8 and repackage for all distros)
-          - container: almalinux:9
+            pkg_cmd: yum
+          - container: almalinux:8
             dist_tag: el10
-            pkg_cmd: dnf
+            pkg_cmd: yum
 
     runs-on: ubuntu-22.04
     timeout-minutes: 120

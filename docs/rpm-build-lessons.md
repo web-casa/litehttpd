@@ -172,3 +172,53 @@ P1=$(strings %{buildroot}/.../openlitespeed | grep -c "set_php_config_value")
 6. **RPM spec 注释中的 `%install` 会被当作 section 标记** — 不要在注释里写 RPM 关键字
 7. **`$变量` 不在 `%build` 和 `%install` 之间共享** — 用 `/tmp` 文件传递
 8. **glibc versionlock 在容器里经常不生效** — 需要固定基础镜像版本
+
+---
+
+## 问题 10 详解：GLIBC 版本不兼容
+
+### 现象
+
+在 AlmaLinux 9 VPS（glibc 2.34）上安装 RPM 后：
+
+```
+./litespeed: /lib64/libc.so.6: version `GLIBC_2.35' not found
+```
+
+### 根因
+
+CI 的 `almalinux:9` Docker 镜像（latest tag）可能自动拉到 9.5+，其 glibc 为 2.35。
+编译出的 binary 引用了 `GLIBC_2.35` 符号，但用户 VPS 可能是 9.2/9.3（glibc 2.34）。
+
+`dnf versionlock` 在 Docker 容器内不可靠——容器创建时 glibc 已经是 2.35，lock 只能防止升级不能降级。
+
+### 官方做法
+
+逆向发现官方 OLS binary 只需要 `GLIBC_2.11`（极低），因为他们在 **RHEL 8**（glibc 2.28）上编译。
+
+```
+$ readelf -V official-ols-binary | grep GLIBC_ | sort -uV
+GLIBC_2.2.5
+GLIBC_2.3
+GLIBC_2.7
+GLIBC_2.10
+GLIBC_2.11
+```
+
+### 最终修复
+
+**所有 EL8/9/10 RPM 都在 AlmaLinux 8 容器中编译**（跟官方一致）：
+
+```yaml
+# release.yml
+matrix:
+  include:
+    - container: almalinux:8   # glibc 2.28
+      dist_tag: el8
+    - container: almalinux:8   # same binary, different RPM tag
+      dist_tag: el9
+    - container: almalinux:8   # same binary, different RPM tag
+      dist_tag: el10
+```
+
+这样 binary 只需要 `GLIBC_2.28`，在 EL8/9/10 上都能运行。不再需要 versionlock。
