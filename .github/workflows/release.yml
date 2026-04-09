@@ -290,11 +290,10 @@ jobs:
 
             | Package | Description |
             |---------|-------------|
-            | `litehttpd-*.el9.x86_64.rpm` | .htaccess module (EL 9) |
-            | `litehttpd-*.el9.aarch64.rpm` | .htaccess module (EL 9 ARM64) |
-            | `openlitespeed-litehttpd-*.el8.x86_64.rpm` | Patched OLS (EL 8) |
-            | `openlitespeed-litehttpd-*.el9.x86_64.rpm` | Patched OLS (EL 9) |
-            | `openlitespeed-litehttpd-*.el10.x86_64.rpm` | Patched OLS (EL 10) |
+            | `openlitespeed-litehttpd-*.el8.x86_64.rpm` | Patched OLS + bundled module (EL 8) |
+            | `openlitespeed-litehttpd-*.el9.x86_64.rpm` | Patched OLS + bundled module (EL 9) |
+            | `openlitespeed-litehttpd-*.el10.x86_64.rpm` | Patched OLS + bundled module (EL 10) |
+            | `litehttpd-*.el9.x86_64.rpm` | Standalone module RPM (EL 9) |
 
             ```bash
             # Install both (replaces stock OLS, enables php_value + RewriteRule)
@@ -309,12 +308,10 @@ jobs:
 
             | File | Platform |
             |------|----------|
+            | `litehttpd_htaccess-el8-x86_64.so` | EL 8 x86_64 (also for OLS RPM) |
             | `litehttpd_htaccess-el9-x86_64.so` | EL 9 x86_64 |
-            | `litehttpd_htaccess-el9-aarch64.so` | EL 9 ARM64 |
             | `litehttpd_htaccess-el10-x86_64.so` | EL 10 x86_64 |
-            | `litehttpd_htaccess-el10-aarch64.so` | EL 10 ARM64 |
             | `litehttpd_htaccess-ubuntu22-x86_64.so` | Ubuntu 22.04+, Debian 12+ x86_64 |
-            | `litehttpd_htaccess-ubuntu22-aarch64.so` | Ubuntu 22.04+, Debian 12+ ARM64 |
 
             ### OLS Patches
 
@@ -350,14 +347,30 @@ jobs:
           sudo apt-get update && sudo apt-get install -y createrepo-c rpm gnupg2
           pip install awscli
 
-      - name: Import GPG key
+      - name: Import GPG key and configure signing
         run: |
+          # Import key into isolated GNUPGHOME
+          export GNUPGHOME=$(mktemp -d)
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-          echo "%_gpg_name WebCasaRPM" > ~/.rpmmacros
-          echo "%__gpg_sign_cmd %{__gpg} gpg --batch --yes --no-armor --pinentry-mode loopback --passphrase '${{ secrets.GPG_PASSPHRASE }}' -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}" >> ~/.rpmmacros
+
+          # Configure gpg-agent for passphrase (avoids command-line exposure)
+          echo "allow-loopback-pinentry" >> "$GNUPGHOME/gpg-agent.conf"
+          gpg-connect-agent reloadagent /bye 2>/dev/null || true
+
+          # Save GNUPGHOME for subsequent steps
+          echo "GNUPGHOME=$GNUPGHOME" >> $GITHUB_ENV
+
+          # RPM signing macros (passphrase via gpg-agent, not command line)
+          cat > ~/.rpmmacros << 'MACROS'
+          %_gpg_name WebCasaRPM
+          %__gpg_sign_cmd %{__gpg} gpg --batch --yes --no-armor --pinentry-mode loopback -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}
+          MACROS
 
       - name: Build repository structure
         run: |
+          # Feed passphrase to gpg-agent (once, not per-file)
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --sign --detach-sign /dev/null 2>/dev/null || true
+
           # Collect all RPMs
           mkdir -p repo-staging
           find artifacts -name "*.rpm" -exec cp {} repo-staging/ \;
@@ -367,10 +380,7 @@ jobs:
           echo "=== Signing RPMs ==="
           for rpm_file in repo-staging/*.rpm; do
             echo "Signing: $(basename $rpm_file)"
-            rpm --addsign "$rpm_file" <<< "${{ secrets.GPG_PASSPHRASE }}" 2>&1 | tail -1 || \
-              rpmsign --addsign --define "_gpg_name WebCasaRPM" \
-                --define "__gpg_sign_cmd %{__gpg} gpg --batch --yes --no-armor --pinentry-mode loopback --passphrase '${{ secrets.GPG_PASSPHRASE }}' -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}" \
-                "$rpm_file" 2>&1 | tail -1
+            rpmsign --addsign "$rpm_file" 2>&1 | tail -1
           done
 
           # Create per-EL-version directories
@@ -383,6 +393,11 @@ jobs:
             fi
             # Generate repodata
             createrepo_c "repo/$dist/x86_64/"
+
+            # Sign repomd.xml (enables repo_gpgcheck=1 on client)
+            gpg --batch --yes --detach-sign --armor \
+              "repo/$dist/x86_64/repodata/repomd.xml"
+
             echo "Created repo: $dist/x86_64/ ($(ls repo/$dist/x86_64/RPMS/*.rpm 2>/dev/null | wc -l) RPMs)"
           done
 
@@ -392,6 +407,9 @@ jobs:
 
           echo "=== Repository structure ==="
           find repo -type f | sort
+
+          # Cleanup GNUPGHOME
+          rm -rf "$GNUPGHOME"
 
       - name: Upload to Cloudflare R2
         env:

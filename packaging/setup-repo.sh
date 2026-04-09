@@ -18,12 +18,19 @@ else
     exit 1
 fi
 
+ARCH=$(uname -m)
+
 if [ "$MAJOR" != "8" ] && [ "$MAJOR" != "9" ] && [ "$MAJOR" != "10" ]; then
     echo "Error: Unsupported EL version: $MAJOR (supported: 8, 9, 10)"
     exit 1
 fi
 
-echo "Detected: EL${MAJOR} $(uname -m)"
+if [ "$ARCH" != "x86_64" ]; then
+    echo "Error: Unsupported architecture: $ARCH (only x86_64 is currently supported)"
+    exit 1
+fi
+
+echo "Detected: EL${MAJOR} ${ARCH}"
 
 # Import GPG key
 echo "Importing GPG key..."
@@ -33,8 +40,9 @@ rpm --import "$GPG_KEY_URL"
 cat > /etc/yum.repos.d/litehttpd.repo << EOF
 [litehttpd]
 name=LiteHTTPD - EL${MAJOR}
-baseurl=${REPO_URL}/el${MAJOR}/x86_64/
+baseurl=${REPO_URL}/el${MAJOR}/${ARCH}/
 gpgcheck=1
+repo_gpgcheck=1
 gpgkey=${GPG_KEY_URL}
 enabled=1
 EOF
