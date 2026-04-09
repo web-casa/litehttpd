@@ -360,10 +360,14 @@ jobs:
           # Save GNUPGHOME for subsequent steps
           echo "GNUPGHOME=$GNUPGHOME" >> $GITHUB_ENV
 
-          # RPM signing macros (passphrase via gpg-agent, not command line)
-          cat > ~/.rpmmacros << 'MACROS'
+          # Write passphrase to a temp file for gpg (avoids command-line exposure)
+          echo "${{ secrets.GPG_PASSPHRASE }}" > "$GNUPGHOME/passphrase"
+          chmod 600 "$GNUPGHOME/passphrase"
+
+          # RPM signing macros
+          cat > ~/.rpmmacros << MACROS
           %_gpg_name WebCasaRPM
-          %__gpg_sign_cmd %{__gpg} gpg --batch --yes --no-armor --pinentry-mode loopback -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}
+          %__gpg_sign_cmd %{__gpg} gpg --batch --yes --no-armor --pinentry-mode loopback --passphrase-file $GNUPGHOME/passphrase -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}
           MACROS
 
       - name: Build repository structure
@@ -395,7 +399,9 @@ jobs:
             createrepo_c "repo/$dist/x86_64/"
 
             # Sign repomd.xml (enables repo_gpgcheck=1 on client)
-            gpg --batch --yes --detach-sign --armor \
+            gpg --batch --yes --pinentry-mode loopback \
+              --passphrase-file "$GNUPGHOME/passphrase" \
+              --detach-sign --armor \
               "repo/$dist/x86_64/repodata/repomd.xml"
 
             echo "Created repo: $dist/x86_64/ ($(ls repo/$dist/x86_64/RPMS/*.rpm 2>/dev/null | wc -l) RPMs)"
