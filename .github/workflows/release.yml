@@ -154,12 +154,21 @@ jobs:
             https://github.com/litespeedtech/openlitespeed.git /tmp/ols-src
           cd /tmp/ols-src && tar czf /tmp/v1.8.5.tar.gz --exclude=.git --transform="flags=r;s,^\.,openlitespeed-1.8.5," .
 
+      - name: Create module source tarball
+        run: |
+          # Package the litehttpd repo as tarball for Source9 (no git clone inside Docker)
+          tar czf /tmp/litehttpd-module-src.tar.gz \
+            --transform="flags=r;s,^\.,litehttpd-module," \
+            --exclude=.git --exclude=build --exclude=node_modules \
+            -C ${{ github.workspace }} .
+
       - name: Build RPM
         run: |
           mkdir -p output
           docker run --rm \
             -v ${{ github.workspace }}:/src:ro \
             -v /tmp/v1.8.5.tar.gz:/tmp/v1.8.5.tar.gz:ro \
+            -v /tmp/litehttpd-module-src.tar.gz:/tmp/litehttpd-module-src.tar.gz:ro \
             -v ${{ github.workspace }}/output:/output \
             ${{ matrix.container }} \
             bash -c '
@@ -196,6 +205,7 @@ jobs:
               cp /src/tools/apacheconf_parser.h /root/rpmbuild/SOURCES/
               cp /src/tools/ols_config_writer.c /root/rpmbuild/SOURCES/
               cp /src/tools/ols_config_writer.h /root/rpmbuild/SOURCES/
+              cp /tmp/litehttpd-module-src.tar.gz /root/rpmbuild/SOURCES/
               rpmbuild -bb --define "_topdir /root/rpmbuild" \
                 --define "dist .${{ matrix.dist_tag }}" \
                 /src/packaging/openlitespeed-litehttpd.spec

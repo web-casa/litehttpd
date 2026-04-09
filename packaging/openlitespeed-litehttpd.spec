@@ -23,6 +23,8 @@ Source5:        apacheconf_parser.c
 Source6:        apacheconf_parser.h
 Source7:        ols_config_writer.c
 Source8:        ols_config_writer.h
+# Module source tarball (created by CI from the repo checkout)
+Source9:        litehttpd-module-src.tar.gz
 
 # ── Build tools only — all libraries compiled from third-party sources ──
 # Matches official LiteSpeed approach: NO system -devel packages.
@@ -154,12 +156,11 @@ cp dist/bin/openlitespeed $SAVE_DIR/openlitespeed-patched
 echo "=== Saved patched binary ==="
 
 # ── Build litehttpd_htaccess.so module in same EL8 environment ──
-# Pinned to the same version tag for reproducibility and supply-chain safety.
+# Source9 is a tarball of the litehttpd repo (created by CI, no git clone needed)
 echo "=== Building litehttpd module ==="
 cd %{_builddir}
-git clone --quiet --depth 1 --branch v%{litehttpd_version} \
-    https://github.com/web-casa/litehttpd-private.git litehttpd-module 2>&1 | tail -1
-[ -d litehttpd-module/src ] || { echo "FATAL: Failed to clone litehttpd v%{litehttpd_version}"; exit 1; }
+tar xzf %{SOURCE9} -C . 2>/dev/null || true
+[ -d litehttpd-module/src ] || { echo "FATAL: litehttpd-module-src.tar.gz missing or invalid"; exit 1; }
 cd litehttpd-module
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS="-O2 -DNDEBUG" 2>&1 | tail -3
 cmake --build build --target litehttpd_htaccess -j$(nproc) 2>&1 | tail -3
