@@ -8,10 +8,10 @@ import { Steps } from '@astrojs/starlight/components';
 ## WordPress on LiteHTTPD (Full)
 
 <Steps>
-1. Install LiteHTTPD (RPM):
+1. Install LiteHTTPD (RPM repo):
    ```bash
-   dnf install ./openlitespeed-litehttpd-*.rpm
-   dnf install ./litehttpd-*.rpm
+   curl -s https://rpms.litehttpd.com/setup.sh | bash
+   dnf install openlitespeed-litehttpd
    systemctl restart lsws
    ```
 

@@ -47,11 +47,13 @@ Without this patch, RewriteRule directives are parsed but not executed. The modu
 
 ## Patch 0003: readApacheConf Startup Hook
 
-Adds a `readApacheConf` directive to OLS plainconf that triggers `litehttpd-confconv` at startup:
+Adds a `readApacheConf` directive to OLS plainconf that embeds the Apache configuration parser directly in the OLS process (in-process, not fork/exec):
 
 ```
 readApacheConf /etc/httpd/conf/httpd.conf portmap=80:8088,443:8443
 ```
+
+The confconv parser sources are bundled as Source5-9 in the RPM and compiled into the OLS binary.
 
 **Files modified**: `src/main/plainconf.cpp`
 
@@ -64,6 +66,8 @@ When `.htaccess` contains `Options -Indexes` and a directory has no index file, 
 The patch scans `.htaccess` in `HttpReq::processPath()` at the contextMap stage, parsing `Options` tokens with proper `+Indexes`/`-Indexes` precedence.
 
 ## Applying Patches
+
+All 4 patches are pre-applied and verified in the `openlitespeed-litehttpd` RPM binary. For manual builds:
 
 ```bash
 cd /path/to/openlitespeed-1.8.5

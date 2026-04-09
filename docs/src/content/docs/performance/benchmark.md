@@ -5,7 +5,7 @@ description: Performance comparison across 4 web server engines
 
 
 :::note
-All benchmark data on this page was collected using LiteHTTPD (Full edition) with all four OLS patches applied.
+All benchmark data on this page was collected using LiteHTTPD v2.0.3 (Full edition) RPM with all four OLS patches applied.
 :::
 
 ## Test Environment
@@ -18,6 +18,17 @@ All benchmark data on this page was collected using LiteHTTPD (Full edition) wit
 | Database | MariaDB 10.11.15 |
 | WordPress | 6.9.4 + 19 plugins |
 | Benchmark | `ab -n 5000 -c 50 -k`, localhost, 3 rounds median |
+
+## Headline Numbers
+
+| Metric | Value |
+|--------|-------|
+| Static RPS (best) | **58,891** (2.5x Apache) |
+| PHP RPS (WordPress) | **292** |
+| Apache compatibility | **10/10** |
+| WordPress plugin compatibility | **9/9** |
+| Total memory | 689 MB |
+| RSS | 449 MB |
 
 ## Throughput (Requests/sec)
 
@@ -48,7 +59,8 @@ Stock OLS numbers for directive tests are inflated because it does not actually 
 
 | Metric | Apache | LiteHTTPD | Stock OLS | LSWS |
 |--------|--------|-----------|-----------|------|
-| Baseline memory | 969 MB | **676 MB** | 663 MB | 819 MB |
+| Total memory | 969 MB | **689 MB** | 663 MB | 819 MB |
+| RSS | -- | **449 MB** | -- | -- |
 | Module overhead | -- | +13 MB | -- | +156 MB |
 | Peak CPU (static) | 98.5% | **66.0%** | 48.1% | 38.8% |
 | RPS/CPU% efficiency | 525 | **1,324** | 1,890 | 1,265 |

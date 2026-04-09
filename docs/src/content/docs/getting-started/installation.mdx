@@ -15,22 +15,35 @@ LiteHTTPD (Full) is the default and recommended edition. It includes the patched
 - Linux x86_64 or ARM64
 
 <Tabs>
-<TabItem label="RPM (EL 9) -- recommended">
+<TabItem label="RPM Repo (EL 9) -- recommended">
 
 <Steps>
-1. Download the RPM packages from the [Releases](https://github.com/web-casa/litehttpd-private/releases) page
+1. Add the LiteHTTPD RPM repository and install:
+   ```bash
+   curl -s https://rpms.litehttpd.com/setup.sh | bash
+   dnf install openlitespeed-litehttpd
+   ```
 
-2. Install the patched OLS binary:
+   This single RPM includes the patched OLS binary, the bundled htaccess module, and auto-configuration. Packages are GPG signed.
+
+2. Restart OLS:
+   ```bash
+   systemctl restart lsws
+   ```
+</Steps>
+
+</TabItem>
+<TabItem label="Manual RPM download">
+
+<Steps>
+1. Download the RPM package from the [Releases](https://github.com/web-casa/litehttpd-private/releases) page
+
+2. Install:
    ```bash
    dnf install ./openlitespeed-litehttpd-*.rpm
    ```
 
-3. Install the htaccess module:
-   ```bash
-   dnf install ./litehttpd-*.rpm
-   ```
-
-4. Restart OLS:
+3. Restart OLS:
    ```bash
    systemctl restart lsws
    ```

@@ -10,9 +10,9 @@ LiteHTTPD comes in two editions. Both are free and open source.
 | | LiteHTTPD-Thin | LiteHTTPD-Full |
 |-|---------------|----------------|
 | **What it is** | `litehttpd_htaccess.so` module only | Module + Patched OpenLiteSpeed |
-| **Install on** | Stock (unmodified) OLS | Custom-built OLS with 4 patches |
-| **Install time** | 1 minute (copy .so) | 10-15 minutes (compile OLS) |
-| **OLS binary** | Unchanged | Replaced with patched version |
+| **Install on** | Stock (unmodified) OLS | One RPM from rpms.litehttpd.com |
+| **Install time** | 1 minute (copy .so) | ~1 minute via RPM repo |
+| **OLS binary** | Unchanged | Replaced with patched version (module bundled) |
 
 ## Feature Comparison
 
@@ -80,12 +80,12 @@ echo 'module litehttpd_htaccess { ls_enabled 1 }' >> /usr/local/lsws/conf/httpd_
 /usr/local/lsws/bin/lswsctrl restart
 ```
 
-### LiteHTTPD-Full (RPM)
+### LiteHTTPD-Full (RPM repo -- recommended)
 
 ```bash
-# Install patched OLS + module
-dnf install ./openlitespeed-litehttpd-*.rpm
-dnf install ./litehttpd-*.rpm
+# Add repo and install (patched OLS + bundled module)
+curl -s https://rpms.litehttpd.com/setup.sh | bash
+dnf install openlitespeed-litehttpd
 systemctl restart lsws
 ```
 

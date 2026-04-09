@@ -10,9 +10,9 @@ LiteHTTPD 提供两个版本，均为免费开源。
 | | LiteHTTPD-Thin | LiteHTTPD-Full |
 |-|---------------|----------------|
 | **组成** | 仅 `litehttpd_htaccess.so` 模块 | 模块 + 打补丁的 OpenLiteSpeed |
-| **安装目标** | 原生（未修改的）OLS | 应用 4 个补丁的定制 OLS |
-| **安装时间** | 1 分钟（复制 .so） | 10-15 分钟（编译 OLS） |
-| **OLS 二进制** | 不变 | 替换为打补丁版本 |
+| **安装目标** | 原生（未修改的）OLS | 通过 rpms.litehttpd.com 一键安装 |
+| **安装时间** | 1 分钟（复制 .so） | 约 1 分钟（RPM 仓库安装） |
+| **OLS 二进制** | 不变 | 替换为打补丁版本（模块已内置） |
 
 ## 功能对比
 
@@ -75,11 +75,12 @@ echo 'module litehttpd_htaccess { ls_enabled 1 }' >> /usr/local/lsws/conf/httpd_
 /usr/local/lsws/bin/lswsctrl restart
 ```
 
-### LiteHTTPD-Full (RPM)
+### LiteHTTPD-Full（RPM 仓库 -- 推荐）
 
 ```bash
-dnf install ./openlitespeed-litehttpd-*.rpm
-dnf install ./litehttpd-*.rpm
+# 添加仓库并安装（打补丁的 OLS + 内置模块）
+curl -s https://rpms.litehttpd.com/setup.sh | bash
+dnf install openlitespeed-litehttpd
 systemctl restart lsws
 ```
 

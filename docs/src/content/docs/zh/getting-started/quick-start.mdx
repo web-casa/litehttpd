@@ -8,10 +8,10 @@ import { Steps } from '@astrojs/starlight/components';
 ## 在 LiteHTTPD（完整版）上运行 WordPress
 
 <Steps>
-1. 安装 LiteHTTPD（RPM）：
+1. 安装 LiteHTTPD（RPM 仓库）：
    ```bash
-   dnf install ./openlitespeed-litehttpd-*.rpm
-   dnf install ./litehttpd-*.rpm
+   curl -s https://rpms.litehttpd.com/setup.sh | bash
+   dnf install openlitespeed-litehttpd
    systemctl restart lsws
    ```
 

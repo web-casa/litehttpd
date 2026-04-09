@@ -21,7 +21,7 @@ export default defineConfig({
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/web-casa/litehttpd",
+          href: "https://github.com/web-casa/litehttpd-private",
         },
       ],
       customCss: ["./src/styles/custom.css"],

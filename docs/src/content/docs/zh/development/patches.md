@@ -47,11 +47,13 @@ void (*free_rewrite_rules)(handle);
 
 ## 补丁 0003：readApacheConf 启动钩子
 
-向 OLS plainconf 添加 `readApacheConf` 指令，在启动时触发 `litehttpd-confconv`：
+向 OLS plainconf 添加 `readApacheConf` 指令，将 Apache 配置解析器直接嵌入 OLS 进程（进程内执行，非 fork/exec）：
 
 ```
 readApacheConf /etc/httpd/conf/httpd.conf portmap=80:8088,443:8443
 ```
+
+confconv 解析器源代码作为 Source5-9 打包在 RPM 中，编译进 OLS 二进制文件。
 
 **修改的文件**：`src/main/plainconf.cpp`
 
@@ -64,6 +66,8 @@ readApacheConf /etc/httpd/conf/httpd.conf portmap=80:8088,443:8443
 该补丁在 `HttpReq::processPath()` 的 contextMap 阶段扫描 `.htaccess`，使用正确的 `+Indexes`/`-Indexes` 优先级解析 `Options` 令牌。
 
 ## 应用补丁
+
+全部 4 个补丁已在 `openlitespeed-litehttpd` RPM 二进制中预先应用并验证。手动构建方式：
 
 ```bash
 cd /path/to/openlitespeed-1.8.5

@@ -15,22 +15,35 @@ LiteHTTPD（完整版）是默认且推荐的版本。它包含打补丁的 OLS 
 - Linux x86_64 或 ARM64
 
 <Tabs>
-<TabItem label="RPM (EL 9) -- 推荐">
+<TabItem label="RPM 仓库 (EL 9) -- 推荐">
+
+<Steps>
+1. 添加 LiteHTTPD RPM 仓库并安装：
+   ```bash
+   curl -s https://rpms.litehttpd.com/setup.sh | bash
+   dnf install openlitespeed-litehttpd
+   ```
+
+   一个 RPM 包含打补丁的 OLS 二进制文件、内置的 htaccess 模块和自动配置。软件包已 GPG 签名。
+
+2. 重启 OLS：
+   ```bash
+   systemctl restart lsws
+   ```
+</Steps>
+
+</TabItem>
+<TabItem label="手动下载 RPM">
 
 <Steps>
 1. 从 [Releases](https://github.com/web-casa/litehttpd-private/releases) 页面下载 RPM 包
 
-2. 安装打补丁的 OLS 二进制文件：
+2. 安装：
    ```bash
    dnf install ./openlitespeed-litehttpd-*.rpm
    ```
 
-3. 安装 htaccess 模块：
-   ```bash
-   dnf install ./litehttpd-*.rpm
-   ```
-
-4. 重启 OLS：
+3. 重启 OLS：
    ```bash
    systemctl restart lsws
    ```
