@@ -1,4 +1,5 @@
 %global ols_version  1.8.5
+%global litehttpd_version 2.0.3
 %global install_dir  /usr/local/lsws
 %define debug_package %{nil}
 # Disable all brp-* post-install processing to prevent binary replacement
@@ -156,9 +157,9 @@ echo "=== Saved patched binary ==="
 # Pinned to the same version tag for reproducibility and supply-chain safety.
 echo "=== Building litehttpd module ==="
 cd %{_builddir}
-git clone --quiet --depth 1 --branch v%{version} \
+git clone --quiet --depth 1 --branch v%{litehttpd_version} \
     https://github.com/web-casa/litehttpd.git litehttpd-module 2>&1 | tail -1
-[ -d litehttpd-module/src ] || { echo "FATAL: Failed to clone litehttpd v%{version}"; exit 1; }
+[ -d litehttpd-module/src ] || { echo "FATAL: Failed to clone litehttpd v%{litehttpd_version}"; exit 1; }
 cd litehttpd-module
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS="-O2 -DNDEBUG" 2>&1 | tail -3
 cmake --build build --target litehttpd_htaccess -j$(nproc) 2>&1 | tail -3

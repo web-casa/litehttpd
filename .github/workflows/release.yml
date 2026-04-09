@@ -32,26 +32,6 @@ jobs:
             suffix: ubuntu22-x86_64
             platform: linux/amd64
             pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev"
-          - container: arm64v8/almalinux:8
-            suffix: el8-aarch64
-            platform: linux/arm64
-            pkg_cmd: "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel && ln -sf /usr/bin/cmake3 /usr/bin/cmake"
-            qemu: true
-          - container: arm64v8/almalinux:9
-            suffix: el9-aarch64
-            platform: linux/arm64
-            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
-            qemu: true
-          - container: arm64v8/almalinux:10
-            suffix: el10-aarch64
-            platform: linux/arm64
-            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
-            qemu: true
-          - container: arm64v8/ubuntu:22.04
-            suffix: ubuntu22-aarch64
-            platform: linux/arm64
-            pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev"
-            qemu: true
 
     runs-on: ubuntu-22.04
     steps:
@@ -96,10 +76,6 @@ jobs:
           - container: almalinux:9
             platform: linux/amd64
             arch_suffix: x86_64
-          - container: arm64v8/almalinux:9
-            platform: linux/arm64
-            arch_suffix: aarch64
-            qemu: true
 
     runs-on: ubuntu-22.04
     steps:
