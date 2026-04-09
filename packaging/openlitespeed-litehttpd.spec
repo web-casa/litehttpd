@@ -1,5 +1,5 @@
 %global ols_version  1.8.5
-%global litehttpd_version 2.0.3
+%global litehttpd_version 2.1.0
 %global install_dir  /usr/local/lsws
 %define debug_package %{nil}
 # Disable all brp-* post-install processing to prevent binary replacement
