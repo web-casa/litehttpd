@@ -332,3 +332,77 @@ jobs:
             - glibc >= 2.34
             - For `php_value`/`php_flag` + `RewriteRule`: install `openlitespeed-litehttpd` RPM or apply both patches
           files: release/*
+
+  # ── Publish RPM Repository to Cloudflare R2 ─────────────────────────
+  publish-rpm-repo:
+    needs: [release]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download RPM artifacts
+        uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+
+      - name: Install tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y createrepo-c rpm gnupg2
+          pip install awscli
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          echo "%_gpg_name WebCasaRPM" > ~/.rpmmacros
+          echo "%__gpg_sign_cmd %{__gpg} gpg --batch --yes --no-armor --pinentry-mode loopback --passphrase '${{ secrets.GPG_PASSPHRASE }}' -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}" >> ~/.rpmmacros
+
+      - name: Build repository structure
+        run: |
+          # Collect all RPMs
+          mkdir -p repo-staging
+          find artifacts -name "*.rpm" -exec cp {} repo-staging/ \;
+          ls -lh repo-staging/
+
+          # Sign all RPMs
+          echo "=== Signing RPMs ==="
+          for rpm_file in repo-staging/*.rpm; do
+            echo "Signing: $(basename $rpm_file)"
+            rpm --addsign "$rpm_file" <<< "${{ secrets.GPG_PASSPHRASE }}" 2>&1 | tail -1 || \
+              rpmsign --addsign --define "_gpg_name WebCasaRPM" \
+                --define "__gpg_sign_cmd %{__gpg} gpg --batch --yes --no-armor --pinentry-mode loopback --passphrase '${{ secrets.GPG_PASSPHRASE }}' -u '%{_gpg_name}' -sbo %{__signature_filename} %{__plaintext_filename}" \
+                "$rpm_file" 2>&1 | tail -1
+          done
+
+          # Create per-EL-version directories
+          for dist in el8 el9 el10; do
+            mkdir -p "repo/$dist/x86_64/RPMS"
+            cp repo-staging/*.$dist.*.rpm "repo/$dist/x86_64/RPMS/" 2>/dev/null || true
+            # Module RPM goes to el9 only (built on el9)
+            if [ "$dist" = "el9" ]; then
+              cp repo-staging/litehttpd-*.el9.*.rpm "repo/$dist/x86_64/RPMS/" 2>/dev/null || true
+            fi
+            # Generate repodata
+            createrepo_c "repo/$dist/x86_64/"
+            echo "Created repo: $dist/x86_64/ ($(ls repo/$dist/x86_64/RPMS/*.rpm 2>/dev/null | wc -l) RPMs)"
+          done
+
+          # Copy GPG public key and setup script to root
+          cp packaging/RPM-GPG-KEY-litehttpd repo/
+          cp packaging/setup-repo.sh repo/setup.sh
+
+          echo "=== Repository structure ==="
+          find repo -type f | sort
+
+      - name: Upload to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          # Sync to R2 (S3-compatible API)
+          aws s3 sync repo/ "s3://${{ secrets.R2_BUCKET }}/" \
+            --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
+            --delete \
+            --no-sign-request=false
+
+          echo "=== Published to https://rpms.litehttpd.com/ ==="
+          echo "Users can now run: curl -s https://rpms.litehttpd.com/setup.sh | bash"
