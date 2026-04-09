@@ -401,8 +401,7 @@ jobs:
           # Sync to R2 (S3-compatible API)
           aws s3 sync repo/ "s3://${{ secrets.R2_BUCKET }}/" \
             --endpoint-url "${{ secrets.R2_ENDPOINT }}" \
-            --delete \
-            --no-sign-request=false
+            --delete
 
           echo "=== Published to https://rpms.litehttpd.com/ ==="
           echo "Users can now run: curl -s https://rpms.litehttpd.com/setup.sh | bash"
