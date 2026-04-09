@@ -288,6 +288,25 @@ ctest --test-dir build --output-on-failure
 - Stock OLS **exposes wp-config.php** (200) — security risk without .htaccess
 - Permalink rewrite is slow on all OLS engines (OLS architecture limitation)
 
+#### WordPress Plugin Compatibility (10 plugins, .htaccess dependent)
+
+Tested with: Wordfence, All In One WP Security, W3 Total Cache, WP Super Cache, Yoast SEO, Redirection, WPS Hide Login, Disable XML-RPC, iThemes Security, HTTP Headers
+
+| Test | Apache | OLS-Full (RPM) |
+|------|--------|----------------|
+| Home (10 plugins active) | ✅ 200 | ✅ 200 |
+| Pretty Permalink | ✅ 200 | ✅ 200 |
+| Yoast Sitemap | ✅ 200 | ✅ 200 |
+| xmlrpc blocked | ✅ 403 | ✅ 403 |
+| wp-config protected | ✅ 403 | ✅ 403 |
+| Security Headers | ✅ nosniff + xframe | ✅ nosniff + xframe |
+| Cache Headers on JS | ✅ 2 headers | ✅ 2 headers |
+| REST API | ✅ 200 | ✅ 200 |
+| RSS Feed | ✅ 200 | ✅ 200 |
+| **Result** | **9/9 match** | **9/9 match** |
+
+OLS-Full produces **identical results** to Apache on all .htaccess-dependent plugin tests.
+
 Previous benchmark (5-engine, 19 WP plugins): [tests/e2e/vps-5engine/benchmark-results.md](tests/e2e/vps-5engine/benchmark-results.md)
 
 ### PHP Performance Tuning
