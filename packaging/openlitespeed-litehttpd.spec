@@ -246,10 +246,20 @@ CONF=%{install_dir}/conf/httpd_config.conf
 VHCONF=%{install_dir}/conf/vhosts/Example/vhconf.conf
 
 if [ -f "$CONF" ]; then
-    # 1. Fix lsphp path: only if still pointing to old fcgi-bin/lsphp
-    #    (user who changed to custom path won't match, so preserved)
-    sed -i 's|path.*fcgi-bin/lsphp5|path                            $SERVER_ROOT/lsphp83/bin/lsphp|' "$CONF" 2>/dev/null || true
-    sed -i 's|path.*fcgi-bin/lsphp\b|path                            $SERVER_ROOT/lsphp83/bin/lsphp|' "$CONF" 2>/dev/null || true
+    # 1. Fix lsphp path: auto-detect installed lsphp version
+    #    Supports: lsphp83, lsphp82, lsphp81, lsphp84, or user's custom path
+    #    Only modifies if still pointing to old default fcgi-bin/lsphp
+    LSPHP_BIN=""
+    for ver in 84 83 82 81 80; do
+        if [ -x "%{install_dir}/lsphp${ver}/bin/lsphp" ]; then
+            LSPHP_BIN="\$SERVER_ROOT/lsphp${ver}/bin/lsphp"
+            break
+        fi
+    done
+    if [ -n "$LSPHP_BIN" ]; then
+        sed -i "s|path.*fcgi-bin/lsphp5|path                            $LSPHP_BIN|" "$CONF" 2>/dev/null || true
+        sed -i "s|path.*fcgi-bin/lsphp\b|path                            $LSPHP_BIN|" "$CONF" 2>/dev/null || true
+    fi
 
     # 2. PHP worker pool: only add if not present (grep guard)
     if ! grep -q "PHP_LSAPI_CHILDREN" "$CONF" 2>/dev/null; then
