@@ -59,7 +59,7 @@ For stock (unpatched) OLS. Download the `.so` matching your OS:
 
 ```bash
 # Download module for your platform (el8/el9/el10/ubuntu22, x86_64/aarch64)
-curl -LO https://github.com/web-casa/litehttpd/releases/latest/download/litehttpd_htaccess-el9-x86_64.so
+curl -LO https://github.com/web-casa/litehttpd-private/releases/latest/download/litehttpd_htaccess-el9-x86_64.so
 cp litehttpd_htaccess-el9-x86_64.so /usr/local/lsws/modules/litehttpd_htaccess.so
 
 # Enable module
