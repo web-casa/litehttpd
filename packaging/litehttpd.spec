@@ -7,7 +7,7 @@ Release:        1%{?dist}
 Summary:        Apache .htaccess compatibility module for OpenLiteSpeed
 
 License:        GPLv3+
-URL:            https://github.com/web-casa/litehttpd
+URL:            https://github.com/web-casa/litehttpd-private
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  cmake >= 3.14
