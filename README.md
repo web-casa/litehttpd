@@ -264,24 +264,29 @@ ctest --test-dir build --output-on-failure
 
 #### Performance
 
-| Metric | Apache | OLS-Thin | OLS-Full | Stock OLS |
-|--------|--------|----------|----------|-----------|
-| Static RPS | 23,256 | 49,242 | **57,037** | 69,920 |
-| PHP RPS (wp-login) | **284** | 111 | 124 | 111 |
-| Permalink RPS | **74** | 4.2 | 2.8 | 2.1 |
-| Server RSS | 97 MB | **44 MB** | **47 MB** | 42 MB |
-| Total Memory | 793 MB | **670 MB** | 773 MB | 717 MB |
-| Process count | 8 | 9 | 11 | 19 |
+| Metric | Apache | Stock OLS | **OLS-Full (RPM)** |
+|--------|--------|-----------|-------------------|
+| Static RPS | 23,909 | 63,140 | **58,891** |
+| PHP RPS (wp-login) | 274 | 258 | **292** |
+| Permalink RPS | **69** | 1.1 | 1.1 |
 
-- **OLS-Thin**: Stock OLS + litehttpd_htaccess.so module (70+ directives)
-- **OLS-Full**: Patched OLS (4 patches, source-compiled) + module (80 directives)
-- **Stock OLS**: No .htaccess module, native vhost rewrite only
+#### Resource Usage (after load)
+
+| Metric | Apache | Stock OLS | **OLS-Full (RPM)** |
+|--------|--------|-----------|-------------------|
+| Total Memory | 818 MB | **654 MB** | 689 MB |
+| Server RSS | 618 MB | **320 MB** | 449 MB |
+| Process Count | 18 | 14 | 17 |
+
+- **OLS-Full (RPM)**: One RPM install — patched OLS + bundled module + auto-configured
+- **Stock OLS**: Official OLS without .htaccess module
 
 **Key findings**:
-- OLS-Full static performance is **2.5x Apache** with **half the memory** (47 MB vs 97 MB)
-- OLS-Thin and OLS-Full achieve **100% Apache .htaccess compatibility** (10/10)
-- Apache PHP-FPM (`pm=static`, 10 children) outperforms OLS lsphp default fork mode -- configure `PHP_LSAPI_CHILDREN=10` to improve
-- Permalink (rewrite + PHP routing) is slow across all OLS engines (2-4 rps) -- this is an OLS architectural limitation where native rewrite + PHP routing has higher overhead than Apache mod_rewrite
+- OLS-Full achieves **100% Apache .htaccess compatibility** (10/10 vs Stock OLS 6/10)
+- Static performance **2.5x faster than Apache** with 20% less memory
+- PHP performance slightly better than Apache (292 vs 274 rps)
+- Stock OLS **exposes wp-config.php** (200) — security risk without .htaccess
+- Permalink rewrite is slow on all OLS engines (OLS architecture limitation)
 
 Previous benchmark (5-engine, 19 WP plugins): [tests/e2e/vps-5engine/benchmark-results.md](tests/e2e/vps-5engine/benchmark-results.md)
 
