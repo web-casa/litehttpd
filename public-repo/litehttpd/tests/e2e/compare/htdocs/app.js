@@ -1,0 +1,1 @@
+console.log("APP_JS_V1");

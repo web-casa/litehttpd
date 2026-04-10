@@ -1,0 +1,4 @@
+# Error documents
+ErrorDocument 404 /errors/not-found.html
+ErrorDocument 500 "Internal Server Error - please try again later"
+ErrorDocument 403 https://example.com/forbidden

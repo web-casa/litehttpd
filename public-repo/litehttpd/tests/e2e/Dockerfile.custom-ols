@@ -1,0 +1,73 @@
+# Custom OLS Docker image with litehttpd LSIAPI patches
+#
+# Multi-stage build:
+# 1. Download OLS source and apply patches (PHPConfig + Rewrite)
+# 2. Compile patched OLS from source
+# 3. Replace OLS binary in official image (keeps lsphp, configs, etc.)
+#
+# Usage:
+#   docker build -f tests/e2e/Dockerfile.custom-ols -t ols-custom .
+
+# Stage 1: Compile patched OLS from source
+FROM ubuntu:22.04 AS ols-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ cmake make wget ca-certificates patch \
+    libpcre3-dev libexpat1-dev zlib1g-dev libxml2-dev libaio-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download OLS 1.8.5 source
+ARG OLS_VERSION=1.8.5
+RUN wget -qO- "https://github.com/litespeedtech/openlitespeed/archive/v${OLS_VERSION}.tar.gz" \
+    | tar xz -C /tmp
+
+WORKDIR /tmp/openlitespeed-${OLS_VERSION}
+
+# Apply litehttpd patches
+COPY patches/0001-lsiapi-phpconfig.patch /tmp/
+COPY patches/0002-lsiapi-rewrite.patch /tmp/
+RUN patch -p1 < /tmp/0001-lsiapi-phpconfig.patch && \
+    patch -p1 < /tmp/0002-lsiapi-rewrite.patch
+
+# Build OLS (skip BoringSSL/QUIC — use system OpenSSL, sufficient for CI)
+RUN mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_INSTALL_PREFIX=/usr/local/lsws \
+          .. && \
+    make -j$(nproc) && \
+    make install DESTDIR=/opt/ols-install
+
+# Stage 2: Final runtime image
+FROM litespeedtech/openlitespeed:latest
+
+# Replace OLS binary with patched version
+COPY --from=ols-builder /opt/ols-install/usr/local/lsws/bin/openlitespeed \
+                         /usr/local/lsws/bin/openlitespeed
+
+# Copy the litehttpd module
+COPY build/litehttpd_htaccess.so /usr/local/lsws/modules/litehttpd_htaccess.so
+
+# Create test document root
+RUN mkdir -p /var/www/vhosts/localhost/html/subdir && \
+    echo "<h1>OK</h1>" > /var/www/vhosts/localhost/html/index.html && \
+    echo "img" > /var/www/vhosts/localhost/html/photo.jpg && \
+    echo "custom" > /var/www/vhosts/localhost/html/subdir/custom.html && \
+    chown -R nobody:nogroup /var/www/vhosts/localhost
+
+# Configure vhost for .htaccess support
+RUN VHCONF="/usr/local/lsws/conf/vhosts/localhost/vhconf.conf" && \
+    if [ -f "$VHCONF" ]; then \
+      sed -i 's/allowOverride.*/allowOverride             255/' "$VHCONF" || true; \
+      grep -q 'allowOverride' "$VHCONF" || echo 'allowOverride 255' >> "$VHCONF"; \
+    fi
+
+# Load litehttpd module
+RUN CONF="/usr/local/lsws/conf/httpd_config.conf" && \
+    if ! grep -q 'litehttpd_htaccess' "$CONF" 2>/dev/null; then \
+      echo '' >> "$CONF"; \
+      echo 'module litehttpd_htaccess {' >> "$CONF"; \
+      echo '  ls_enabled              1' >> "$CONF"; \
+      echo '}' >> "$CONF"; \
+    fi
+
+EXPOSE 8088

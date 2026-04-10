@@ -1,0 +1,5 @@
+# Laravel Options sample
+Options -Indexes +FollowSymLinks -MultiViews
+DirectoryIndex index.php index.html
+AddType application/json .json
+ForceType text/html

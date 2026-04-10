@@ -1,0 +1,38 @@
+# =============================================================================
+# Docker Compose for PHP Application Integration Testing
+#
+# Defines OLS (with LSPHP), and MariaDB services for testing WordPress,
+# Nextcloud, Drupal, and Laravel with the litehttpd_htaccess module.
+#
+# Requirements: 13.1, 13.4, 13.5
+# =============================================================================
+
+services:
+  ols:
+    build:
+      context: ../..
+      dockerfile: tests/e2e/Dockerfile.app
+    container_name: ols-app-e2e
+    ports:
+      - "8088:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mariadb:10.11
+    container_name: ols-app-db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: wordpress
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mariadb", "-uroot", "-prootpass", "-e", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db-data:

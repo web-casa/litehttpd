@@ -1,0 +1,25 @@
+FROM litespeedtech/openlitespeed:latest
+
+# Create document root
+RUN mkdir -p /var/www/html
+
+# Copy shared document root
+COPY htdocs/ /var/www/html/
+
+RUN chown -R nobody:nogroup /var/www/html
+
+# Configure OLS: NO module loaded, but rewrite enabled
+RUN CONF="/usr/local/lsws/conf/httpd_config.conf" && \
+    # Remove any existing litehttpd_htaccess module block
+    sed -i '/module litehttpd_htaccess/,/}/d' "$CONF" 2>/dev/null || true
+
+# Create vhost config
+RUN mkdir -p /usr/local/lsws/conf/vhosts/compare
+
+COPY conf/vhconf_compare.conf /usr/local/lsws/conf/vhosts/compare/vhconf.conf
+COPY conf/httpd_compare_native.conf /tmp/httpd_patch.conf
+
+# Patch httpd_config.conf: add listener and vhost
+RUN cat /tmp/httpd_patch.conf >> /usr/local/lsws/conf/httpd_config.conf
+
+EXPOSE 8088

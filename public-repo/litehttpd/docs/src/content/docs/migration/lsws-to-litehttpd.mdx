@@ -1,0 +1,130 @@
+---
+title: From LSWS Enterprise to LiteHTTPD
+description: Replace LSWS Enterprise with OpenLiteSpeed + LiteHTTPD for equivalent .htaccess support
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## Why Migrate?
+
+LSWS Enterprise provides full `.htaccess` support but requires a paid license. LiteHTTPD (Full edition) achieves 90%+ compatibility on the free, open-source OpenLiteSpeed -- without license fees. This page covers replacing LSWS with LiteHTTPD-Full, which includes the patched OLS binary for RewriteRule execution and php_value support.
+
+## Feature Comparison
+
+| Feature | LSWS Enterprise | LiteHTTPD (OLS) |
+|---------|----------------|-----------------|
+| .htaccess compatibility | 100% | **90%+** |
+| Static RPS (no .htaccess) | 24,786 | 22,104 |
+| Static RPS (200-line .htaccess) | 20,306 | 21,960 |
+| .htaccess overhead | -18.1% | **-0.7%** |
+| Baseline memory | 819 MB | **676 MB** |
+| License | Paid (from $0/mo free tier to $65/mo) | **Free (GPLv3)** |
+| Source code | Proprietary | **Open source** |
+| LSCache built-in | Yes | Via OLS cache module |
+| Admin GUI | Yes | OLS WebAdmin (free) |
+| cPanel/Plesk integration | Yes | No (manual config) |
+
+:::note
+LiteHTTPD actually has **lower .htaccess parsing overhead** than LSWS Enterprise (-0.7% vs -18.1%) thanks to its fingerprint-based directive caching.
+:::
+
+## Migration Steps
+
+<Steps>
+1. **Install OpenLiteSpeed**
+
+   ```bash
+   # AlmaLinux / Rocky
+   rpm -Uvh https://rpms.litespeedtech.com/centos/litespeed-repo-1.3-1.el9.noarch.rpm
+   dnf install openlitespeed
+
+   # Install the patched version (LiteHTTPD-Full, recommended)
+   dnf install ./openlitespeed-litehttpd-*.rpm
+   ```
+
+2. **Install LiteHTTPD module**
+
+   ```bash
+   cp litehttpd_htaccess.so /usr/local/lsws/modules/
+   ```
+
+3. **Migrate configuration**
+
+   LSWS uses XML config (`httpd_config.xml`), OLS uses plaintext (`httpd_config.conf`). Key mappings:
+
+   | LSWS (XML) | OLS (plaintext) |
+   |-----------|----------------|
+   | `<listener><address>*:80</address></listener>` | `listener Default { address *:80 }` |
+   | `<virtualHost><vhRoot>/var/www</vhRoot></virtualHost>` | `virtualHost Example { vhRoot /var/www }` |
+   | `<allowOverride>255</allowOverride>` | `allowOverride 255` |
+   | `<docRoot>$VH_ROOT/html/</docRoot>` | `docRoot $VH_ROOT/html/` |
+
+4. **Copy document roots**
+
+   Your website files and `.htaccess` files need no changes. Just point OLS vhosts to the same directories:
+   ```
+   docRoot /var/www/html
+   allowOverride 255
+   autoLoadHtaccess 1
+   ```
+
+5. **Configure PHP**
+
+   LSWS uses its built-in lsphp. For OLS, install lsphp separately:
+   ```bash
+   dnf install lsphp84 lsphp84-mysqlnd lsphp84-xml
+   ln -sf /usr/local/lsws/lsphp84/bin/lsphp /usr/local/lsws/fcgi-bin/lsphp
+   ```
+
+   For production performance, configure the worker pool:
+   ```
+   extProcessor lsphp {
+       env PHP_LSAPI_CHILDREN=10
+       env PHP_LSAPI_MAX_IDLE=300
+   }
+   ```
+
+6. **Enable the module**
+
+   ```
+   module litehttpd_htaccess {
+       ls_enabled 1
+   }
+   ```
+
+7. **Stop LSWS, start OLS**
+
+   ```bash
+   # Stop LSWS
+   /usr/local/lsws/bin/lswsctrl stop
+
+   # If OLS is installed to the same prefix, just start it
+   /usr/local/lsws/bin/lswsctrl start
+
+   # If separate prefix, adjust paths accordingly
+   ```
+</Steps>
+
+## Features Not Available in LiteHTTPD
+
+| LSWS Feature | Status in LiteHTTPD | Alternative |
+|--------------|--------------------|----|
+| Built-in page cache (LSCache) | Not in module | Enable OLS `cache` module + LiteSpeed Cache plugin |
+| cPanel/Plesk integration | Not supported | Manual OLS config or use CyberPanel |
+| QUIC/HTTP3 | Supported by OLS natively | No change needed |
+| ModSecurity | Supported by OLS natively | No change needed |
+| ESI (Edge Side Includes) | Not supported | -- |
+| GeoIP | Not in module | Use OLS native GeoIP |
+
+## SSL Certificate Migration
+
+Copy your existing SSL certificates and update the OLS listener:
+
+```
+listener SSL {
+    address *:443
+    secure 1
+    keyFile /etc/letsencrypt/live/example.com/privkey.pem
+    certFile /etc/letsencrypt/live/example.com/fullchain.pem
+}
+```

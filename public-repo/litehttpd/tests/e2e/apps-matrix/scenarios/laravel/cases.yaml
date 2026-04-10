@@ -1,0 +1,47 @@
+scenario: laravel
+app: laravel
+purpose: front-controller routing, static bypass, deny behavior, header/env probes
+
+cases:
+  - id: LARAVEL_001
+    category: app-health
+    desc: welcome page returns 200
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: LARAVEL_002
+    category: routing
+    desc: framework route resolves through public/index.php front controller
+    method: GET
+    path: /up
+    probe_path: /_probe/router.php?uri=/up
+    assert:
+      - status_exact: 200
+      - probe_field_exact: SCRIPT_NAME=/index.php
+
+  - id: LARAVEL_003
+    category: routing
+    desc: static asset bypasses front controller
+    method: GET
+    path: /favicon.ico
+    assert:
+      - status_exact: 200
+
+  - id: LARAVEL_004
+    category: deny
+    desc: hidden or sensitive files are not directly exposed
+    method: GET
+    path: /.env
+    assert:
+      - status_exact: 403
+
+  - id: LARAVEL_005
+    category: headers
+    desc: probe endpoint can observe request headers and env side effects
+    method: GET
+    path: /_probe/env.php
+    assert:
+      - status_exact: 200
+      - body_contains: REQUEST_METHOD

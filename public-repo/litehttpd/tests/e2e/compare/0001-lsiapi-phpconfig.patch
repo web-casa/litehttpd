@@ -1,0 +1,84 @@
+From 9c411a1d216e2a1d66a6c9ff27310cbbda465c4a Mon Sep 17 00:00:00 2001
+From: yeagoo <i90h@vip.qq.com>
+Date: Tue, 31 Mar 2026 17:18:43 +0800
+Subject: [PATCH 1/2] litehttpd: add PHPConfig + set_req_header LSIAPI
+ extensions
+
+---
+ include/ls.h             | 14 ++++++++++++++
+ src/lsiapi/lsiapilib.cpp | 34 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 48 insertions(+)
+
+diff --git a/include/ls.h b/include/ls.h
+index 9e7aef6..e3770f6 100644
+--- a/include/ls.h
++++ b/include/ls.h
+@@ -3981,6 +3981,20 @@ struct lsi_api_s
+     void (*register_thread_cleanup)(const lsi_module_t *module,
+                                     void (*routine)(void *), void * arg);
+ 
++    /* litehttpd: PHPConfig LSIAPI + request header write */
++    int (*set_php_config_value)(const lsi_session_t *session,
++                                const char *name, const char *value,
++                                int type);
++    int (*set_php_config_flag)(const lsi_session_t *session,
++                               const char *name, int value,
++                               int type);
++    int (*get_php_config)(const lsi_session_t *session,
++                          const char *name, char *buf, int buf_len);
++    int (*set_req_header)(const lsi_session_t *session,
++                          const char *name, int name_len,
++                          const char *value, int value_len,
++                          int op);
++
+ };
+ 
+ /**
+diff --git a/src/lsiapi/lsiapilib.cpp b/src/lsiapi/lsiapilib.cpp
+index a51c6a9..141e309 100644
+--- a/src/lsiapi/lsiapilib.cpp
++++ b/src/lsiapi/lsiapilib.cpp
+@@ -3792,6 +3792,40 @@ void lsiapi_init_server_api()
+     pApi->schedule_remove_session_cbs_event = schedule_remove_session_cbs_event;
+     pApi->register_thread_cleanup = register_thread_cleanup_ts;
+ 
++    /* litehttpd: PHPConfig LSIAPI extensions */
++    pApi->set_php_config_value = [](const lsi_session_t *session,
++                                    const char *name, const char *value,
++                                    int type) -> int {
++        if (!session || !name || !name[0]) return -1;
++        HttpSession *pSess = (HttpSession *)session;
++        HttpReq *pReq = pSess->getReq();
++        if (!pReq) return -1;
++        HttpContext *pCtx = (HttpContext *)pReq->getContext();
++        if (!pCtx) return -1;
++        PHPConfig *pCfg = pCtx->getPHPConfig();
++        if (!pCfg) {
++            pCfg = new PHPConfig();
++            pCtx->setPHPConfig(pCfg);
++        }
++        char buf[1024];
++        int n = snprintf(buf, sizeof(buf), "%s %s", name, value ? value : "");
++        if (n < 0 || n >= (int)sizeof(buf)) return -1;
++        char err[256] = {0};
++        pCfg->parse(type, buf, err, sizeof(err));
++        pCfg->buildLsapiEnv();
++        return 0;
++    };
++    pApi->set_php_config_flag = [](const lsi_session_t *session,
++                                   const char *name, int value,
++                                   int type) -> int {
++        const char *v = value ? "1" : "0";
++        if (g_lsiapi.set_php_config_value)
++            return g_lsiapi.set_php_config_value(session, name, v, type);
++        return -1;
++    };
++    pApi->get_php_config = nullptr;
++    pApi->set_req_header = nullptr;
++
+     g_lsiapi_ts = g_lsiapi;
+ 
+     pApi = &g_lsiapi_ts;
+-- 
+2.47.3
+

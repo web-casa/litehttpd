@@ -1,0 +1,47 @@
+scenario: mediawiki
+app: mediawiki
+purpose: pretty URL routing, protected maintenance paths, and static asset cache behavior
+
+cases:
+  - id: MEDIAWIKI_001
+    category: app-health
+    desc: homepage returns 200
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: MEDIAWIKI_002
+    category: routing
+    desc: pretty URL resolves through front controller
+    method: GET
+    path: /wiki/Main_Page
+    probe_path: /_probe/router.php?uri=/wiki/Main_Page
+    assert:
+      - status_exact: 200
+      - probe_field_exact: SCRIPT_NAME=/index.php
+
+  - id: MEDIAWIKI_003
+    category: deny
+    desc: maintenance script path is not directly accessible
+    method: GET
+    path: /maintenance/run.php
+    assert:
+      - status_exact: 403
+
+  - id: MEDIAWIKI_004
+    category: ttl
+    desc: shipped static asset publishes cache TTL
+    method: GET
+    path: /resources/assets/wiki.png
+    assert:
+      - status_exact: 200
+      - ttl_close: 86400
+
+  - id: MEDIAWIKI_005
+    category: htaccess
+    desc: protected includes/private paths are not browseable
+    method: GET
+    path: /includes/
+    assert:
+      - status_exact: 403

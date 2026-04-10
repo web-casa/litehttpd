@@ -1,0 +1,48 @@
+scenario: wordpress-redirection
+app: wordpress + redirection
+purpose: redirect semantics, path tail retention, query preservation, 410 handling
+
+cases:
+  - id: WP_REDIRECT_001
+    category: redirect
+    desc: permanent redirect returns 301 with exact target
+    method: GET
+    path: /legacy-path/
+    assert:
+      - status_exact: 301
+      - location_exact: /new-path/
+
+  - id: WP_REDIRECT_002
+    category: redirect
+    desc: redirect preserves path tail
+    method: GET
+    path: /campaign/a/b
+    assert:
+      - status_exact: 301
+      - location_exact: /landing/a/b
+
+  - id: WP_REDIRECT_003
+    category: redirect
+    desc: redirect preserves query string placement
+    method: GET
+    path: /promo?src=test
+    assert:
+      - status_exact: 302
+      - location_exact: /offer?src=test
+
+  - id: WP_REDIRECT_004
+    category: redirect
+    desc: gone rule returns 410 without Location
+    method: GET
+    path: /removed-page/
+    assert:
+      - status_exact: 410
+      - header_absent: Location
+
+  - id: WP_REDIRECT_005
+    category: app-health
+    desc: homepage still works after plugin-generated redirect rules
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200

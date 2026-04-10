@@ -1,0 +1,70 @@
+# Root-level .htaccess for four-engine comparison testing
+
+# --- Headers ---
+Header set X-Custom-Header "test-value-v1"
+Header always set X-Frame-Options "SAMEORIGIN"
+Header always set X-Content-Type-Options "nosniff"
+Header set X-Test-Append "base"
+Header append X-Test-Append "appended"
+Header unset X-Powered-By
+
+# --- Expires ---
+ExpiresActive On
+ExpiresByType text/css "access plus 7 days"
+ExpiresByType application/javascript "access plus 7 days"
+ExpiresByType image/jpeg "access plus 30 days"
+ExpiresDefault "access plus 1 hour"
+
+# --- Environment variables ---
+SetEnv TEST_ENV "hello_from_htaccess"
+
+# --- Options ---
+Options -Indexes +FollowSymLinks
+
+# --- DirectoryIndex ---
+DirectoryIndex index.php index.html
+
+# --- Files blocks ---
+<Files "wp-config.php">
+  Order Allow,Deny
+  Deny from all
+</Files>
+
+<Files "secret.txt">
+  Require all denied
+</Files>
+
+# --- FilesMatch ---
+<FilesMatch "\.(sql|log|bak)$">
+  Require all denied
+</FilesMatch>
+
+# --- Redirect ---
+Redirect 301 /old-page /new-page
+RedirectMatch 301 ^/blog/([0-9]{4})/([0-9]{2})/?$ /archive/$1-$2
+
+# --- ErrorDocument ---
+ErrorDocument 403 "Access Forbidden by htaccess"
+ErrorDocument 404 "Page Not Found by htaccess"
+
+# --- PHP config ---
+php_value memory_limit 256M
+php_flag display_errors Off
+
+# --- Rewrite rules ---
+RewriteEngine On
+
+# Specific rules first (before WordPress fallback)
+# Capture group test
+RewriteRule ^article/([0-9]+)/?$ /_probe/probe.php?id=$1 [L]
+
+# QSA test
+RewriteRule ^search/(.+)$ /_probe/probe.php?q=$1 [QSA,L]
+
+# NC (nocase) test
+RewriteRule ^UPPER/(.*)$ /_probe/probe.php?upper=$1 [NC,L]
+
+# WordPress-style fallback: if not file/dir, route to index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ /index.php?route=$1 [QSA,L]

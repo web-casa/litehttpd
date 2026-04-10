@@ -1,0 +1,189 @@
+---
+import MobileMenuToggle from 'virtual:starlight/components/MobileMenuToggle';
+
+const { hasSidebar } = Astro.locals.starlightRoute;
+const isZh = Astro.url.pathname.startsWith('/zh');
+const prefix = isZh ? '/zh' : '';
+
+const navItems = isZh ? [
+  { href: `${prefix}/getting-started/introduction/`, section: `${prefix}/getting-started/`, label: '快速开始' },
+  { href: `${prefix}/compare/`, section: `${prefix}/compare`, label: '对比' },
+  { href: `${prefix}/ols/install-overview/`, section: `${prefix}/ols/install`, label: 'OLS 安装' },
+  { href: `${prefix}/ols/basic-config/`, section: `${prefix}/ols/basic-config`, label: 'OLS 配置' },
+  { href: `${prefix}/ols/php-install/`, section: `${prefix}/ols/php`, label: 'PHP' },
+  { href: `${prefix}/ols/app-wordpress/`, section: `${prefix}/ols/app-`, label: '应用' },
+  { href: `${prefix}/ols/security-overview/`, section: `${prefix}/ols/security`, label: '安全' },
+  { href: `${prefix}/directives/overview/`, section: `${prefix}/directives/`, label: '指令' },
+  { href: `${prefix}/migration/apache-to-ols/`, section: `${prefix}/migration/`, label: '迁移' },
+] : [
+  { href: `${prefix}/getting-started/introduction/`, section: `${prefix}/getting-started/`, label: 'Get Started' },
+  { href: `${prefix}/compare/`, section: `${prefix}/compare`, label: 'Compare' },
+  { href: `${prefix}/ols/install-overview/`, section: `${prefix}/ols/install`, label: 'OLS Install' },
+  { href: `${prefix}/ols/basic-config/`, section: `${prefix}/ols/basic-config`, label: 'OLS Config' },
+  { href: `${prefix}/ols/php-install/`, section: `${prefix}/ols/php`, label: 'PHP' },
+  { href: `${prefix}/ols/app-wordpress/`, section: `${prefix}/ols/app-`, label: 'Apps' },
+  { href: `${prefix}/ols/security-overview/`, section: `${prefix}/ols/security`, label: 'Security' },
+  { href: `${prefix}/directives/overview/`, section: `${prefix}/directives/`, label: 'Directives' },
+  { href: `${prefix}/migration/apache-to-ols/`, section: `${prefix}/migration/`, label: 'Migration' },
+];
+---
+
+<div class="page sl-flex">
+	<header class="header"><slot name="header" /></header>
+	<nav class="top-nav" aria-label="Section navigation">
+		<div class="top-nav-inner">
+			{navItems.map(item => (
+				<a
+					href={item.href}
+					class:list={['top-nav-link', { active: Astro.url.pathname.includes(item.section) }]}
+				>
+					{item.label}
+				</a>
+			))}
+		</div>
+	</nav>
+	{
+		hasSidebar && (
+			<nav class="sidebar print:hidden" aria-label={Astro.locals.t('sidebarNav.accessibleLabel')}>
+				<MobileMenuToggle />
+				<div id="starlight__sidebar" class="sidebar-pane">
+					<div class="sidebar-content sl-flex">
+						<slot name="sidebar" />
+					</div>
+				</div>
+			</nav>
+		)
+	}
+	<div class="main-frame"><slot /></div>
+</div>
+
+<style>
+	@layer starlight.core {
+		.page {
+			flex-direction: column;
+			min-height: 100vh;
+		}
+
+		.header {
+			z-index: var(--sl-z-index-navbar);
+			position: fixed;
+			inset-inline-start: 0;
+			inset-block-start: 0;
+			width: 100%;
+			height: var(--sl-nav-height);
+			padding: var(--sl-nav-pad-y) var(--sl-nav-pad-x);
+			padding-inline-end: var(--sl-nav-pad-x);
+			background-color: var(--sl-color-bg-nav);
+			border-bottom: 1px solid var(--sl-color-hairline-shade);
+		}
+
+		:global([data-has-sidebar]) .header {
+			padding-inline-end: calc(var(--sl-nav-pad-x) + var(--sl-nav-mobile-bar-size));
+		}
+
+		.sidebar-pane {
+			visibility: var(--sl-sidebar-visibility, hidden);
+			position: fixed;
+			z-index: var(--sl-z-index-menu);
+			inset-block: var(--sl-nav-height) 0;
+			inset-inline-start: 0;
+			width: 100%;
+			background-color: var(--sl-color-black);
+			overflow-y: auto;
+			overscroll-behavior: contain;
+		}
+
+		:global([aria-expanded='true']) ~ .sidebar-pane {
+			--sl-sidebar-visibility: visible;
+		}
+
+		.sidebar-content {
+			height: 100%;
+			min-height: max-content;
+			padding: 1rem var(--sl-sidebar-pad-x) 0;
+			flex-direction: column;
+			gap: 1rem;
+		}
+
+		@media (min-width: 50rem) {
+			.sidebar-content::after {
+				content: '';
+				padding-bottom: 1px;
+			}
+
+			.sidebar-pane {
+				--sl-sidebar-visibility: visible;
+				width: var(--sl-sidebar-width);
+				background-color: var(--sl-color-bg-sidebar);
+				border-inline-end: 1px solid var(--sl-color-hairline-shade);
+			}
+		}
+
+		.main-frame {
+			padding-top: calc(var(--sl-nav-height) + var(--sl-mobile-toc-height));
+			padding-inline-start: var(--sl-content-inline-start);
+		}
+
+		@media (min-width: 50rem) {
+			:global([data-has-sidebar]) .header {
+				padding-inline-end: var(--sl-nav-pad-x);
+			}
+		}
+
+		:global([data-has-sidebar]) .main-frame {
+			@media (min-width: 50rem) {
+				--sl-content-inline-start: var(--sl-sidebar-width);
+			}
+		}
+	}
+
+	/* Top navigation bar */
+	.top-nav {
+		position: fixed;
+		top: var(--sl-nav-height);
+		left: 0;
+		right: 0;
+		z-index: calc(var(--sl-z-index-navbar) - 1);
+		background: var(--sl-color-gray-6);
+		border-bottom: 1px solid var(--sl-color-gray-5);
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+	}
+	.top-nav-inner {
+		display: flex;
+		gap: 0;
+		padding: 0 var(--sl-nav-pad-x);
+	}
+	.top-nav-link {
+		display: inline-block;
+		padding: 0.45rem 0.7rem;
+		font-size: 0.8rem;
+		font-weight: 500;
+		color: var(--sl-color-gray-2);
+		text-decoration: none;
+		white-space: nowrap;
+		border-bottom: 2px solid transparent;
+		transition: color 0.15s, border-color 0.15s;
+	}
+	.top-nav-link:hover {
+		color: var(--sl-color-white);
+		border-bottom-color: var(--sl-color-gray-3);
+	}
+	.top-nav-link.active {
+		color: var(--sl-color-accent-high);
+		border-bottom-color: var(--sl-color-accent);
+	}
+	/* Add space for the fixed top-nav on all pages */
+	.page .main-frame {
+		padding-top: calc(var(--sl-nav-height) + 2.2rem + var(--sl-mobile-toc-height));
+	}
+	@media (max-width: 50rem) {
+		.top-nav-inner {
+			padding: 0 0.5rem;
+		}
+		.top-nav-link {
+			padding: 0.35rem 0.45rem;
+			font-size: 0.75rem;
+		}
+	}
+</style>

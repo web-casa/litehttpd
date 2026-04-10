@@ -1,0 +1,7 @@
+# PHP configuration
+php_value upload_max_filesize 64M
+php_value post_max_size 64M
+php_value max_execution_time 300
+php_flag display_errors Off
+php_admin_value open_basedir /var/www/html
+php_admin_flag allow_url_fopen Off

@@ -1,0 +1,4 @@
+# Apache 2.4 Require syntax sample
+Require all granted
+Require ip 10.0.0.0/8
+Require not ip 192.168.1.0/24

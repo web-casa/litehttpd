@@ -1,0 +1,24 @@
+FROM litespeedtech/litespeed:latest
+
+# LSWS Enterprise — native .htaccess support (trial license auto-applied)
+# Default docRoot: /var/www/vhosts/localhost/html
+# Uses XML config, listens on port 80 via docker template vhost
+
+# Copy shared document root to the template vhost docRoot
+COPY htdocs/ /var/www/vhosts/localhost/html/
+
+RUN chown -R nobody:nogroup /var/www/vhosts/localhost/html
+
+# Create symlink so AuthUserFile path /var/www/html works in LSWS too
+RUN ln -sf /var/www/vhosts/localhost/html /var/www/html
+
+# Patch the docker template to enable allowOverride and rewrite from .htaccess
+COPY conf/lsws_docker_template.xml /usr/local/lsws/conf/templates/docker.xml
+
+# Enable allowOverride in global httpd_config.xml (server-level default)
+# LSWS allowOverride valid range: 0-31 (5-bit bitmask, same as Apache)
+# 31 = AuthConfig + FileInfo + Indexes + Limit + Options = All
+RUN sed -i 's|<allowOverride>0</allowOverride>|<allowOverride>31</allowOverride>|g' \
+    /usr/local/lsws/conf/httpd_config.xml
+
+EXPOSE 80

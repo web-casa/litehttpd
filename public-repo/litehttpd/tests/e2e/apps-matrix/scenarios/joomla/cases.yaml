@@ -1,0 +1,45 @@
+scenario: joomla
+app: joomla
+purpose: sef URL routing, sensitive path protection, and baseline cache/security behavior
+
+cases:
+  - id: JOOMLA_001
+    category: app-health
+    desc: homepage returns 200
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: JOOMLA_002
+    category: routing
+    desc: sef route resolves through front controller
+    method: GET
+    path: /index.php/component/users/
+    probe_path: /_probe/router.php?uri=/index.php/component/users/
+    assert:
+      - status_exact: 200
+
+  - id: JOOMLA_003
+    category: deny
+    desc: configuration file is not directly exposed
+    method: GET
+    path: /configuration.php
+    assert:
+      - status_exact: 403
+
+  - id: JOOMLA_004
+    category: headers
+    desc: static asset remains directly accessible
+    method: GET
+    path: /media/system/js/core.js
+    assert:
+      - status_exact: 200
+
+  - id: JOOMLA_005
+    category: htaccess
+    desc: shipped Joomla htaccess rules are active on protected paths
+    method: GET
+    path: /administrator/cache/
+    assert:
+      - status_exact: 403

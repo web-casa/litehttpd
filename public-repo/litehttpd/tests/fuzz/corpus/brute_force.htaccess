@@ -1,0 +1,5 @@
+# Brute force protection
+BruteForceProtection On
+BruteForceAllowedAttempts 5
+BruteForceWindow 600
+BruteForceAction block

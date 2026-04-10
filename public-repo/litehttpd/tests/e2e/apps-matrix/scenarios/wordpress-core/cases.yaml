@@ -1,0 +1,48 @@
+scenario: wordpress-core
+app: wordpress
+purpose: core front-controller and baseline deny/header behavior
+
+cases:
+  - id: WP_CORE_001
+    category: routing
+    desc: homepage returns 200 and WordPress marker is present
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+      - body_contains: wordpress
+
+  - id: WP_CORE_002
+    category: routing
+    desc: permalink route resolves through index.php front controller
+    method: GET
+    path: /hello-world/
+    probe_path: /_probe/router.php?uri=/hello-world/
+    assert:
+      - status_exact: 200
+      - probe_field_exact: SCRIPT_NAME=/index.php
+
+  - id: WP_CORE_003
+    category: deny
+    desc: wp-config.php is not directly accessible
+    method: GET
+    path: /wp-config.php
+    assert:
+      - status_exact: 403
+
+  - id: WP_CORE_004
+    category: deny
+    desc: directory listing is disabled on a known no-index directory
+    method: GET
+    path: /wp-includes/
+    assert:
+      - status_exact: 403
+
+  - id: WP_CORE_005
+    category: htaccess
+    desc: probe confirms .htaccess-derived behavior is observable
+    method: GET
+    path: /_probe/server.php
+    assert:
+      - status_exact: 200
+      - body_contains: REQUEST_URI

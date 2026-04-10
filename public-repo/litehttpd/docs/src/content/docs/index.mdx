@@ -1,0 +1,150 @@
+---
+title: LiteHTTPD
+description: Apache .htaccess compatibility module for OpenLiteSpeed
+template: splash
+hero:
+  title: Make OLS Understand .htaccess
+  tagline: |
+    The missing .htaccess engine for OpenLiteSpeed.
+    80 directives. 90%+ Apache compatible. 2x faster. Free and open source.
+  image:
+    html: |
+      <div class="terminal" style="background:#0d1117;border-radius:8px;overflow:hidden;font-family:'SF Mono','Cascadia Code','Fira Code',Consolas,monospace;font-size:0.75rem;line-height:1.6;box-shadow:0 8px 32px rgba(0,0,0,0.4);border:1px solid #30363d;max-width:540px;width:100%">
+        <div style="background:#161b22;padding:0.5rem 0.75rem;display:flex;align-items:center;gap:0.375rem;border-bottom:1px solid #30363d">
+          <span style="width:10px;height:10px;border-radius:50%;background:#ff5f56"></span>
+          <span style="width:10px;height:10px;border-radius:50%;background:#ffbd2e"></span>
+          <span style="width:10px;height:10px;border-radius:50%;background:#27c93f"></span>
+          <span style="margin-left:0.5rem;color:#8b949e;font-size:0.7rem">terminal</span>
+        </div>
+        <div style="padding:0.75rem 1rem;color:#c9d1d9">
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>dnf install openlitespeed-litehttpd litehttpd</span></div>
+          <div style="color:#8b949e;padding-left:1rem">Installed: openlitespeed-litehttpd-1.8.5, litehttpd-2.0</div>
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>systemctl restart lsws</span></div>
+          <div style="height:0.5rem"></div>
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>curl -I localhost:8088/</span></div>
+          <div style="color:#8b949e;padding-left:1rem">HTTP/1.1 <span style="color:#22c55e;font-weight:600">200 OK</span></div>
+          <div style="color:#8b949e;padding-left:1rem">x-custom-header: <span style="color:#79c0ff">LiteHTTPD</span></div>
+          <div style="color:#8b949e;padding-left:1rem">cache-control: <span style="color:#79c0ff">max-age=31536000</span></div>
+          <div style="height:0.5rem"></div>
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>curl -sI localhost:8088/test-redirect/old-page</span></div>
+          <div style="color:#8b949e;padding-left:1rem">HTTP/1.1 <span style="color:#22c55e;font-weight:600">301 Moved Permanently</span></div>
+          <div style="color:#8b949e;padding-left:1rem">location: <span style="color:#79c0ff">/test-redirect/new-page</span></div>
+          <div style="height:0.5rem"></div>
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>curl -sI localhost:8088/.htaccess</span></div>
+          <div style="color:#8b949e;padding-left:1rem"><span style="color:#22c55e;font-weight:600">403 Forbidden</span> <span style="color:#6e7681;font-style:italic"># protected</span></div>
+        </div>
+      </div>
+  actions:
+    - text: Get Started
+      link: /getting-started/introduction/
+      icon: right-arrow
+    - text: Compare Engines
+      link: /compare/
+      variant: minimal
+      icon: external
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+<CardGrid>
+  <Card title="90%+ Compatible" icon="approve-check">
+    80 directives: Require, Header, RewriteRule, ExpiresByType, FilesMatch,
+    If/ElseIf/Else and more. WordPress plugins just work.
+  </Card>
+  <Card title="2x Faster" icon="rocket">
+    22,000+ RPS on static files. Only 0.7% overhead from 200-line .htaccess
+    parsing vs Apache's 4.2%.
+  </Card>
+  <Card title="30% Less Memory" icon="seti:db">
+    676 MB baseline vs Apache's 969 MB. Module adds only +13 MB over stock OLS.
+  </Card>
+  <Card title="5-Minute Setup" icon="puzzle">
+    Copy .so, set `allowOverride 255`, restart. Your .htaccess files work unchanged.
+  </Card>
+</CardGrid>
+
+---
+
+## Why LiteHTTPD?
+
+Stock OpenLiteSpeed ignores most `.htaccess` directives -- `Require all denied` returns 200, `Header set` is silently skipped, `RewriteRule [R=301]` returns 404. Security plugins like Wordfence and AIOS are effectively disabled.
+
+LiteHTTPD comes in two editions:
+
+- **LiteHTTPD-Thin** -- the `.so` module alone on stock OLS. Adds security headers, ACL, authentication, caching, conditionals, and redirects. Ideal for quick deployment.
+- **LiteHTTPD-Full** -- module + patched OLS. Adds full RewriteRule execution, `php_value`/`php_flag`, and engine-level `Options -Indexes`. Required for complete Apache migration.
+
+<LinkCard title="Compare editions" href="/getting-started/editions/" description="See exactly which directives work in Thin vs Full, and how to choose." />
+
+---
+
+## Features
+
+<CardGrid>
+  <Card title="Security" icon="approve-check-circle">
+    Require all/ip/env, FilesMatch ACL, Options -Indexes, AuthType Basic,
+    IPv6 CIDR access control, brute force protection.
+  </Card>
+  <Card title="URL Rewriting" icon="random">
+    RewriteEngine, RewriteCond, RewriteRule with [R=301,L,QSA,F,G] flags,
+    RewriteBase, RewriteOptions, RewriteMap.
+  </Card>
+  <Card title="Response Headers" icon="list-format">
+    Header set/unset/append/merge/add/edit, env=VAR conditionals,
+    Header always, RequestHeader.
+  </Card>
+  <Card title="Cache Control" icon="star">
+    ExpiresActive, ExpiresByType, ExpiresDefault with automatic
+    Cache-Control and Expires header generation.
+  </Card>
+  <Card title="Conditionals" icon="setting">
+    If/ElseIf/Else with ap_expr: ==, !=, =~, -f, -d, -ipmatch.
+    Conditional headers, access control, type overrides.
+  </Card>
+  <Card title="PHP Config" icon="seti:php">
+    php_value, php_flag, php_admin_value/flag passed to lsphp via LSIAPI.
+  </Card>
+</CardGrid>
+
+---
+
+## Performance at a Glance
+
+| | Apache httpd | Stock OLS | **LiteHTTPD** | LSWS Enterprise |
+|-|-------------|-----------|-----------|-----------------|
+| **Static RPS** | 11,082 | 23,242 | **22,104** | 24,786 |
+| **.htaccess overhead** | -4.2% | -18.8% | **-0.7%** | -18.1% |
+| **Memory** | 969 MB | 663 MB | **676 MB** | 819 MB |
+| **Compatibility** | 100% | 44% | **90%+** | 100% |
+| **License** | Free | Free | **Free** | Paid |
+| **Security ACL** | Full | Missing | **Full** | Full |
+
+<LinkCard title="Full benchmark and comparison" href="/compare/" description="Detailed results from 4-engine testing on identical hardware with WordPress 6.9 + 19 plugins." />
+
+---
+
+## Get Started
+
+<CardGrid>
+  <LinkCard title="Install LiteHTTPD" href="/getting-started/installation/" description="RPM, binary .so, or build from source. 5 minutes to full .htaccess support." />
+  <LinkCard title="WordPress Setup" href="/solutions/wordpress/" description="Tested with 15 popular plugins: AIOS, Wordfence, W3TC, Yoast, and more." />
+  <LinkCard title="Migrate from Apache" href="/migration/apache-to-ols/" description="Step-by-step guide. Your .htaccess files transfer unchanged." />
+  <LinkCard title="Replace LSWS" href="/migration/lsws-to-litehttpd/" description="Same 90%+ compatibility, no license fees. Save $65/month." />
+</CardGrid>
+
+---
+
+## Linux Documentation Alliance
+
+<CardGrid>
+  <LinkCard title="Debian.Club" href="https://debian.club/" description="Debian Linux community and documentation." />
+  <LinkCard title="Ubuntu.Fan" href="https://ubuntu.fan/" description="Ubuntu Linux community and resources." />
+  <LinkCard title="RunEntLinux" href="https://runentlinux.com/" description="Enterprise Linux guides and tutorials." />
+  <LinkCard title="AlmaLinuxCN" href="https://www.almalinux.com.cn/" description="AlmaLinux Chinese community." />
+</CardGrid>
+
+Check software end-of-life dates at [EOL.Wiki](https://eol.wiki/).
+
+AI-native open source server control panel: [WebCasa](https://web.casa).
+
+Lightweight web server with high Apache httpd compatibility: [LiteHTTPD](https://litehttpd.com).

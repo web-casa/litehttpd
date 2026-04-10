@@ -1,0 +1,328 @@
+# =============================================================================
+# P0 Test Cases — Four-Engine Comparison
+# =============================================================================
+# compare_mode:
+#   "all4"    = apache ≈ ols_native ≈ ols_module ≈ lsws
+#   "htaccess"= apache ≈ lsws (engines with native .htaccess rewrite support)
+#   "mod"     = apache ≈ ols_module (module-handled directives)
+#   "mod_lsws"= apache ≈ ols_module ≈ lsws (non-rewrite .htaccess directives)
+#   "known"   = known difference, documented in expected_diff.md
+
+# ---------------------------------------------------------------------------
+# Group: rewrite_core (8 cases)
+# OLS native/module do NOT read RewriteRule from .htaccess.
+# LSWS Enterprise reads .htaccess rewrite natively.
+# ---------------------------------------------------------------------------
+- id: RW_001
+  group: rewrite_core
+  desc: "WordPress-style fallback: non-existent path -> index.php"
+  method: GET
+  path: /hello-world
+  compare_mode: htaccess
+  checks:
+    status: 200
+    body_contains: ROOT_PHP_INDEX_V1
+
+- id: RW_002
+  group: rewrite_core
+  desc: "Capture group backref $1"
+  method: GET
+  path: /article/42
+  compare_mode: htaccess
+  checks:
+    status: 200
+    probe:GET.id: "42"
+
+- id: RW_003
+  group: rewrite_core
+  desc: "QSA — append existing query string"
+  method: GET
+  path: /search/test?extra=1
+  compare_mode: htaccess
+  checks:
+    status: 200
+    probe:GET.q: "test"
+
+- id: RW_004
+  group: rewrite_core
+  desc: "NC flag — case-insensitive match"
+  method: GET
+  path: /UPPER/hello
+  compare_mode: htaccess
+  checks:
+    status: 200
+    probe:GET.upper: "hello"
+
+- id: RW_005
+  group: rewrite_core
+  desc: "RewriteCond -f: existing file bypasses rewrite"
+  method: GET
+  path: /style.css
+  compare_mode: htaccess
+  checks:
+    status: 200
+    header:Content-Type_contains: "css"
+
+- id: RW_006
+  group: rewrite_core
+  desc: "RewriteCond -f: existing PHP file served directly"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: htaccess
+  checks:
+    status: 200
+    probe:PROBE_MARKER: "PROBE_V2"
+
+- id: RW_007
+  group: rewrite_core
+  desc: "Static file served without rewrite"
+  method: GET
+  path: /photo.jpg
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+- id: RW_008
+  group: rewrite_core
+  desc: "Non-existent path with query string preserved"
+  method: GET
+  path: /page/test?foo=bar
+  compare_mode: htaccess
+  checks:
+    status: 200
+    body_contains: ROOT_PHP_INDEX_V1
+
+# ---------------------------------------------------------------------------
+# Group: headers_core (5 cases)
+# ---------------------------------------------------------------------------
+- id: HD_001
+  group: headers_core
+  desc: "Header set — custom header present"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Custom-Header: "test-value-v1"
+
+- id: HD_002
+  group: headers_core
+  desc: "Header always set — security headers"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Frame-Options: "SAMEORIGIN"
+    header:X-Content-Type-Options: "nosniff"
+
+- id: HD_003
+  group: headers_core
+  desc: "Header append — multiple values"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Test-Append_contains: "appended"
+
+- id: HD_004
+  group: headers_core
+  desc: "Header unset — X-Powered-By removed"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Powered-By: null
+
+- id: HD_005
+  group: headers_core
+  desc: "ExpiresByType — CSS gets Cache-Control"
+  method: GET
+  path: /style.css
+  compare_mode: htaccess
+  checks:
+    status: 200
+    header:Cache-Control_contains: "max-age"
+
+# ---------------------------------------------------------------------------
+# Group: security_core (6 cases)
+# ---------------------------------------------------------------------------
+- id: SC_001
+  group: security_core
+  desc: "<Files wp-config.php> — blocked with 403"
+  method: GET
+  path: /wp-config.php
+  compare_mode: mod_lsws
+  checks:
+    status: 403
+
+- id: SC_002
+  group: security_core
+  desc: "<Files secret.txt> Require all denied — blocked"
+  method: GET
+  path: /secret.txt
+  compare_mode: mod_lsws
+  checks:
+    status: 403
+
+- id: SC_003
+  group: security_core
+  desc: "<FilesMatch .sql> — blocked"
+  method: GET
+  path: /dump.sql
+  compare_mode: known
+  checks:
+    status: 403
+  known_diff: "OLS may return 404 for static files not routed through module"
+
+- id: SC_004
+  group: security_core
+  desc: "<FilesMatch .log> — blocked"
+  method: GET
+  path: /debug.log
+  compare_mode: known
+  checks:
+    status: 403
+  known_diff: "OLS may return 404 for static files not routed through module"
+
+- id: SC_005
+  group: security_core
+  desc: "Options -Indexes — directory listing denied"
+  method: GET
+  path: /noindex/
+  compare_mode: mod_lsws
+  checks:
+    status_in: [403, 404]
+
+- id: SC_006
+  group: security_core
+  desc: "AuthType Basic — no credentials returns 401"
+  method: GET
+  path: /protected/secret.php
+  compare_mode: mod_lsws
+  checks:
+    status: 401
+
+# ---------------------------------------------------------------------------
+# Group: redirect_core (3 cases)
+# ---------------------------------------------------------------------------
+- id: RD_001
+  group: redirect_core
+  desc: "Redirect 301 /old-page -> /new-page"
+  method: GET
+  path: /old-page
+  compare_mode: known
+  checks:
+    status: 301
+    header:Location_contains: "/new-page"
+  known_diff: "OLS Module cannot intercept 404 requests for Redirect"
+
+- id: RD_002
+  group: redirect_core
+  desc: "RedirectMatch with capture groups"
+  method: GET
+  path: /blog/2024/03/
+  compare_mode: known
+  checks:
+    status: 301
+    header:Location_contains: "/archive/2024-03"
+  known_diff: "OLS Module cannot intercept 404 requests for RedirectMatch"
+
+- id: RD_003
+  group: redirect_core
+  desc: "Non-matching redirect path — no redirect"
+  method: GET
+  path: /old-page-not
+  compare_mode: htaccess
+  checks:
+    status: 200
+
+# ---------------------------------------------------------------------------
+# Group: module_core (5 cases)
+# ---------------------------------------------------------------------------
+- id: MC_001
+  group: module_core
+  desc: "SetEnv — TEST_ENV visible in probe"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    probe:TEST_ENV: "hello_from_htaccess"
+
+- id: MC_002
+  group: module_core
+  desc: "php_value memory_limit — reflected in ini_get"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: known
+  checks:
+    status: 200
+    probe:php_memory_limit: "256M"
+  known_diff: "OLS module php_value may not propagate to LSPHP runtime"
+
+- id: MC_003
+  group: module_core
+  desc: "AuthType Basic — valid credentials accepted"
+  method: GET
+  path: /protected/secret.php
+  auth: "testuser:testpass"
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    body_contains: "AUTH_OK_V1"
+
+- id: MC_004
+  group: module_core
+  desc: "AuthType Basic — wrong password rejected"
+  method: GET
+  path: /protected/secret.php
+  auth: "testuser:wrongpass"
+  compare_mode: mod_lsws
+  checks:
+    status: 401
+
+- id: MC_005
+  group: module_core
+  desc: "SetEnvIf Remote_Addr — env var check"
+  method: GET
+  path: /_probe/probe.php
+  compare_mode: mod
+  checks:
+    status: 200
+
+# ---------------------------------------------------------------------------
+# Group: inherit_core (3 cases) — subdirectory .htaccess inheritance
+# ---------------------------------------------------------------------------
+- id: IH_001
+  group: inherit_core
+  desc: "Subdir overrides parent Header"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Custom-Header: "subdir-override-v1"
+    header:X-Subdir-Header: "subdir-only"
+
+- id: IH_002
+  group: inherit_core
+  desc: "Subdir inherits parent security headers"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    header:X-Frame-Options: "SAMEORIGIN"
+
+- id: IH_003
+  group: inherit_core
+  desc: "Subdir overrides SetEnv"
+  method: GET
+  path: /subdir/_probe/probe.php
+  compare_mode: mod_lsws
+  checks:
+    status: 200
+    probe:TEST_ENV: "hello_from_subdir"

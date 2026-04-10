@@ -1,0 +1,47 @@
+scenario: wordpress-ewww
+app: wordpress + ewww
+purpose: image/static asset caching behavior and plugin-generated resource rules
+
+cases:
+  - id: WP_EWWW_001
+    category: app-health
+    desc: homepage remains healthy after EWWW plugin htaccess changes
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: WP_EWWW_002
+    category: ttl
+    desc: optimized image publishes long-lived TTL
+    method: GET
+    path: /wp-content/cache-matrix/test-image.jpg
+    assert:
+      - status_exact: 200
+      - header_contains: Cache-Control=max-age=
+      - ttl_close: 31536000
+
+  - id: WP_EWWW_003
+    category: headers
+    desc: image asset exposes expected content-type and cache headers
+    method: GET
+    path: /wp-content/cache-matrix/test-image.jpg
+    assert:
+      - status_exact: 200
+      - header_contains: Content-Type=image/
+
+  - id: WP_EWWW_004
+    category: deny
+    desc: original protected resource path behavior is stable
+    method: GET
+    path: /wp-content/cache-matrix/originals/
+    assert:
+      - status_exact: 403
+
+  - id: WP_EWWW_005
+    category: htaccess
+    desc: plugin-generated static rules are visible on deterministic asset
+    method: GET
+    path: /wp-content/cache-matrix/test-image.jpg
+    assert:
+      - status_exact: 200

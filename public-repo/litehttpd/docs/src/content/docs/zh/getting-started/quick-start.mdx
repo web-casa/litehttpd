@@ -1,0 +1,90 @@
+---
+title: 快速开始
+description: 5 分钟内让 LiteHTTPD 运行起来
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## 在 LiteHTTPD（完整版）上运行 WordPress
+
+<Steps>
+1. 安装 LiteHTTPD（RPM 仓库）：
+   ```bash
+   curl -s https://rpms.litehttpd.com/setup.sh | bash
+   dnf install openlitespeed-litehttpd
+   systemctl restart lsws
+   ```
+
+2. 在 `vhconf.conf` 中配置虚拟主机：
+   ```
+   docRoot /var/www/html
+   allowOverride 255
+   autoLoadHtaccess 1
+   ```
+
+3. 创建或验证你的 WordPress `.htaccess`：
+   ```apache
+   # BEGIN WordPress
+   RewriteEngine On
+   RewriteBase /
+   RewriteRule ^index\.php$ - [L]
+   RewriteCond %{REQUEST_FILENAME} !-f
+   RewriteCond %{REQUEST_FILENAME} !-d
+   RewriteRule . /index.php [L]
+   # END WordPress
+   ```
+
+4. 重启 OLS：
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+   ```
+
+5. 验证完整版功能：
+   ```bash
+   # RewriteRule [R=301] 重定向生效
+   curl -I localhost:8088/test-redirect/old-page
+   # 返回 301 Moved Permanently
+
+   # Header set 生效
+   curl -I localhost:8088/
+   # 显示自定义响应头
+
+   # Require all denied 生效
+   curl -I localhost:8088/.htaccess
+   # 返回 403 Forbidden
+   ```
+</Steps>
+
+## Thin 版本快速开始
+
+<Steps>
+1. 将模块复制到 OLS：
+   ```bash
+   cp litehttpd_htaccess.so /usr/local/lsws/modules/
+   ```
+
+2. 启用模块：
+   ```bash
+   cat >> /usr/local/lsws/conf/httpd_config.conf <<'CONF'
+
+   module litehttpd_htaccess {
+       ls_enabled              1
+   }
+   CONF
+   ```
+
+3. 重启并验证：
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+
+   # Header set 生效
+   curl -I localhost:8088/
+   # 显示自定义响应头
+
+   # Require all denied 生效
+   curl -I localhost:8088/.htaccess
+   # 返回 403 Forbidden
+   ```
+</Steps>
+
+在 Thin 版本中，RewriteRule `[R=301]` 将返回 404。如需重定向支持，请使用完整版。

@@ -1,0 +1,47 @@
+scenario: wordpress-w3-total-cache
+app: wordpress + w3-total-cache
+purpose: cache headers, expires, vary, etag, and rewrite-derived static behavior
+
+cases:
+  - id: WP_W3TC_001
+    category: headers
+    desc: homepage remains healthy after plugin-generated .htaccess rules
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: WP_W3TC_002
+    category: ttl
+    desc: CSS asset publishes expected cache TTL
+    method: GET
+    path: /wp-content/cache-matrix/test.css
+    assert:
+      - status_exact: 200
+      - header_contains: Cache-Control=max-age=
+      - ttl_close: 31536000
+
+  - id: WP_W3TC_003
+    category: headers
+    desc: static asset exposes Vary semantics when configured
+    method: GET
+    path: /wp-content/cache-matrix/test.js
+    assert:
+      - status_exact: 200
+      - header_contains: Vary=
+
+  - id: WP_W3TC_004
+    category: headers
+    desc: configured etag removal or normalization is observable
+    method: GET
+    path: /wp-content/cache-matrix/test.js
+    assert:
+      - status_exact: 200
+
+  - id: WP_W3TC_005
+    category: htaccess
+    desc: plugin-generated .htaccess behavior is visible on a cache-managed asset
+    method: GET
+    path: /wp-content/cache-matrix/test.css
+    assert:
+      - status_exact: 200

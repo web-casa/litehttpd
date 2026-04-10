@@ -1,0 +1,47 @@
+scenario: wordpress-litespeed-cache
+app: wordpress + litespeed-cache
+purpose: vary/cache header semantics and browser cache behavior under plugin-managed htaccess
+
+cases:
+  - id: WP_LSCACHE_001
+    category: app-health
+    desc: homepage remains healthy with LiteSpeed Cache rules present
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: WP_LSCACHE_002
+    category: headers
+    desc: homepage exposes configured vary semantics
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+      - header_contains: Vary=
+
+  - id: WP_LSCACHE_003
+    category: ttl
+    desc: static CSS asset advertises browser cache TTL
+    method: GET
+    path: /wp-content/cache-matrix/lscache.css
+    assert:
+      - status_exact: 200
+      - header_contains: Cache-Control=max-age=
+      - ttl_close: 31536000
+
+  - id: WP_LSCACHE_004
+    category: headers
+    desc: plugin-managed response header is observable on static asset
+    method: GET
+    path: /wp-content/cache-matrix/lscache.css
+    assert:
+      - status_exact: 200
+
+  - id: WP_LSCACHE_005
+    category: htaccess
+    desc: probe confirms engine sees request under plugin-managed rules
+    method: GET
+    path: /_probe/server.php
+    assert:
+      - status_exact: 200

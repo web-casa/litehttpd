@@ -1,0 +1,5 @@
+# Environment variables
+SetEnv APPLICATION_ENV production
+SetEnvIf Remote_Addr "^127\.0\.0\.1$" local_request
+SetEnvIf Request_URI "\.gif$" image_request
+BrowserMatch "MSIE" ie_browser

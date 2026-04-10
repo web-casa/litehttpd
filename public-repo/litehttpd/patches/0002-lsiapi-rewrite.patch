@@ -1,0 +1,132 @@
+--- a/include/ls.h
++++ b/include/ls.h
+@@ -3995,6 +3995,12 @@
+                           const char *value, int value_len,
+                           int op);
+ 
++
++    /* litehttpd: Rewrite engine LSIAPI extensions */
++    void *(*parse_rewrite_rules)(const char *rules_text, int text_len);
++    int (*exec_rewrite_rules)(const lsi_session_t *session, void *handle,
++                              const char *base, int base_len);
++    void (*free_rewrite_rules)(void *handle);
+ };
+ 
+ /**
+--- a/src/http/rewriteengine.h
++++ b/src/http/rewriteengine.h
+@@ -113,6 +113,7 @@
+                        const HttpContext *pContext, const HttpContext *pRootContext);
+     const char *getResultURI()     {   return m_pSourceURL;    }
+     int          getResultURILen()  {   return m_sourceURLLen;  }
++    int          getStatusCode()    {   return m_statusCode;    }
+ 
+     void clearUnparsedRuleBuf()     {   m_qsLen = 0;            }
+     int appendUnparsedRule(AutoStr2 &sDirective, char *pBegin,
+--- a/src/lsiapi/lsiapilib.cpp
++++ b/src/lsiapi/lsiapilib.cpp
+@@ -38,6 +38,8 @@
+ #include <http/reqparser.h>
+ #include <http/clientinfo.h>
+ #include <http/ntwkiolink.h>
++#include <http/rewriteengine.h>
++#include <http/rewriterulelist.h>
+ 
+ #include <log4cxx/logger.h>
+ #include <lsiapi/envmanager.h>
+@@ -3829,6 +3831,95 @@
+     pApi->get_php_config = nullptr;
+     pApi->set_req_header = nullptr;
+ 
++    /* litehttpd: Rewrite engine LSIAPI extensions */
++    pApi->parse_rewrite_rules = [](const char *rules_text,
++                                    int text_len) -> void * {
++        if (!rules_text || text_len <= 0)
++        if (text_len > 1024 * 1024) return NULL; /* 1MB max */
++            return NULL;
++        char *buf = (char *)malloc(text_len + 1);
++        if (!buf) return NULL;
++        memcpy(buf, rules_text, text_len);
++        buf[text_len] = 0x00;
++
++        /* Create a temporary HttpContext for parseRules.
++         * parseRules needs context for RewriteEngine On/Off and
++         * RewriteBase — we provide a throwaway context. */
++        HttpContext tmpCtx;
++        RewriteRuleList *pList = new RewriteRuleList();
++        char *p = buf;
++        if (RewriteEngine::parseRules(p, pList, NULL, &tmpCtx) == 0
++            && pList->begin()) {
++            free(buf);
++            return (void *)pList;
++        }
++        delete pList;
++        free(buf);
++        return NULL;
++    };
++
++    pApi->exec_rewrite_rules = [](const lsi_session_t *session,
++                                   void *handle,
++                                   const char *base,
++                                   int base_len) -> int {
++        if (!session || !handle)
++            return -1;
++        HttpSession *pSession = (HttpSession *)session;
++        HttpReq *pReq = pSession->getReq();
++        if (!pReq) return -1;
++        RewriteRuleList *pList = (RewriteRuleList *)handle;
++
++        /* Get context from the current request */
++        const HttpContext *pCtx = pReq->getContext();
++        if (!pCtx) return -1;
++
++        /* processRuleSet returns:
++         *   -3  = URL rewritten internally
++         *    0  = redirect set on pReq (or no match)
++         *  403  = forbidden
++         *  410  = gone
++         *  500  = error
++         * For redirect, it returns 0 but sets REWRITE_REDIR on pReq */
++        RewriteEngine &rwe = RewriteEngine::getInstance();
++        int ret = rwe.processRuleSet(
++            pList, pSession, pCtx, pCtx);
++
++        if (ret == -3) {
++            /* Internal rewrite — call postRewriteProcess */
++            pReq->postRewriteProcess(
++                rwe.getResultURI(),
++                rwe.getResultURILen());
++            return 1;
++        }
++        if (ret == SC_403 || ret == SC_410 || ret == SC_500) {
++            int httpCode = HttpStatusCode::getInstance().indexToCode(ret);
++            if (httpCode <= 0) httpCode = 403;
++            g_lsiapi.set_status_code(session, httpCode);
++            g_lsiapi.end_resp(session);
++            return httpCode;
++        }
++        /* Check if redirect was set on pReq */
++        if (pReq->getContextState(REWRITE_REDIR)) {
++            int sc = rwe.getStatusCode();
++            if (sc < SC_301 || sc >= SC_400)
++                sc = SC_302;
++            int httpCode = HttpStatusCode::getInstance().indexToCode(sc);
++            if (httpCode < 300 || httpCode >= 400) httpCode = 302;
++
++            /* OLS rewrite engine already set Location via setRewriteLocation.
++             * Just set status code and end response to prevent 404 fallthrough. */
++            g_lsiapi.set_status_code(session, httpCode);
++            g_lsiapi.end_resp(session);
++            return httpCode;
++        }
++        return 0;      /* No match */
++    };
++
++    pApi->free_rewrite_rules = [](void *handle) {
++        if (handle)
++            delete (RewriteRuleList *)handle;
++    };
++
+     g_lsiapi_ts = g_lsiapi;
+ 
+     pApi = &g_lsiapi_ts;
