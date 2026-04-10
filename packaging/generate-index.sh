@@ -7,6 +7,16 @@ REPO_DIR="${1%/}"
 SITE_NAME="LiteHTTPD RPM Repository"
 SITE_URL="https://rpms.litehttpd.com"
 
+# HTML-escape: & < > "
+html_escape() {
+    printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g; s/"/\&quot;/g'
+}
+
+# URL-encode path segment
+url_encode() {
+    printf '%s' "$1" | sed 's/ /%20/g; s/#/%23/g; s/?/%3F/g; s/%/%25/g'
+}
+
 generate_html() {
     local dir="$1"
     local rel_path="${dir#$REPO_DIR}"
@@ -14,48 +24,77 @@ generate_html() {
     rel_path="${rel_path%/}"
     local title="/"
     [ -n "$rel_path" ] && title="/${rel_path}/"
+    local safe_title
+    safe_title=$(html_escape "$title")
     local index_file="$dir/index.html"
+    local tmpfile
+    tmpfile=$(mktemp)
 
-    # Collect entries
-    local entries=""
+    # Collect entries into temp file (avoids O(n^2) string concat)
     for item in "$dir"/*; do
         [ -e "$item" ] || continue
-        local name=$(basename "$item")
+        local name
+        name=$(basename "$item")
         [ "$name" = "index.html" ] && continue
 
-        if [ -d "$item" ]; then
-            local size="-"
-            local icon="📁"
-            local href="$name/"
-        else
-            local bytes=$(stat -c%s "$item" 2>/dev/null || stat -f%z "$item" 2>/dev/null || echo 0)
-            if [ "$bytes" -ge 1048576 ]; then
-                local size="$((bytes / 1048576)).$((bytes % 1048576 * 10 / 1048576)) MB"
-            elif [ "$bytes" -ge 1024 ]; then
-                local size="$((bytes / 1024)).$((bytes % 1024 * 10 / 1024)) KB"
-            else
-                local size="${bytes} B"
-            fi
-            local icon="📄"
-            case "$name" in
-                *.rpm) icon="📦" ;;
-                *.xml|*.xml.asc) icon="🔐" ;;
-                *.sh) icon="⚙️" ;;
-                *.gz|*.bz2|*.xz|*.zst) icon="🗜️" ;;
-                RPM-GPG-KEY*) icon="🔑" ;;
-            esac
-            local href="$name"
-        fi
-        local mtime=$(stat -c%Y "$item" 2>/dev/null || stat -f%m "$item" 2>/dev/null || echo 0)
-        local date=$(date -d "@$mtime" "+%Y-%m-%d %H:%M" 2>/dev/null || date -r "$mtime" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "-")
+        local safe_name href size icon date_str
+        safe_name=$(html_escape "$name")
 
-        entries="$entries<tr><td class=\"icon\">$icon</td><td class=\"name\"><a href=\"$href\">$name</a></td><td class=\"size\">$size</td><td class=\"date\">$date</td></tr>\n"
+        if [ -d "$item" ]; then
+            size="-"
+            icon="&#x1F4C1;"
+            href="$(url_encode "$name")/"
+        else
+            local bytes
+            bytes=$(stat -c%s "$item" 2>/dev/null || stat -f%z "$item" 2>/dev/null || echo 0)
+            if [ "$bytes" -ge 1048576 ]; then
+                size="$((bytes / 1048576)).$((bytes % 1048576 * 10 / 1048576)) MB"
+            elif [ "$bytes" -ge 1024 ]; then
+                size="$((bytes / 1024)).$((bytes % 1024 * 10 / 1024)) KB"
+            else
+                size="${bytes} B"
+            fi
+            icon="&#x1F4C4;"
+            case "$name" in
+                *.rpm) icon="&#x1F4E6;" ;;
+                *.xml|*.xml.asc|*.asc) icon="&#x1F510;" ;;
+                *.sh) icon="&#x2699;&#xFE0F;" ;;
+                *.gz|*.bz2|*.xz|*.zst) icon="&#x1F5DC;&#xFE0F;" ;;
+                RPM-GPG-KEY*) icon="&#x1F511;" ;;
+            esac
+            href=$(url_encode "$name")
+        fi
+        local mtime
+        mtime=$(stat -c%Y "$item" 2>/dev/null || stat -f%m "$item" 2>/dev/null || echo 0)
+        date_str=$(date -d "@$mtime" "+%Y-%m-%d %H:%M" 2>/dev/null || date -r "$mtime" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "-")
+
+        printf '<tr><td class="icon">%s</td><td class="name"><a href="%s">%s</a></td><td class="size">%s</td><td class="date">%s</td></tr>\n' \
+            "$icon" "$href" "$safe_name" "$size" "$date_str" >> "$tmpfile"
     done
 
     # Parent link
     local parent=""
     if [ -n "$rel_path" ]; then
-        parent='<tr><td class="icon">⬆️</td><td class="name"><a href="../">Parent Directory</a></td><td class="size">-</td><td class="date">-</td></tr>'
+        parent='<tr><td class="icon">&#x2B06;&#xFE0F;</td><td class="name"><a href="../">Parent Directory</a></td><td class="size">-</td><td class="date">-</td></tr>'
+    fi
+
+    # Breadcrumb
+    local breadcrumb='<a href="/">root</a>'
+    if [ -n "$rel_path" ]; then
+        local accum=""
+        IFS='/' read -ra parts <<< "$rel_path"
+        for part in "${parts[@]}"; do
+            accum="$accum/$part"
+            local safe_part
+            safe_part=$(html_escape "$part")
+            breadcrumb="$breadcrumb / <a href=\"$accum/\">$safe_part</a>"
+        done
+    fi
+
+    # Install hint
+    local install_block=""
+    if [ -z "$rel_path" ]; then
+        install_block='<div class="install"><strong>Quick Install:</strong><br><code>curl -s https://rpms.litehttpd.com/setup.sh | bash &amp;&amp; dnf install openlitespeed-litehttpd</code></div>'
     fi
 
     cat > "$index_file" << HTMLEOF
@@ -64,7 +103,7 @@ generate_html() {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>$SITE_NAME — $title</title>
+<title>$SITE_NAME — $safe_title</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, 'Segoe UI', Roboto, monospace; background: #0d1117; color: #c9d1d9; }
@@ -103,47 +142,26 @@ tr:hover { background: #161b22; }
 </div>
 </div>
 <div class="container">
-HTMLEOF
-
-    # Breadcrumb
-    echo -n '<p class="breadcrumb"><a href="/">root</a>' >> "$index_file"
-    if [ -n "$rel_path" ]; then
-        IFS='/' read -ra parts <<< "$rel_path"
-        local accum=""
-        for part in "${parts[@]}"; do
-            accum="$accum/$part"
-            echo -n " / <a href=\"$accum/\">$part</a>" >> "$index_file"
-        done
-    fi
-    echo '</p>' >> "$index_file"
-
-    # Install hint on root page
-    if [ -z "$rel_path" ]; then
-        cat >> "$index_file" << 'INSTALLEOF'
-<div class="install">
-<strong>Quick Install:</strong><br>
-<code>curl -s https://rpms.litehttpd.com/setup.sh | bash && dnf install openlitespeed-litehttpd</code>
-</div>
-INSTALLEOF
-    fi
-
-    cat >> "$index_file" << TABLEEOF
+<p class="breadcrumb">$breadcrumb</p>
+$install_block
 <table>
 <thead><tr><th></th><th>Name</th><th class="size">Size</th><th class="date">Modified</th></tr></thead>
 <tbody>
 $parent
-$(echo -e "$entries")
+$(cat "$tmpfile")
 </tbody>
 </table>
 <div class="footer">Powered by <a href="https://web.casa">Web.Casa</a> &middot; LiteHTTPD</div>
 </div>
 </body>
 </html>
-TABLEEOF
+HTMLEOF
+
+    rm -f "$tmpfile"
 }
 
-# Generate for all directories recursively
-find "$REPO_DIR" -type d | sort | while read dir; do
+# Generate for all directories recursively (null-delimited for safety)
+find "$REPO_DIR" -type d -print0 | sort -z | while IFS= read -r -d '' dir; do
     generate_html "$dir"
 done
 
