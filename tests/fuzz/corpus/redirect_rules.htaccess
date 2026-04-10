@@ -1,0 +1,4 @@
+# Redirect rules
+Redirect 301 /old-page /new-page
+Redirect /temp-page /other-page
+RedirectMatch 301 ^/blog/([0-9]+)/([0-9]+)$ /archive/$1/$2

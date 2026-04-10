@@ -1,0 +1,17 @@
+# Subdirectory .htaccess — tests DirWalker inheritance
+# Child overrides parent for same-name directives
+
+# Override parent's X-Custom-Header
+Header set X-Custom-Header "subdir-override-v1"
+
+# Add a subdir-only header
+Header set X-Subdir-Header "subdir-only"
+
+# Override DirectoryIndex
+DirectoryIndex custom.html index.php
+
+# Override PHP config
+php_value max_execution_time 120
+
+# Subdir-specific env
+SetEnv TEST_ENV "hello_from_subdir"

@@ -1,0 +1,23 @@
+# Typical WordPress-style .htaccess
+Header set X-Frame-Options "SAMEORIGIN"
+Header set X-XSS-Protection "1; mode=block"
+Header set X-Content-Type-Options "nosniff"
+
+ExpiresActive On
+ExpiresByType image/jpeg "access plus 1 year"
+ExpiresByType text/css "access plus 1 month"
+ExpiresByType application/javascript "access plus 1 month"
+
+<FilesMatch "\.(php|phtml)$">
+Header set X-Content-Type-Options "nosniff"
+</FilesMatch>
+
+ErrorDocument 404 /index.php
+ErrorDocument 403 /index.php
+
+php_value upload_max_filesize 128M
+php_value post_max_size 128M
+php_value max_execution_time 600
+
+Order Deny,Allow
+Allow from all

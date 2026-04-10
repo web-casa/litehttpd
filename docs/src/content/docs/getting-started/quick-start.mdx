@@ -1,0 +1,90 @@
+---
+title: Quick Start
+description: Get LiteHTTPD running in 5 minutes
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## WordPress on LiteHTTPD (Full)
+
+<Steps>
+1. Install LiteHTTPD (RPM repo):
+   ```bash
+   curl -s https://rpms.litehttpd.com/setup.sh | bash
+   dnf install openlitespeed-litehttpd
+   systemctl restart lsws
+   ```
+
+2. Configure your vhost in `vhconf.conf`:
+   ```
+   docRoot /var/www/html
+   allowOverride 255
+   autoLoadHtaccess 1
+   ```
+
+3. Create or verify your WordPress `.htaccess`:
+   ```apache
+   # BEGIN WordPress
+   RewriteEngine On
+   RewriteBase /
+   RewriteRule ^index\.php$ - [L]
+   RewriteCond %{REQUEST_FILENAME} !-f
+   RewriteCond %{REQUEST_FILENAME} !-d
+   RewriteRule . /index.php [L]
+   # END WordPress
+   ```
+
+4. Restart OLS:
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+   ```
+
+5. Verify Full features:
+   ```bash
+   # RewriteRule [R=301] works
+   curl -I localhost:8088/test-redirect/old-page
+   # Returns 301 Moved Permanently
+
+   # Header set works
+   curl -I localhost:8088/
+   # Shows custom headers
+
+   # Require all denied works
+   curl -I localhost:8088/.htaccess
+   # Returns 403 Forbidden
+   ```
+</Steps>
+
+## Quick Start with Thin Edition
+
+<Steps>
+1. Copy the module to OLS:
+   ```bash
+   cp litehttpd_htaccess.so /usr/local/lsws/modules/
+   ```
+
+2. Enable the module:
+   ```bash
+   cat >> /usr/local/lsws/conf/httpd_config.conf <<'CONF'
+
+   module litehttpd_htaccess {
+       ls_enabled              1
+   }
+   CONF
+   ```
+
+3. Restart and verify:
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+
+   # Header set works
+   curl -I localhost:8088/
+   # Shows custom headers
+
+   # Require all denied works
+   curl -I localhost:8088/.htaccess
+   # Returns 403 Forbidden
+   ```
+</Steps>
+
+RewriteRule `[R=301]` will return 404 in Thin edition. Use Full for redirect support.

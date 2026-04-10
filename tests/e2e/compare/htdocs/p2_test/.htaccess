@@ -1,0 +1,97 @@
+# P2 Test Cases .htaccess — Edge Cases
+
+# Edge cases
+Header set X-Special-Chars "value with spaces and \"quotes\""
+Header set X-Long-Value "AAAAAAAAAA..." # 1KB value placeholder
+
+# Regex edge cases
+<FilesMatch "^exact-match\.txt$">
+  Require all denied
+</FilesMatch>
+
+<FilesMatch "[a-z]+\.txt">
+  Require all denied
+</FilesMatch>
+
+<FilesMatch "[^0-9]+\.txt">
+  Require all denied
+</FilesMatch>
+
+<FilesMatch "\.a{2,4}$">
+  Require all denied
+</FilesMatch>
+
+<FilesMatch "\.(jpg|png|gif)$">
+  Require all denied
+</FilesMatch>
+
+# ACL edge cases
+<Directory "/var/www/html/localhost-only">
+  Order Deny,Allow
+  Deny from all
+  Allow from 127.0.0.1
+  Allow from ::1
+</Directory>
+
+# Require ip with CIDR
+<Directory "/var/www/html/cidr-test">
+  Require ip 127.0.0.0/8
+  Require ip 192.168.0.0/16
+</Directory>
+
+# IfModule tests
+<IfModule mod_headers.c>
+  Header set X-IfModule-Test "enabled"
+</IfModule>
+
+<IfModule !mod_nonexistent.c>
+  Header set X-IfModule-Negation "enabled"
+</IfModule>
+
+# Require complex
+<RequireAll>
+  Require ip 127.0.0.1
+  Require all granted
+</RequireAll>
+
+<RequireAny>
+  Require ip 127.0.0.1
+  Require ip 192.168.1.1
+</RequireAny>
+
+# Options complex
+<Directory "/var/www/html/with-indexes">
+  Options +Indexes
+</Directory>
+
+<Directory "/var/www/html/options-all">
+  Options All
+</Directory>
+
+<Directory "/var/www/html/options-none">
+  Options None
+</Directory>
+
+# Encoding and charset
+AddDefaultCharset UTF-8
+AddCharset UTF-8 .txt .html
+AddEncoding br .br
+AddEncoding gzip .gz
+
+# Directory index
+DirectoryIndex index.php index.html default.htm
+
+# Cache control
+<FilesMatch "\.php$">
+  Header set Cache-Control "no-cache, no-store, must-revalidate"
+  Header set Pragma "no-cache"
+  Header set Expires "0"
+</FilesMatch>
+
+# Brute force protection (custom directive)
+BruteForceProtection On
+BruteForceAllowedAttempts 5
+BruteForceWindow 600
+BruteForceAction block
+BruteForceWhitelist 127.0.0.1
+BruteForceXForwardedFor On

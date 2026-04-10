@@ -1,0 +1,74 @@
+# P1 Test Cases .htaccess
+
+# Headers advanced
+Header merge X-Test-Merge "value1, value2"
+Header add Set-Cookie "session=abc123"
+Header add Set-Cookie "user=testuser"
+Header set X-Conditional-Header "value" env=SPECIAL_ENV
+
+# Security advanced
+<Directory "/var/www/html/restricted">
+  Order Allow,Deny
+  Deny from all
+</Directory>
+
+<Files ".htaccess">
+  Require all denied
+</Files>
+
+<FilesMatch "\.(tar|gz|zip|bak|backup)$">
+  Require all denied
+</FilesMatch>
+
+# Auth advanced
+<Directory "/var/www/html/protected">
+  AuthType Basic
+  AuthName "Protected Area"
+  AuthUserFile /var/www/html/protected/.htpasswd
+  Require valid-user
+</Directory>
+
+# Expires advanced
+ExpiresActive On
+ExpiresDefault "access plus 1 hour"
+ExpiresByType image/png "access plus 1 year"
+ExpiresByType application/pdf "access plus 1 month"
+
+# Environment advanced
+SetEnvIf User-Agent "iPhone" IS_MOBILE=1
+SetEnvIf User-Agent "Android" IS_MOBILE=1
+SetEnvIf Referer "google\.com" FROM_GOOGLE=1
+BrowserMatch "MSIE" IS_IE=1
+
+# PHP advanced
+php_flag display_errors Off
+php_value upload_max_filesize 128M
+php_value post_max_size 128M
+php_admin_value open_basedir "/var/www/html"
+php_admin_flag allow_url_fopen Off
+
+# Error documents
+ErrorDocument 403 "Access Forbidden by htaccess"
+ErrorDocument 404 "Page Not Found by htaccess"
+ErrorDocument 500 "Internal Server Error"
+
+# MIME types
+AddType application/x-custom .xyz
+AddEncoding gzip .gz
+AddCharset UTF-8 .txt .html
+
+# Handlers
+AddHandler application/x-httpd-php5 .php5
+SetHandler application/x-httpd-php
+
+# Limit methods
+<Limit GET>
+  Require all denied
+</Limit>
+
+<LimitExcept GET POST>
+  Require all denied
+</LimitExcept>
+
+# Options
+Options -Indexes +FollowSymLinks -ExecCGI

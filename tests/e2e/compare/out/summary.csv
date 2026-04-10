@@ -1,0 +1,66 @@
+id,group,desc,compare_mode,apache,ols_native,ols_module,lsws,result
+EC_P2_001,edge_cases,"URI with encoded space %20",mod_lsws,200,200,200,000,FAIL
+EC_P2_002,edge_cases,"Query string with special chars",mod_lsws,200,200,200,000,FAIL
+EC_P2_003,edge_cases,"Multiple query parameters",mod_lsws,200,200,200,000,FAIL
+EC_P2_004,edge_cases,"Empty query string",mod_lsws,200,200,200,000,FAIL
+EC_P2_005,edge_cases,"Path with trailing slash",mod_lsws,200,200,200,000,FAIL
+EC_P2_006,edge_cases,"Path without trailing slash",mod_lsws,200,200,200,000,FAIL
+EC_P2_007,edge_cases,"Case sensitive path — lowercase",htaccess,200,200,200,000,FAIL
+EC_P2_008,edge_cases,"Case sensitive path — uppercase",htaccess,200,404,200,000,FAIL
+EC_P2_009,edge_cases,"Double extension file",htaccess,200,200,200,000,FAIL
+EC_P2_010,edge_cases,"Hidden file access attempt",known,403,403,403,000,PASS
+HE_P2_001,headers_edge,"Multiple same headers",mod_lsws,200,200,200,000,FAIL
+HE_P2_002,headers_edge,"Header with empty value",mod_lsws,200,200,200,000,FAIL
+HE_P2_003,headers_edge,"Header case sensitivity",mod_lsws,200,200,200,000,FAIL
+HE_P2_004,headers_edge,"Content-Type header",htaccess,200,200,200,000,FAIL
+HE_P2_005,headers_edge,"Cache-Control header",htaccess,200,200,200,000,FAIL
+HE_P2_006,headers_edge,"Multiple security headers",mod_lsws,200,200,200,000,FAIL
+HE_P2_007,headers_edge,"Header inheritance from parent",mod_lsws,200,200,200,000,FAIL
+HE_P2_008,headers_edge,"Header override in subdir",mod_lsws,200,200,200,000,FAIL
+AC_P2_001,acl_edge,"Allow from localhost",mod_lsws,200,200,200,000,FAIL
+AC_P2_002,acl_edge,"Files block — wp-config.php",mod_lsws,403,200,403,000,FAIL
+AC_P2_003,acl_edge,"Files block — secret.txt",mod_lsws,403,200,403,000,FAIL
+AC_P2_004,acl_edge,"FilesMatch — .sql extension",known,403,200,403,000,PASS
+AC_P2_005,acl_edge,"FilesMatch — .log extension",known,403,200,403,000,PASS
+AC_P2_006,acl_edge,"Require all granted",mod_lsws,200,200,200,000,FAIL
+AU_P2_001,auth_edge,"Auth — no credentials",mod_lsws,401,200,401,000,FAIL
+AU_P2_002,auth_edge,"Auth — valid credentials",mod_lsws,200,200,200,000,FAIL
+AU_P2_003,auth_edge,"Auth — wrong username",mod_lsws,401,200,401,000,FAIL
+AU_P2_004,auth_edge,"Auth — wrong password",mod_lsws,401,200,401,000,FAIL
+AU_P2_005,auth_edge,"Auth — empty password",mod_lsws,401,200,401,000,FAIL
+MT_P2_001,mime_edge,"CSS MIME type",htaccess,200,200,200,000,FAIL
+MT_P2_002,mime_edge,"JPEG MIME type",htaccess,200,200,200,000,FAIL
+MT_P2_003,mime_edge,"HTML MIME type",htaccess,200,200,200,000,FAIL
+MT_P2_004,mime_edge,"PHP MIME type",htaccess,200,200,200,000,FAIL
+MT_P2_005,mime_edge,"JavaScript MIME type",htaccess,200,200,200,000,FAIL
+EX_P2_001,expires_edge,"Expires — CSS file",htaccess,200,200,200,000,FAIL
+EX_P2_002,expires_edge,"Expires — JPEG file",htaccess,200,200,200,000,FAIL
+EX_P2_003,expires_edge,"Expires — HTML file",htaccess,200,200,200,000,FAIL
+EX_P2_004,expires_edge,"Expires — PHP file",htaccess,200,200,200,000,FAIL
+EX_P2_005,expires_edge,"Expires — subdir file",htaccess,200,200,200,000,FAIL
+EN_P2_001,env_edge,"SetEnv — root level",mod_lsws,200,200,200,000,FAIL
+EN_P2_002,env_edge,"SetEnv — subdir override",mod_lsws,200,200,200,000,FAIL
+EN_P2_003,env_edge,"SetEnvIf — Remote_Addr",mod,200,200,200,000,PASS
+EN_P2_004,env_edge,"Multiple env vars",mod_lsws,200,200,200,000,FAIL
+EN_P2_005,env_edge,"Env var inheritance",mod_lsws,200,200,200,000,FAIL
+RD_P2_001,redirect_edge,"Redirect 301",known,301,404,301,000,PASS
+RD_P2_002,redirect_edge,"RedirectMatch",known,301,404,301,000,PASS
+RD_P2_003,redirect_edge,"Non-matching redirect",htaccess,200,404,200,000,FAIL
+OP_P2_001,options_edge,"Options -Indexes",mod_lsws,403,404,404,000,FAIL
+OP_P2_002,options_edge,"Options +FollowSymLinks",mod_lsws,200,200,200,000,FAIL
+OP_P2_003,options_edge,"Options inheritance",mod_lsws,200,200,200,000,FAIL
+OP_P2_004,options_edge,"Options in subdir",mod_lsws,200,200,200,000,FAIL
+ED_P2_001,error_doc_edge,"ErrorDocument 403",mod_lsws,403,200,403,000,FAIL
+ED_P2_002,error_doc_edge,"ErrorDocument 401",mod_lsws,401,200,401,000,FAIL
+ED_P2_003,error_doc_edge,"ErrorDocument 404 fallback",htaccess,200,404,200,000,FAIL
+ED_P2_004,error_doc_edge,"ErrorDocument inheritance",htaccess,200,404,200,000,FAIL
+IH_P2_001,inherit_edge,"Subdir inherits headers",mod_lsws,200,200,200,000,FAIL
+IH_P2_002,inherit_edge,"Subdir overrides header",mod_lsws,200,200,200,000,FAIL
+IH_P2_003,inherit_edge,"Subdir adds header",mod_lsws,200,200,200,000,FAIL
+IH_P2_004,inherit_edge,"Subdir inherits env",mod_lsws,200,200,200,000,FAIL
+IH_P2_005,inherit_edge,"Subdir overrides env",mod_lsws,200,200,200,000,FAIL
+RW_P2_001,rewrite_edge,"Rewrite — existing file",htaccess,200,200,200,000,FAIL
+RW_P2_002,rewrite_edge,"Rewrite — existing CSS",htaccess,200,200,200,000,FAIL
+RW_P2_003,rewrite_edge,"Rewrite — existing image",htaccess,200,200,200,000,FAIL
+RW_P2_004,rewrite_edge,"Rewrite — fallback to index",htaccess,200,404,200,000,FAIL
+RW_P2_005,rewrite_edge,"Rewrite — with query string",htaccess,200,404,200,000,FAIL

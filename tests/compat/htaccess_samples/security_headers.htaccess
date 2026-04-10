@@ -1,0 +1,6 @@
+# Security headers sample
+Header always set X-Frame-Options DENY
+Header always set X-Content-Type-Options nosniff
+Header always set X-XSS-Protection 1
+Header always set Referrer-Policy no-referrer
+Header always unset X-Powered-By

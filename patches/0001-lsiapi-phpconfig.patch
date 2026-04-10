@@ -1,0 +1,69 @@
+--- a/include/ls.h
++++ b/include/ls.h
+@@ -3981,6 +3981,20 @@
+     void (*register_thread_cleanup)(const lsi_module_t *module,
+                                     void (*routine)(void *), void * arg);
+ 
++    /* litehttpd: PHPConfig LSIAPI + request header write */
++    int (*set_php_config_value)(const lsi_session_t *session,
++                                const char *name, const char *value,
++                                int type);
++    int (*set_php_config_flag)(const lsi_session_t *session,
++                               const char *name, int value,
++                               int type);
++    int (*get_php_config)(const lsi_session_t *session,
++                          const char *name, char *buf, int buf_len);
++    int (*set_req_header)(const lsi_session_t *session,
++                          const char *name, int name_len,
++                          const char *value, int value_len,
++                          int op);
++
+ };
+ 
+ /**
+--- a/src/lsiapi/lsiapilib.cpp
++++ b/src/lsiapi/lsiapilib.cpp
+@@ -3792,6 +3792,43 @@
+     pApi->schedule_remove_session_cbs_event = schedule_remove_session_cbs_event;
+     pApi->register_thread_cleanup = register_thread_cleanup_ts;
+ 
++    /* litehttpd: PHPConfig LSIAPI extensions */
++    pApi->set_php_config_value = [](const lsi_session_t *session,
++                                    const char *name, const char *value,
++                                    int type) -> int {
++        if (!session || !name || !name[0]) return -1;
++        HttpSession *pSess = (HttpSession *)session;
++        HttpReq *pReq = pSess->getReq();
++        if (!pReq) return -1;
++        HttpContext *pCtx = (HttpContext *)pReq->getContext();
++        if (!pCtx) return -1;
++        PHPConfig *pCfg = pCtx->getPHPConfig();
++        if (!pCfg) {
++            pCfg = new PHPConfig();
++            pCtx->setPHPConfig(pCfg);
++        }
++        char buf[1024];
++        int n = snprintf(buf, sizeof(buf), "%s %s", name, value ? value : "");
++        if (n < 0 || n >= (int)sizeof(buf)) return -1;
++        char err[256] = {0};
++        if (pCfg->parse(type, buf, err, sizeof(err)) != 0) {
++            LS_WARN("PHPConfig parse failed: %s", err[0] ? err : "(unknown)");
++            return -1;
++        }
++        pCfg->buildLsapiEnv();
++        return 0;
++    };
++    pApi->set_php_config_flag = [](const lsi_session_t *session,
++                                   const char *name, int value,
++                                   int type) -> int {
++        const char *v = value ? "1" : "0";
++        if (g_lsiapi.set_php_config_value)
++            return g_lsiapi.set_php_config_value(session, name, v, type);
++        return -1;
++    };
++    pApi->get_php_config = nullptr;
++    pApi->set_req_header = nullptr;
++
+     g_lsiapi_ts = g_lsiapi;
+ 
+     pApi = &g_lsiapi_ts;

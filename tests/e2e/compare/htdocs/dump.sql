@@ -1,0 +1,1 @@
+-- SQL dump should be blocked by FilesMatch

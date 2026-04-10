@@ -1,0 +1,120 @@
+---
+title: 安装
+description: 如何在 OpenLiteSpeed 上安装 LiteHTTPD
+---
+
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+
+## LiteHTTPD 安装
+
+LiteHTTPD（完整版）是默认且推荐的版本。它包含打补丁的 OLS 二进制文件和 htaccess 模块。
+
+### 前提条件
+
+- OpenLiteSpeed 1.7.0 或更高版本
+- Linux x86_64 或 ARM64
+
+<Tabs>
+<TabItem label="RPM 仓库 (EL 9) -- 推荐">
+
+<Steps>
+1. 添加 LiteHTTPD RPM 仓库并安装：
+   ```bash
+   curl -s https://rpms.litehttpd.com/setup.sh | bash
+   dnf install openlitespeed-litehttpd
+   ```
+
+   一个 RPM 包含打补丁的 OLS 二进制文件、内置的 htaccess 模块和自动配置。软件包已 GPG 签名。
+
+2. 重启 OLS：
+   ```bash
+   systemctl restart lsws
+   ```
+</Steps>
+
+</TabItem>
+<TabItem label="手动下载 RPM">
+
+<Steps>
+1. 从 [rpms.litehttpd.com](https://rpms.litehttpd.com/) 下载，或添加仓库源：
+
+2. 安装：
+   ```bash
+   dnf install ./openlitespeed-litehttpd-*.rpm
+   ```
+
+3. 重启 OLS：
+   ```bash
+   systemctl restart lsws
+   ```
+</Steps>
+
+</TabItem>
+<TabItem label="从源码构建（完整版）">
+
+<Steps>
+1. 安装构建依赖：
+   ```bash
+   # AlmaLinux / Rocky / RHEL
+   dnf install cmake gcc gcc-c++ libcrypt-devel
+
+   # Ubuntu / Debian
+   apt install cmake g++ libcrypt-dev
+   ```
+
+2. 克隆 OLS，应用补丁并构建：
+   ```bash
+   git clone --branch v1.8.5 https://github.com/litespeedtech/openlitespeed.git
+   cd openlitespeed
+   patch -p1 < /path/to/patches/0001-lsiapi-phpconfig.patch
+   patch -p1 < /path/to/patches/0002-lsiapi-rewrite.patch
+   # 应用补丁 0003、0004
+   bash build.sh
+   ```
+
+3. 构建模块：
+   ```bash
+   cd /path/to/litehttpd
+   cmake -B build -DCMAKE_BUILD_TYPE=Release
+   cmake --build build --target litehttpd_htaccess
+   ```
+
+4. 安装：
+   ```bash
+   cp build/litehttpd_htaccess.so /usr/local/lsws/modules/
+   ```
+</Steps>
+
+</TabItem>
+</Tabs>
+
+## LiteHTTPD-Thin（仅模块）
+
+适用于未打补丁的原生 OLS。安装快捷但功能有限：
+
+- RewriteRule 指令会被解析但不会执行
+- `php_value`/`php_flag` 指令会被解析但不会传递给 lsphp
+
+<Steps>
+1. 将模块复制到 OLS：
+   ```bash
+   cp litehttpd_htaccess.so /usr/local/lsws/modules/
+   ```
+
+2. 在 OLS 配置中启用模块：
+   ```bash
+   cat >> /usr/local/lsws/conf/httpd_config.conf <<'CONF'
+
+   module litehttpd_htaccess {
+       ls_enabled              1
+   }
+   CONF
+   ```
+
+3. 重启 OLS：
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+   ```
+</Steps>
+
+对于依赖 `.htaccess` 重定向的生产环境 WordPress 站点，建议升级到完整版。

@@ -1,0 +1,355 @@
+[
+  {
+    "id": "EC_P2_001", "group": "edge_cases",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EC_P2_002", "group": "edge_cases",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EC_P2_003", "group": "edge_cases",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EC_P2_004", "group": "edge_cases",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EC_P2_005", "group": "edge_cases",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EC_P2_006", "group": "edge_cases",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EC_P2_007", "group": "edge_cases",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EC_P2_008", "group": "edge_cases",
+    "apache": 200, "ols_native": 404, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected one of [200, 404] got=000\n"
+  }
+,
+  {
+    "id": "EC_P2_009", "group": "edge_cases",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "HE_P2_001", "group": "headers_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header X-Frame-Options expected='SAMEORIGIN' got=''\n"
+  }
+,
+  {
+    "id": "HE_P2_002", "group": "headers_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "HE_P2_003", "group": "headers_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header X-Custom-Header expected='test-value-v1' got=''\n"
+  }
+,
+  {
+    "id": "HE_P2_004", "group": "headers_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header Content-Type expected to contain 'css' got=''\n"
+  }
+,
+  {
+    "id": "HE_P2_005", "group": "headers_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header Cache-Control expected to contain 'max-age' got=''\n"
+  }
+,
+  {
+    "id": "HE_P2_006", "group": "headers_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header X-Frame-Options expected='SAMEORIGIN' got=''\n    lsws: header X-Content-Type-Options expected='nosniff' got=''\n"
+  }
+,
+  {
+    "id": "HE_P2_007", "group": "headers_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header X-Frame-Options expected='SAMEORIGIN' got=''\n"
+  }
+,
+  {
+    "id": "HE_P2_008", "group": "headers_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header X-Custom-Header expected='subdir-override-v1' got=''\n"
+  }
+,
+  {
+    "id": "AC_P2_001", "group": "acl_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "AC_P2_002", "group": "acl_edge",
+    "apache": 403, "ols_native": 200, "ols_module": 403, "lsws": 000,
+    "errors": "    lsws: status expected=403 got=000\n"
+  }
+,
+  {
+    "id": "AC_P2_003", "group": "acl_edge",
+    "apache": 403, "ols_native": 200, "ols_module": 403, "lsws": 000,
+    "errors": "    lsws: status expected=403 got=000\n"
+  }
+,
+  {
+    "id": "AC_P2_006", "group": "acl_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "AU_P2_001", "group": "auth_edge",
+    "apache": 401, "ols_native": 200, "ols_module": 401, "lsws": 000,
+    "errors": "    lsws: status expected=401 got=000\n"
+  }
+,
+  {
+    "id": "AU_P2_002", "group": "auth_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "AU_P2_003", "group": "auth_edge",
+    "apache": 401, "ols_native": 200, "ols_module": 401, "lsws": 000,
+    "errors": "    lsws: status expected=401 got=000\n"
+  }
+,
+  {
+    "id": "AU_P2_004", "group": "auth_edge",
+    "apache": 401, "ols_native": 200, "ols_module": 401, "lsws": 000,
+    "errors": "    lsws: status expected=401 got=000\n"
+  }
+,
+  {
+    "id": "AU_P2_005", "group": "auth_edge",
+    "apache": 401, "ols_native": 200, "ols_module": 401, "lsws": 000,
+    "errors": "    lsws: status expected=401 got=000\n"
+  }
+,
+  {
+    "id": "MT_P2_001", "group": "mime_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header Content-Type expected to contain 'css' got=''\n"
+  }
+,
+  {
+    "id": "MT_P2_002", "group": "mime_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "MT_P2_003", "group": "mime_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header Content-Type expected to contain 'html' got=''\n"
+  }
+,
+  {
+    "id": "MT_P2_004", "group": "mime_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "MT_P2_005", "group": "mime_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EX_P2_001", "group": "expires_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header Cache-Control expected to contain 'max-age' got=''\n"
+  }
+,
+  {
+    "id": "EX_P2_002", "group": "expires_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header Cache-Control expected to contain 'max-age' got=''\n"
+  }
+,
+  {
+    "id": "EX_P2_003", "group": "expires_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header Cache-Control expected to contain 'max-age' got=''\n"
+  }
+,
+  {
+    "id": "EX_P2_004", "group": "expires_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EX_P2_005", "group": "expires_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EN_P2_001", "group": "env_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: probe TEST_ENV expected='hello_from_htaccess' got=''\n"
+  }
+,
+  {
+    "id": "EN_P2_002", "group": "env_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: probe TEST_ENV expected='hello_from_subdir' got=''\n"
+  }
+,
+  {
+    "id": "EN_P2_004", "group": "env_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "EN_P2_005", "group": "env_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "RD_P2_003", "group": "redirect_edge",
+    "apache": 200, "ols_native": 404, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "OP_P2_001", "group": "options_edge",
+    "apache": 403, "ols_native": 404, "ols_module": 404, "lsws": 000,
+    "errors": "    lsws: status expected one of [403, 404] got=000\n"
+  }
+,
+  {
+    "id": "OP_P2_002", "group": "options_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "OP_P2_003", "group": "options_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "OP_P2_004", "group": "options_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected one of [200, 403, 404] got=000\n"
+  }
+,
+  {
+    "id": "ED_P2_001", "group": "error_doc_edge",
+    "apache": 403, "ols_native": 200, "ols_module": 403, "lsws": 000,
+    "errors": "    lsws: status expected=403 got=000\n"
+  }
+,
+  {
+    "id": "ED_P2_002", "group": "error_doc_edge",
+    "apache": 401, "ols_native": 200, "ols_module": 401, "lsws": 000,
+    "errors": "    lsws: status expected=401 got=000\n"
+  }
+,
+  {
+    "id": "ED_P2_003", "group": "error_doc_edge",
+    "apache": 200, "ols_native": 404, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected one of [200, 404] got=000\n"
+  }
+,
+  {
+    "id": "ED_P2_004", "group": "error_doc_edge",
+    "apache": 200, "ols_native": 404, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected one of [200, 404] got=000\n"
+  }
+,
+  {
+    "id": "IH_P2_001", "group": "inherit_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header X-Frame-Options expected='SAMEORIGIN' got=''\n"
+  }
+,
+  {
+    "id": "IH_P2_002", "group": "inherit_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header X-Custom-Header expected='subdir-override-v1' got=''\n"
+  }
+,
+  {
+    "id": "IH_P2_003", "group": "inherit_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: header X-Subdir-Header expected='subdir-only' got=''\n"
+  }
+,
+  {
+    "id": "IH_P2_004", "group": "inherit_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "IH_P2_005", "group": "inherit_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n    lsws: probe TEST_ENV expected='hello_from_subdir' got=''\n"
+  }
+,
+  {
+    "id": "RW_P2_001", "group": "rewrite_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "RW_P2_002", "group": "rewrite_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "RW_P2_003", "group": "rewrite_edge",
+    "apache": 200, "ols_native": 200, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "RW_P2_004", "group": "rewrite_edge",
+    "apache": 200, "ols_native": 404, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+,
+  {
+    "id": "RW_P2_005", "group": "rewrite_edge",
+    "apache": 200, "ols_native": 404, "ols_module": 200, "lsws": 000,
+    "errors": "    lsws: status expected=200 got=000\n"
+  }
+]

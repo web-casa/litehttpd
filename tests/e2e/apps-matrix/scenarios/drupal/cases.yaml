@@ -1,0 +1,46 @@
+scenario: drupal
+app: drupal
+purpose: clean urls, front-controller routing, static bypass, and protected path behavior
+
+cases:
+  - id: DRUPAL_001
+    category: app-health
+    desc: homepage returns 200
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: DRUPAL_002
+    category: routing
+    desc: clean URL resolves through front controller
+    method: GET
+    path: /user/login
+    probe_path: /_probe/router.php?uri=/user/login
+    assert:
+      - status_exact: 200
+      - probe_field_exact: SCRIPT_NAME=/index.php
+
+  - id: DRUPAL_003
+    category: deny
+    desc: protected sensitive file is not directly accessible
+    method: GET
+    path: /sites/default/settings.php
+    assert:
+      - status_exact: 403
+
+  - id: DRUPAL_004
+    category: headers
+    desc: static asset bypass still returns 200
+    method: GET
+    path: /core/misc/drupal.js
+    assert:
+      - status_exact: 200
+
+  - id: DRUPAL_005
+    category: htaccess
+    desc: htaccess-derived behavior remains visible on a protected path
+    method: GET
+    path: /sites/default/files/
+    assert:
+      - status_exact: 403

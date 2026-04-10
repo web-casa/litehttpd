@@ -1,0 +1,82 @@
+---
+title: 从 Apache 迁移到 OLS
+description: 从 Apache httpd 迁移到 OpenLiteSpeed 并使用 LiteHTTPD 的分步指南
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## 迁移概述
+
+LiteHTTPD 通过支持相同的 `.htaccess` 指令，使 Apache 到 OLS 的迁移变得简单。大多数 WordPress、Laravel 和 Drupal 站点无需修改任何 `.htaccess` 即可工作。默认迁移路径使用 LiteHTTPD（Full 版本）以获得最大兼容性，包括 RewriteRule 执行和 php_value 支持。
+
+:::note
+对于无法替换 OLS 二进制文件的 Docker 或容器环境，请使用 LiteHTTPD-Thin（在原生 OLS 上加载 `.so` 模块）。Thin 可处理大多数指令，但 RewriteRule 执行和 php_value 需要 Full 版本。
+:::
+
+## 分步迁移
+
+<Steps>
+1. **安装 OLS + LiteHTTPD (Full)**
+
+   ```bash
+   dnf install ./openlitespeed-litehttpd-*.rpm
+   ```
+
+   参见 [安装](/zh/getting-started/installation/) 了解 RPM、二进制文件或源码构建选项。
+
+2. **转换 Apache 配置**（可选）
+
+   使用 `litehttpd-confconv` 转换你的 Apache 虚拟主机配置：
+   ```bash
+   litehttpd-confconv --input /etc/httpd/conf/httpd.conf \
+     --output /usr/local/lsws/conf/apacheconf/ \
+     portmap=80:8088,443:8443
+   ```
+
+3. **复制你的文档根目录**
+
+   将 OLS 虚拟主机指向相同的文档根目录：
+   ```
+   docRoot /var/www/html
+   ```
+
+4. **启用 .htaccess 处理**
+
+   添加到你的虚拟主机配置：
+   ```
+   allowOverride 255
+   autoLoadHtaccess 1
+   ```
+
+5. **配置 PHP**
+
+   将 lsphp 链接到 OLS：
+   ```bash
+   ln -sf /usr/local/lsws/lsphp84/bin/lsphp /usr/local/lsws/fcgi-bin/lsphp
+   ```
+
+6. **测试和验证**
+
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+   curl -I http://localhost:8088/
+   ```
+</Steps>
+
+## 自动迁移的内容
+
+- 文档根目录树中的所有 `.htaccess` 文件
+- WordPress 固定链接重写规则
+- 安全插件规则（AIOS、Wordfence 等）
+- 缓存头（W3TC、WP Super Cache）
+- 自定义重定向和错误文档
+
+## 需要手动配置的内容
+
+| Apache 功能 | OLS 对应方式 |
+|---------------|----------------|
+| httpd.conf 中的 `LoadModule` | `httpd_config.conf` 中的 OLS 模块配置 |
+| `VirtualHost` 块 | OLS 虚拟主机目录 |
+| `mod_php` / `php-fpm` | 通过 LSAPI 使用 lsphp |
+| SSL 证书 | OLS 监听器 SSL 配置 |
+| `ProxyPass` | OLS 外部应用 + 上下文 |

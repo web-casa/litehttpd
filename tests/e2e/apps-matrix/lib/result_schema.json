@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "apps-matrix result",
+  "type": "object",
+  "required": [
+    "scenario",
+    "case_id",
+    "category",
+    "apache",
+    "ols_module",
+    "ols_native",
+    "result"
+  ],
+  "properties": {
+    "scenario": { "type": "string" },
+    "case_id": { "type": "string" },
+    "category": { "type": "string" },
+    "description": { "type": "string" },
+    "apache": { "$ref": "#/$defs/engineResult" },
+    "ols_module": { "$ref": "#/$defs/engineResult" },
+    "ols_native": { "$ref": "#/$defs/engineResult" },
+    "result": {
+      "type": "string",
+      "enum": [
+        "PASS_EQUIV",
+        "PASS_KNOWN_DIFF",
+        "FAIL_REGRESSION",
+        "FAIL_APP_BROKEN"
+      ]
+    },
+    "known_diff_reason": { "type": "string" },
+    "risk_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high"]
+    }
+  },
+  "$defs": {
+    "engineResult": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "integer" },
+        "location": { "type": "string" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "ttl_seconds": { "type": "integer" },
+        "body_hash": { "type": "string" },
+        "probe": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

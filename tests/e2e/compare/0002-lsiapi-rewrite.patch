@@ -1,0 +1,100 @@
+From 5e31730b8c77a1226f4bbf75f4a5455800a6c34c Mon Sep 17 00:00:00 2001
+From: yeagoo <i90h@vip.qq.com>
+Date: Tue, 31 Mar 2026 17:20:30 +0800
+Subject: [PATCH 2/2] litehttpd: add RewriteRule LSIAPI extensions
+
+---
+ include/ls.h             |  6 +++++
+ src/lsiapi/lsiapilib.cpp | 52 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 58 insertions(+)
+
+diff --git a/include/ls.h b/include/ls.h
+index e3770f6..9351594 100644
+--- a/include/ls.h
++++ b/include/ls.h
+@@ -3995,6 +3995,12 @@ struct lsi_api_s
+                           const char *value, int value_len,
+                           int op);
+ 
++    /* litehttpd: Rewrite engine LSIAPI extensions */
++    void *(*parse_rewrite_rules)(const char *rules_text, int text_len);
++    int (*exec_rewrite_rules)(const lsi_session_t *session, void *handle,
++                              const char *base, int base_len);
++    void (*free_rewrite_rules)(void *handle);
++
+ };
+ 
+ /**
+diff --git a/src/lsiapi/lsiapilib.cpp b/src/lsiapi/lsiapilib.cpp
+index 141e309..068019b 100644
+--- a/src/lsiapi/lsiapilib.cpp
++++ b/src/lsiapi/lsiapilib.cpp
+@@ -38,6 +38,8 @@
+ #include <http/reqparser.h>
+ #include <http/clientinfo.h>
+ #include <http/ntwkiolink.h>
++#include <http/rewriteengine.h>
++#include <http/rewriterulelist.h>
+ 
+ #include <log4cxx/logger.h>
+ #include <lsiapi/envmanager.h>
+@@ -3826,6 +3828,56 @@ void lsiapi_init_server_api()
+     pApi->get_php_config = nullptr;
+     pApi->set_req_header = nullptr;
+ 
++    /* litehttpd: Rewrite engine LSIAPI extensions */
++    pApi->parse_rewrite_rules = [](const char *rules_text,
++                                    int text_len) -> void * {
++        if (!rules_text || text_len <= 0)
++            return NULL;
++        char *buf = (char *)malloc(text_len + 1);
++        if (!buf) return NULL;
++        memcpy(buf, rules_text, text_len);
++        buf[text_len] = '\0';
++
++        RewriteRuleList *pList = new RewriteRuleList();
++        char *p = buf;
++        if (RewriteEngine::parseRules(p, pList, NULL, NULL) == 0
++            && pList->begin()) {
++            free(buf);
++            return (void *)pList;
++        }
++        delete pList;
++        free(buf);
++        return NULL;
++    };
++
++    pApi->exec_rewrite_rules = [](const lsi_session_t *session,
++                                   void *handle,
++                                   const char *base,
++                                   int base_len) -> int {
++        if (!session || !handle)
++            return -1;
++        HttpSession *pSession = (HttpSession *)session;
++        RewriteRuleList *pList = (RewriteRuleList *)handle;
++
++        int ret = RewriteEngine::getInstance().processRuleSet(
++            pList, pSession, NULL, NULL);
++
++        if (ret == -3 /* URL_MODIFIED */) {
++            const char *uri = RewriteEngine::getInstance().getResultURI();
++            int uri_len = RewriteEngine::getInstance().getResultURILen();
++            pSession->getReq()->postRewriteProcess(uri, uri_len);
++            return 1;
++        }
++        if (ret > 0)
++            return ret;  /* HTTP status code (301, 403, 410, ...) */
++        return 0;
++    };
++
++    pApi->free_rewrite_rules = [](void *handle) {
++        if (handle)
++            delete (RewriteRuleList *)handle;
++    };
++
+     g_lsiapi_ts = g_lsiapi;
+ 
+     pApi = &g_lsiapi_ts;
+-- 
+2.47.3
+

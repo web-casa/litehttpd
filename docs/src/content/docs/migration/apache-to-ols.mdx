@@ -1,0 +1,82 @@
+---
+title: Apache to OLS Migration
+description: Step-by-step guide for migrating from Apache httpd to OpenLiteSpeed with LiteHTTPD
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+## Migration Overview
+
+LiteHTTPD makes Apache-to-OLS migration straightforward by supporting the same `.htaccess` directives. Most WordPress, Laravel, and Drupal sites work without any `.htaccess` changes. The default migration path uses LiteHTTPD (Full edition) for maximum compatibility, including RewriteRule execution and php_value support.
+
+:::note
+For Docker or container environments where the OLS binary cannot be replaced, use LiteHTTPD-Thin (the `.so` module on stock OLS). Thin handles most directives but RewriteRule execution and php_value require the Full edition.
+:::
+
+## Step-by-Step Migration
+
+<Steps>
+1. **Install OLS + LiteHTTPD (Full)**
+
+   ```bash
+   dnf install ./openlitespeed-litehttpd-*.rpm
+   ```
+
+   See [Installation](/getting-started/installation/) for RPM, binary, or source build options.
+
+2. **Convert Apache config** (optional)
+
+   Use `litehttpd-confconv` to convert your Apache virtual host configuration:
+   ```bash
+   litehttpd-confconv --input /etc/httpd/conf/httpd.conf \
+     --output /usr/local/lsws/conf/apacheconf/ \
+     portmap=80:8088,443:8443
+   ```
+
+3. **Copy your document root**
+
+   Point the OLS vhost to the same document root:
+   ```
+   docRoot /var/www/html
+   ```
+
+4. **Enable .htaccess processing**
+
+   Add to your vhost config:
+   ```
+   allowOverride 255
+   autoLoadHtaccess 1
+   ```
+
+5. **Configure PHP**
+
+   Link lsphp to OLS:
+   ```bash
+   ln -sf /usr/local/lsws/lsphp84/bin/lsphp /usr/local/lsws/fcgi-bin/lsphp
+   ```
+
+6. **Test and verify**
+
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+   curl -I http://localhost:8088/
+   ```
+</Steps>
+
+## What Transfers Automatically
+
+- All `.htaccess` files in your document root tree
+- WordPress permalink rewrite rules
+- Security plugin rules (AIOS, Wordfence, etc.)
+- Cache headers (W3TC, WP Super Cache)
+- Custom redirects and error documents
+
+## What Needs Manual Configuration
+
+| Apache Feature | OLS Equivalent |
+|---------------|----------------|
+| `LoadModule` in httpd.conf | OLS module config in `httpd_config.conf` |
+| `VirtualHost` blocks | OLS vhost directories |
+| `mod_php` / `php-fpm` | lsphp via LSAPI |
+| SSL certificates | OLS listener SSL config |
+| `ProxyPass` | OLS external app + context |

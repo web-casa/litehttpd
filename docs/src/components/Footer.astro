@@ -1,0 +1,151 @@
+---
+/**
+ * Custom site footer with navigation, badges, and copyright.
+ */
+import type { Props } from '@astrojs/starlight/props';
+import Default from '@astrojs/starlight/components/Footer.astro';
+
+const isZh = Astro.url.pathname.startsWith('/zh');
+const prefix = isZh ? '/zh' : '';
+const year = new Date().getFullYear();
+---
+
+<Default {...Astro.props}><slot /></Default>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+
+    <div class="footer-grid">
+      <div class="footer-col">
+        <h4>{isZh ? '产品' : 'Product'}</h4>
+        <a href={`${prefix}/getting-started/introduction/`}>{isZh ? '简介' : 'Introduction'}</a>
+        <a href={`${prefix}/getting-started/editions/`}>{isZh ? '版本说明' : 'Editions'}</a>
+        <a href={`${prefix}/compare/`}>{isZh ? '引擎对比' : 'Compare'}</a>
+        <a href={`${prefix}/performance/benchmark/`}>{isZh ? '性能测试' : 'Benchmark'}</a>
+      </div>
+
+      <div class="footer-col">
+        <h4>{isZh ? '文档' : 'Documentation'}</h4>
+        <a href={`${prefix}/getting-started/installation/`}>{isZh ? '安装指南' : 'Installation'}</a>
+        <a href={`${prefix}/directives/overview/`}>{isZh ? '指令参考' : 'Directives'}</a>
+        <a href={`${prefix}/ols/install-overview/`}>{isZh ? 'OLS 安装' : 'OLS Install'}</a>
+        <a href={`${prefix}/solutions/wordpress/`}>WordPress</a>
+      </div>
+
+      <div class="footer-col">
+        <h4>{isZh ? '迁移' : 'Migration'}</h4>
+        <a href={`${prefix}/migration/apache-to-ols/`}>{isZh ? '从 Apache 迁移' : 'From Apache'}</a>
+        <a href={`${prefix}/migration/ols-to-litehttpd/`}>{isZh ? '从 OLS 升级' : 'From Stock OLS'}</a>
+        <a href={`${prefix}/migration/lsws-to-litehttpd/`}>{isZh ? '从 LSWS 迁移' : 'From LSWS'}</a>
+        <a href={`${prefix}/migration/confconv/`}>confconv</a>
+      </div>
+
+      <div class="footer-col">
+        <h4>{isZh ? '生态' : 'Ecosystem'}</h4>
+        <a href="https://web.casa" target="_blank" rel="noopener">Web.Casa</a>
+        <a href="https://llstack.com" target="_blank" rel="noopener">LLStack</a>
+        <a href="https://github.com/web-casa/litehttpd" target="_blank" rel="noopener">GitHub</a>
+        <a href={`${prefix}/development/contributing/`}>{isZh ? '贡献指南' : 'Contributing'}</a>
+        <a href={`${prefix}/links/`}>{isZh ? '友情链接' : 'Links'}</a>
+      </div>
+    </div>
+
+    <div class="footer-badges">
+      <a href="https://hicyou.com/" target="_blank" rel="noopener"><img src="https://hicyou.com/badge/featured-light.svg" alt="Featured on Hicyou" loading="lazy" /></a>
+      <a href="https://www.aat.ee/" target="_blank" rel="noopener"><img src="https://www.aat.ee/images/badges/top1-light.svg" alt="Featured on AAT" loading="lazy" /></a>
+      <a href="https://www.mf8.biz" target="_blank" rel="noopener"><img src="https://www.mf8.biz/badge/badge_light.svg" alt="Featured on MF8" loading="lazy" /></a>
+      <a href="https://bigkr.com" target="_blank" rel="noopener"><img src="https://bigkr.com/badge/badge_light.svg" alt="Featured on BigKr" loading="lazy" /></a>
+    </div>
+
+    <div class="footer-bottom">
+      <p>&copy; {year} LiteHTTPD. {isZh ? '基于 OLS 的轻量级 Apache HTTPD 解决方案。' : 'A lightweight Apache HTTPD solution built on OLS.'}</p>
+      <p class="footer-powered">{isZh ? '是' : 'A sub-project of'} <a href="https://web.casa" target="_blank" rel="noopener">Web.Casa</a> {isZh ? '的子项目' : ''}</p>
+    </div>
+
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-gray-6);
+    padding: 2.5rem 1.5rem 1.5rem;
+    margin-top: 2rem;
+  }
+  .footer-inner {
+    max-width: 72rem;
+    margin: 0 auto;
+  }
+  .footer-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2rem;
+    margin-bottom: 2rem;
+  }
+  .footer-col h4 {
+    color: var(--sl-color-white);
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0 0 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .footer-col a {
+    display: block;
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+    font-size: 0.8rem;
+    padding: 0.2rem 0;
+    transition: color 0.15s;
+  }
+  .footer-col a:hover {
+    color: var(--sl-color-accent-high);
+  }
+  .footer-badges {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 1.5rem 0;
+    border-top: 1px solid var(--sl-color-gray-5);
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    margin-bottom: 1.5rem;
+  }
+  .footer-badges a {
+    display: inline-block;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+  }
+  .footer-badges a:hover {
+    opacity: 1;
+  }
+  .footer-badges img {
+    height: 24px;
+    width: auto;
+  }
+  .footer-bottom {
+    text-align: center;
+  }
+  .footer-bottom p {
+    color: var(--sl-color-gray-3);
+    font-size: 0.75rem;
+    margin: 0.25rem 0;
+  }
+  .footer-powered a {
+    color: var(--sl-color-gray-2);
+    text-decoration: underline;
+  }
+  @media (max-width: 50rem) {
+    .footer-grid {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.5rem;
+    }
+  }
+  @media (max-width: 30rem) {
+    .footer-grid {
+      grid-template-columns: 1fr;
+      gap: 1.25rem;
+    }
+  }
+</style>

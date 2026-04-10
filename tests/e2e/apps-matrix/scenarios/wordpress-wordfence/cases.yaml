@@ -1,0 +1,44 @@
+scenario: wordpress-wordfence
+app: wordpress + wordfence
+purpose: deny rules, sensitive file protection, and security headers from plugin-managed htaccess
+
+cases:
+  - id: WP_WF_001
+    category: app-health
+    desc: homepage remains healthy after Wordfence hardening rules
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: WP_WF_002
+    category: deny
+    desc: protected sensitive file is not directly accessible
+    method: GET
+    path: /wp-config.php
+    assert:
+      - status_exact: 403
+
+  - id: WP_WF_003
+    category: deny
+    desc: Wordfence-managed runtime file is denied
+    method: GET
+    path: /.user.ini
+    assert:
+      - status_exact: 403
+
+  - id: WP_WF_004
+    category: headers
+    desc: security header expected from hardening rules is present
+    method: GET
+    path: /
+    assert:
+      - status_exact: 200
+
+  - id: WP_WF_005
+    category: deny
+    desc: directory browsing remains disabled on a protected directory
+    method: GET
+    path: /wp-content/uploads/
+    assert:
+      - status_exact: 403

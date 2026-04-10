@@ -1,0 +1,90 @@
+matrix:
+  engines:
+    - apache
+    - ols_module
+    - ols_native
+  reference_engine: apache
+  known_diff_policy: pass_but_red_table
+  php_db_matrix: fixed
+
+tiers:
+  pr:
+    target_cases_per_scenario: 2
+    purpose: fast regression signal
+  nightly:
+    target_cases_per_scenario: all
+    purpose: full behavioral comparison
+
+scenarios:
+  - name: wordpress-core
+    tier: pr
+    priority: p0
+    cases_for_pr:
+      - WP_CORE_002
+      - WP_CORE_003
+  - name: wordpress-redirection
+    tier: pr
+    priority: p0
+    cases_for_pr:
+      - WP_REDIRECT_001
+      - WP_REDIRECT_004
+  - name: laravel
+    tier: pr
+    priority: p0
+    cases_for_pr:
+      - LARAVEL_002
+      - LARAVEL_004
+  - name: drupal
+    tier: pr
+    priority: p1
+    cases_for_pr:
+      - DRUPAL_002
+      - DRUPAL_003
+  - name: nextcloud
+    tier: pr
+    priority: p1
+    cases_for_pr:
+      - NEXTCLOUD_002
+      - NEXTCLOUD_003
+  - name: wordpress-wordfence
+    tier: pr
+    priority: p1
+    cases_for_pr:
+      - WP_WF_002
+      - WP_WF_004
+  - name: wordpress-w3-total-cache
+    tier: nightly
+    priority: p1
+    cases_for_pr:
+      - WP_W3TC_002
+      - WP_W3TC_003
+  - name: wordpress-litespeed-cache
+    tier: nightly
+    priority: p1
+    cases_for_pr:
+      - WP_LSCACHE_002
+      - WP_LSCACHE_003
+  - name: wordpress-ewww
+    tier: nightly
+    priority: p2
+    cases_for_pr:
+      - WP_EWWW_002
+      - WP_EWWW_004
+  - name: wordpress-wp-optimize
+    tier: nightly
+    priority: p2
+    cases_for_pr:
+      - WP_OPT_002
+      - WP_OPT_004
+  - name: joomla
+    tier: nightly
+    priority: p2
+    cases_for_pr:
+      - JOOMLA_002
+      - JOOMLA_003
+  - name: mediawiki
+    tier: nightly
+    priority: p2
+    cases_for_pr:
+      - MEDIAWIKI_002
+      - MEDIAWIKI_003

@@ -1,0 +1,7 @@
+# FilesMatch blocks
+<FilesMatch "\.(jpg|jpeg|png|gif)$">
+Header set Cache-Control "max-age=2592000, public"
+</FilesMatch>
+<FilesMatch "\.php$">
+Header set X-Content-Type-Options "nosniff"
+</FilesMatch>
