@@ -47,7 +47,6 @@ export default defineConfig({
             { slug: "getting-started/installation" },
             { slug: "getting-started/configuration" },
             { slug: "getting-started/quick-start" },
-            { slug: "getting-started/migration" },
           ],
         },
         {
@@ -153,6 +152,9 @@ export default defineConfig({
             { slug: "migration/apache-to-ols" },
             { slug: "migration/ols-to-litehttpd" },
             { slug: "migration/lsws-to-litehttpd" },
+            { slug: "migration/cyberpanel" },
+            { slug: "migration/aapanel" },
+            { slug: "migration/docker" },
             { slug: "migration/confconv" },
             { slug: "migration/wordpress" },
             { slug: "migration/known-differences" },
