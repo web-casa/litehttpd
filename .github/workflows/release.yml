@@ -411,6 +411,9 @@ jobs:
           cp packaging/RPM-GPG-KEY-litehttpd repo/
           cp packaging/setup-repo.sh repo/setup.sh
 
+          # Generate static index.html directory listings
+          bash packaging/generate-index.sh repo
+
           echo "=== Repository structure ==="
           find repo -type f | sort
 
