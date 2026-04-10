@@ -202,3 +202,7 @@ LiteHTTPD doesn't bundle PHP. You can use:
 - **lsphp from LiteSpeed repo** — `dnf install lsphp83` (recommended for OLS)
 - **php-litespeed from Remi** — `dnf install php-litespeed` (if you prefer Remi packages)
 - **Any LSAPI-compatible PHP** — configure the `extProcessor` path in `httpd_config.conf`
+
+### How do I switch from CyberPanel / aaPanel / Docker to LiteHTTPD?
+
+See the [Migration Guide](/getting-started/migration/) for detailed instructions covering stock OLS, CyberPanel, aaPanel, ols-docker-env, and OLS official Docker.
