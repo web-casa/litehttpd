@@ -245,28 +245,24 @@ exit 0
 CONF=%{install_dir}/conf/httpd_config.conf
 VHCONF=%{install_dir}/conf/vhosts/Example/vhconf.conf
 
-if [ -f "$CONF" ]; then
-    # PHP path and worker config are NOT modified here.
-    # Users choose their own PHP: lsphp from LiteSpeed repo, or
-    # php-litespeed from Remi, and configure extProcessor themselves.
-    :  # no-op
-
-    # 3. Auto-enable litehttpd module: only if not already mentioned (grep guard)
-    if [ -f "%{install_dir}/modules/litehttpd_htaccess.so" ]; then
-        if ! grep -q "litehttpd_htaccess" "$CONF" 2>/dev/null; then
+# Only run on fresh install ($1 == 1), not upgrade.
+# On upgrade, user's config is preserved by %config(noreplace).
+if [ "$1" -eq 1 ]; then
+    # Auto-enable litehttpd module: only if module block not already in config
+    if [ -f "$CONF" ] && [ -f "%{install_dir}/modules/litehttpd_htaccess.so" ]; then
+        if ! grep -q "^module litehttpd_htaccess" "$CONF" 2>/dev/null; then
             printf '\nmodule litehttpd_htaccess {\n  ls_enabled 1\n}\n' >> "$CONF"
         fi
     fi
-fi
 
-if [ -f "$VHCONF" ]; then
-    # 4. Enable rewrite: only inside "rewrite {" block, only if still "enable 0"
-    #    (user who set enable 1 already won't be touched)
-    sed -i '/^rewrite {/,/^}/s/enable 0/enable 1/' "$VHCONF" 2>/dev/null || true
+    # Enable rewrite in vhost (match both "rewrite {" and "rewrite  {")
+    if [ -f "$VHCONF" ]; then
+        sed -i '/^rewrite\s*{/,/^}/s/enable 0/enable 1/' "$VHCONF" 2>/dev/null || true
+    fi
 
-    # 5. Add index.php to indexFiles: only if not already present
-    if ! grep -q "index.php" "$VHCONF" 2>/dev/null; then
-        sed -i 's/indexFiles index.html/indexFiles index.php, index.html/' "$VHCONF" 2>/dev/null || true
+    # Add index.php to indexFiles line (only if that specific line exists without index.php)
+    if [ -f "$VHCONF" ]; then
+        sed -i '/indexFiles/{ /index\.php/!s/indexFiles.*/indexFiles index.php, index.html/ }' "$VHCONF" 2>/dev/null || true
     fi
 fi
 
@@ -282,6 +278,8 @@ fi
 %defattr(-,root,root,-)
 %license GPL.txt
 %dir %{install_dir}
+%config(noreplace) %{install_dir}/conf/httpd_config.conf
+%config(noreplace) %{install_dir}/conf/vhosts/
 %{install_dir}/*
 /etc/init.d/lsws
 %{_unitdir}/lshttpd.service
