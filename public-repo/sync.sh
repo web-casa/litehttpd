@@ -12,6 +12,7 @@ echo "Public:  $PUBLIC_DIR"
 
 rm -rf "$PUBLIC_DIR"
 mkdir -p "$PUBLIC_DIR"
+mv /tmp/litehttpd-public-git "$PUBLIC_DIR/.git" 2>/dev/null || true
 
 # Source code
 cp -r "$PRIVATE_DIR/src" "$PUBLIC_DIR/"
