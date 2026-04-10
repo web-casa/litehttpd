@@ -239,9 +239,8 @@ exit 0
 %systemd_post lshttpd.service
 
 # ── LiteHTTPD post-install tuning ──
-# Strategy: use grep guards (idempotent) instead of $1==1.
-# This ensures both fresh install AND upgrades get correct config,
-# while preserving user customizations (grep won't match modified values).
+# Strategy: only run on fresh install ($1==1) with grep guards for idempotency.
+# On upgrade, user's config is preserved by %config(noreplace).
 CONF=%{install_dir}/conf/httpd_config.conf
 VHCONF=%{install_dir}/conf/vhosts/Example/vhconf.conf
 
