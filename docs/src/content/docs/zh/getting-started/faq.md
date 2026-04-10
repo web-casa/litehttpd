@@ -172,4 +172,8 @@ LiteHTTPD 不捆绑 PHP，你可以选择：
 
 ### 如何从 CyberPanel / aaPanel / Docker 切换到 LiteHTTPD？
 
-详见 [迁移指南](/zh/getting-started/migration/)，涵盖原版 OLS、CyberPanel、aaPanel（宝塔面板）、ols-docker-env 和 OLS 官方 Docker 的详细迁移说明。
+详见迁移指南：
+- [从原版 OLS 迁移](/zh/migration/ols-to-litehttpd/)
+- [从 CyberPanel 迁移](/zh/migration/cyberpanel/)
+- [从 aaPanel 迁移](/zh/migration/aapanel/)
+- [Docker 环境](/zh/migration/docker/)

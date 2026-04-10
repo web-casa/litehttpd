@@ -205,4 +205,8 @@ LiteHTTPD doesn't bundle PHP. You can use:
 
 ### How do I switch from CyberPanel / aaPanel / Docker to LiteHTTPD?
 
-See the [Migration Guide](/getting-started/migration/) for detailed instructions covering stock OLS, CyberPanel, aaPanel, ols-docker-env, and OLS official Docker.
+See the Migration section for detailed instructions:
+- [From Stock OLS](/migration/ols-to-litehttpd/)
+- [From CyberPanel](/migration/cyberpanel/)
+- [From aaPanel](/migration/aapanel/)
+- [Docker Environments](/migration/docker/)
