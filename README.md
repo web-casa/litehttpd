@@ -36,12 +36,12 @@ Apache .htaccess compatibility module for OpenLiteSpeed, plus the `litehttpd-con
 One RPM installs everything: patched OLS + litehttpd module + auto-configuration.
 
 ```bash
-# Install patched OLS (includes bundled module, auto-configured)
-rpm -ivh openlitespeed-litehttpd-1.8.5-2.litehttpd.el9.x86_64.rpm
+# Add repository and install (recommended)
+curl -s https://rpms.litehttpd.com/setup.sh | bash
+dnf install openlitespeed-litehttpd
 
-# Install lsphp83 (from LiteSpeed repo)
-dnf install lsphp83 lsphp83-common lsphp83-mysqlnd lsphp83-gd \
-    lsphp83-mbstring lsphp83-xml lsphp83-pdo lsphp83-opcache
+# Or download RPM directly from https://rpms.litehttpd.com/
+rpm -ivh openlitespeed-litehttpd-1.8.5-2.litehttpd.el9.x86_64.rpm
 
 # Restart OLS
 /usr/local/lsws/bin/lswsctrl restart
@@ -49,17 +49,18 @@ dnf install lsphp83 lsphp83-common lsphp83-mysqlnd lsphp83-gd \
 
 The RPM `%post` automatically:
 - Enables the litehttpd module in `httpd_config.conf`
-- Configures lsphp83 path and `PHP_LSAPI_CHILDREN=10`
 - Enables vhost rewrite (for WordPress permalinks)
 - Adds `index.php` to indexFiles
 
+PHP is not included — install your preferred PHP separately (lsphp from LiteSpeed repo, or php-litespeed from Remi).
+
 ### LiteHTTPD-Thin (stock OLS, any platform)
 
-For stock (unpatched) OLS. Download the `.so` matching your OS:
+For stock (unpatched) OLS. Download the `.so` from [rpms.litehttpd.com](https://rpms.litehttpd.com/):
 
 ```bash
-# Download module for your platform (el8/el9/el10/ubuntu22, x86_64/aarch64)
-curl -LO https://github.com/web-casa/litehttpd-private/releases/latest/download/litehttpd_htaccess-el9-x86_64.so
+# Download module for your platform (el8/el9/el10/ubuntu22)
+curl -LO https://rpms.litehttpd.com/el9/x86_64/RPMS/litehttpd_htaccess-el9-x86_64.so
 cp litehttpd_htaccess-el9-x86_64.so /usr/local/lsws/modules/litehttpd_htaccess.so
 
 # Enable module
