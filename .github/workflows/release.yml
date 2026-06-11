@@ -11,8 +11,82 @@ permissions:
   contents: write
 
 jobs:
+  # ── Create a draft GitHub Release up front ─────────────────────────
+  # Build jobs attach their outputs to THIS release instead of using
+  # actions/upload-artifact. Release assets do NOT count against the
+  # Actions artifact-storage quota, so releases never get blocked by it.
+  create-release:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Create (or reset) draft release
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          # Notes use a placeholder for the version; $(uname -m) and backticks
+          # are intentionally left literal for the user to copy/run.
+          cat > /tmp/notes.md <<'NOTES'
+          ## litehttpd v__VERSION__
+
+          Apache .htaccess compatibility module for OpenLiteSpeed (80 directives, 1017 tests).
+
+          ### RPM Packages (x86_64)
+
+          | Package | Description |
+          |---------|-------------|
+          | `openlitespeed-litehttpd-*.el8.x86_64.rpm` | Patched OLS + bundled module (EL 8) |
+          | `openlitespeed-litehttpd-*.el9.x86_64.rpm` | Patched OLS + bundled module (EL 9) |
+          | `openlitespeed-litehttpd-*.el10.x86_64.rpm` | Patched OLS + bundled module (EL 10) |
+          | `litehttpd-*.el9.x86_64.rpm` | Standalone module RPM (EL 9) |
+
+          ```bash
+          # Install both (replaces stock OLS, enables php_value + RewriteRule)
+          dnf install ./openlitespeed-litehttpd-*.$(uname -m).rpm
+          dnf install ./litehttpd-*.$(uname -m).rpm
+
+          # Or just the module (stock OLS, php_value/RewriteRule won't execute)
+          dnf install ./litehttpd-*.$(uname -m).rpm
+          ```
+
+          ### .so Files (Ubuntu/Debian/Docker)
+
+          | File | Platform |
+          |------|----------|
+          | `litehttpd_htaccess-el8-x86_64.so` | EL 8 x86_64 (also for OLS RPM) |
+          | `litehttpd_htaccess-el9-x86_64.so` | EL 9 x86_64 |
+          | `litehttpd_htaccess-el10-x86_64.so` | EL 10 x86_64 |
+          | `litehttpd_htaccess-ubuntu22-x86_64.so` | Ubuntu 22.04+, Debian 12+ x86_64 |
+
+          ### OLS Patches
+
+          | Patch | Description |
+          |-------|-------------|
+          | `0001-lsiapi-phpconfig.patch` | PHPConfig + set_req_header LSIAPI extensions |
+          | `0002-lsiapi-rewrite.patch` | RewriteRule engine LSIAPI extensions |
+          | `0003-readapacheconf.patch` | readApacheConf startup integration |
+          | `0004-autoindex-403.patch` | Options -Indexes returns 403 (match LSWS) |
+
+          Apply in order: `patch -p1 < 0001-*.patch && patch -p1 < 0002-*.patch && patch -p1 < 0003-*.patch && patch -p1 < 0004-*.patch`
+
+          ### Requirements
+          - OpenLiteSpeed >= 1.7.0
+          - glibc >= 2.34
+          - For `php_value`/`php_flag` + `RewriteRule`: install `openlitespeed-litehttpd` RPM or apply both patches
+          NOTES
+          sed -i "s/__VERSION__/${VERSION}/g" /tmp/notes.md
+
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --draft=true \
+              --title "litehttpd v${VERSION}" --notes-file /tmp/notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --draft \
+              --title "litehttpd v${VERSION}" --notes-file /tmp/notes.md \
+              --target "$GITHUB_SHA"
+          fi
+
   # ── Build litehttpd .so for each platform ──────────────────────────
   build-module:
+    needs: [create-release]
     strategy:
       matrix:
         include:
@@ -34,6 +108,8 @@ jobs:
             pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev"
 
     runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
@@ -62,18 +138,17 @@ jobs:
               cp build/litehttpd_htaccess.so /output/litehttpd_htaccess-${{ matrix.suffix }}.so
             '
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: litehttpd_htaccess-${{ matrix.suffix }}
-          path: output/litehttpd_htaccess-${{ matrix.suffix }}.so
-          # Inter-job handoff only; published assets live in the GitHub Release
-          # and R2 (which don't count against the Actions artifact quota).
-          # Short retention stops these from accumulating past the quota.
-          retention-days: 1
+      - name: Attach .so to release
+        run: |
+          for i in 1 2 3; do
+            gh release upload "$GITHUB_REF_NAME" \
+              output/litehttpd_htaccess-${{ matrix.suffix }}.so --clobber && break
+            echo "upload retry $i"; sleep $((i*5))
+          done
 
-  # ── Build litehttpd RPM (EL9, x86_64 + aarch64) ───────────────────
+  # ── Build litehttpd RPM (EL9, x86_64) ──────────────────────────────
   build-rpm-module:
+    needs: [create-release]
     strategy:
       matrix:
         include:
@@ -82,6 +157,8 @@ jobs:
             arch_suffix: x86_64
 
     runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
@@ -122,15 +199,16 @@ jobs:
               ls -lh /output/
             '
 
-      - name: Upload RPM
-        uses: actions/upload-artifact@v7
-        with:
-          name: litehttpd-rpm-${{ matrix.arch_suffix }}
-          path: output/litehttpd-*.rpm
-          retention-days: 1
+      - name: Attach RPM to release
+        run: |
+          for i in 1 2 3; do
+            gh release upload "$GITHUB_REF_NAME" output/litehttpd-*.rpm --clobber && break
+            echo "upload retry $i"; sleep $((i*5))
+          done
 
   # ── Build openlitespeed-litehttpd RPM (EL8/9/10, x86_64) ─────────────
   build-rpm-ols:
+    needs: [create-release]
     strategy:
       fail-fast: false
       matrix:
@@ -150,6 +228,8 @@ jobs:
 
     runs-on: ubuntu-22.04
     timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
@@ -231,12 +311,12 @@ jobs:
               fi
             '
 
-      - name: Upload RPM
-        uses: actions/upload-artifact@v7
-        with:
-          name: openlitespeed-litehttpd-rpm-${{ matrix.dist_tag }}-x86_64
-          path: output/openlitespeed-litehttpd-*.rpm
-          retention-days: 1
+      - name: Attach RPM to release
+        run: |
+          for i in 1 2 3; do
+            gh release upload "$GITHUB_REF_NAME" output/openlitespeed-litehttpd-*.rpm --clobber && break
+            echo "upload retry $i"; sleep $((i*5))
+          done
 
   # ── Run tests ──────────────────────────────────────────────────────
   test:
@@ -253,100 +333,23 @@ jobs:
           cmake --build build --parallel $(nproc)
           ctest --test-dir build --output-on-failure --parallel $(nproc)
 
-  # ── Create GitHub Release ──────────────────────────────────────────
-  release:
-    needs: [build-module, build-rpm-module, build-rpm-ols, test]
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v7
-        with:
-          path: artifacts
-
-      - name: Prepare release files
-        run: |
-          mkdir -p release
-          find artifacts -name "*.so" -exec cp {} release/ \;
-          find artifacts -name "*.rpm" -exec cp {} release/ \;
-          cp patches/0001-lsiapi-phpconfig.patch release/
-          cp patches/0002-lsiapi-rewrite.patch release/
-          cp patches/0003-readapacheconf.patch release/
-          cp patches/0004-autoindex-403.patch release/
-          find artifacts -name "litehttpd-confconv" -exec cp {} release/ \; 2>/dev/null || true
-          cd release
-          sha256sum * > SHA256SUMS
-          ls -lh
-
-      - name: Extract version
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2.6.1
-        with:
-          name: "litehttpd v${{ steps.version.outputs.version }}"
-          body: |
-            ## litehttpd v${{ steps.version.outputs.version }}
-
-            Apache .htaccess compatibility module for OpenLiteSpeed (80 directives, 1017 tests).
-
-            ### RPM Packages (x86_64)
-
-            | Package | Description |
-            |---------|-------------|
-            | `openlitespeed-litehttpd-*.el8.x86_64.rpm` | Patched OLS + bundled module (EL 8) |
-            | `openlitespeed-litehttpd-*.el9.x86_64.rpm` | Patched OLS + bundled module (EL 9) |
-            | `openlitespeed-litehttpd-*.el10.x86_64.rpm` | Patched OLS + bundled module (EL 10) |
-            | `litehttpd-*.el9.x86_64.rpm` | Standalone module RPM (EL 9) |
-
-            ```bash
-            # Install both (replaces stock OLS, enables php_value + RewriteRule)
-            dnf install ./openlitespeed-litehttpd-*.$(uname -m).rpm
-            dnf install ./litehttpd-*.$(uname -m).rpm
-
-            # Or just the module (stock OLS, php_value/RewriteRule won't execute)
-            dnf install ./litehttpd-*.$(uname -m).rpm
-            ```
-
-            ### .so Files (Ubuntu/Debian/Docker)
-
-            | File | Platform |
-            |------|----------|
-            | `litehttpd_htaccess-el8-x86_64.so` | EL 8 x86_64 (also for OLS RPM) |
-            | `litehttpd_htaccess-el9-x86_64.so` | EL 9 x86_64 |
-            | `litehttpd_htaccess-el10-x86_64.so` | EL 10 x86_64 |
-            | `litehttpd_htaccess-ubuntu22-x86_64.so` | Ubuntu 22.04+, Debian 12+ x86_64 |
-
-            ### OLS Patches
-
-            | Patch | Description |
-            |-------|-------------|
-            | `0001-lsiapi-phpconfig.patch` | PHPConfig + set_req_header LSIAPI extensions |
-            | `0002-lsiapi-rewrite.patch` | RewriteRule engine LSIAPI extensions |
-            | `0003-readapacheconf.patch` | readApacheConf startup integration |
-            | `0004-autoindex-403.patch` | Options -Indexes returns 403 (match LSWS) |
-
-            Apply in order: `patch -p1 < 0001-*.patch && patch -p1 < 0002-*.patch && patch -p1 < 0003-*.patch && patch -p1 < 0004-*.patch`
-
-            ### Requirements
-            - OpenLiteSpeed >= 1.7.0
-            - glibc >= 2.34
-            - For `php_value`/`php_flag` + `RewriteRule`: install `openlitespeed-litehttpd` RPM or apply both patches
-          files: release/*
-
   # ── Publish RPM Repository to Cloudflare R2 ─────────────────────────
+  # Pulls the (unsigned) RPMs straight from the release assets, signs them,
+  # builds the yum metadata and syncs to R2. Independent of the GitHub
+  # Release being finalized; gated on the RPM builds + tests passing.
   publish-rpm-repo:
-    needs: [release]
+    needs: [build-rpm-module, build-rpm-ols, test]
     runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Download RPM artifacts
-        uses: actions/download-artifact@v7
-        with:
-          path: artifacts
+      - name: Download RPMs from release
+        run: |
+          mkdir -p artifacts
+          gh release download "$GITHUB_REF_NAME" --dir artifacts --pattern '*.rpm'
+          ls -lh artifacts/
 
       - name: Install tools
         run: |
@@ -438,3 +441,33 @@ jobs:
 
           echo "=== Published to https://rpms.litehttpd.com/ ==="
           echo "Users can now run: curl -s https://rpms.litehttpd.com/setup.sh | bash"
+
+  # ── Attach patches + checksums, then publish the release ───────────
+  finalize-release:
+    needs: [build-module, build-rpm-module, build-rpm-ols, test]
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Attach patches, generate SHA256SUMS, publish
+        run: |
+          # Attach the OLS patches (from the repo, not a build artifact)
+          for i in 1 2 3; do
+            gh release upload "$GITHUB_REF_NAME" \
+              patches/0001-lsiapi-phpconfig.patch \
+              patches/0002-lsiapi-rewrite.patch \
+              patches/0003-readapacheconf.patch \
+              patches/0004-autoindex-403.patch --clobber && break
+            echo "upload retry $i"; sleep $((i*5))
+          done
+
+          # Pull every asset back down and compute checksums over the full set
+          mkdir -p rel
+          gh release download "$GITHUB_REF_NAME" --dir rel
+          ( cd rel && rm -f SHA256SUMS && sha256sum * > SHA256SUMS )
+          gh release upload "$GITHUB_REF_NAME" rel/SHA256SUMS --clobber
+
+          # Publish (remove draft flag)
+          gh release edit "$GITHUB_REF_NAME" --draft=false
