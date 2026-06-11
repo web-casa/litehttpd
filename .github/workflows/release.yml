@@ -67,6 +67,10 @@ jobs:
         with:
           name: litehttpd_htaccess-${{ matrix.suffix }}
           path: output/litehttpd_htaccess-${{ matrix.suffix }}.so
+          # Inter-job handoff only; published assets live in the GitHub Release
+          # and R2 (which don't count against the Actions artifact quota).
+          # Short retention stops these from accumulating past the quota.
+          retention-days: 1
 
   # ── Build litehttpd RPM (EL9, x86_64 + aarch64) ───────────────────
   build-rpm-module:
@@ -123,6 +127,7 @@ jobs:
         with:
           name: litehttpd-rpm-${{ matrix.arch_suffix }}
           path: output/litehttpd-*.rpm
+          retention-days: 1
 
   # ── Build openlitespeed-litehttpd RPM (EL8/9/10, x86_64) ─────────────
   build-rpm-ols:
@@ -231,6 +236,7 @@ jobs:
         with:
           name: openlitespeed-litehttpd-rpm-${{ matrix.dist_tag }}-x86_64
           path: output/openlitespeed-litehttpd-*.rpm
+          retention-days: 1
 
   # ── Run tests ──────────────────────────────────────────────────────
   test:
