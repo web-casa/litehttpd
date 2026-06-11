@@ -2,6 +2,10 @@ name: Release
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Let `gh` resolve the repo without needing a git checkout (create-release
+  # has no checkout step) and authenticate with the workflow token.
+  GH_REPO: ${{ github.repository }}
+  GH_TOKEN: ${{ github.token }}
 
 on:
   push:
@@ -80,8 +84,7 @@ jobs:
               --title "litehttpd v${VERSION}" --notes-file /tmp/notes.md
           else
             gh release create "$GITHUB_REF_NAME" --draft \
-              --title "litehttpd v${VERSION}" --notes-file /tmp/notes.md \
-              --target "$GITHUB_SHA"
+              --title "litehttpd v${VERSION}" --notes-file /tmp/notes.md
           fi
 
   # ── Build litehttpd .so for each platform ──────────────────────────
