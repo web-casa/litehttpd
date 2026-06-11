@@ -2,7 +2,7 @@
 %global install_dir  /usr/local/lsws
 
 Name:           litehttpd
-Version:        0.2.1
+Version:        0.2.2
 Release:        1%{?dist}
 Summary:        Apache .htaccess compatibility module for OpenLiteSpeed
 
@@ -75,6 +75,15 @@ fi
 %{install_dir}/bin/litehttpd-confconv
 
 %changelog
+* Wed Jun 11 2026 LiteHTTPD <noreply@web.casa> - 0.2.2-1
+- Security hardening (audit + Codex cross-review):
+  - Fix Require user/group auth fail-open; Require user enforced, unknown
+    Require forms fail closed (incl. inside RequireAny/RequireAll)
+  - Confine AuthUserFile to the document root (O_NOFOLLOW + TOCTOU re-check)
+  - BruteForceTrustedProxy gates X-Forwarded-For (anti-spoof)
+  - Private SHM segment names + magic guard; expression DoS/ReDoS guards
+  - Build with stack-protector-strong, FORTIFY, full RELRO, noexecstack
+
 * Sat Apr 04 2026 LiteHTTPD <noreply@web.casa> - 0.2.1-1
 - Initial public release
 - 80 .htaccess directives, 90%+ Apache compatible
