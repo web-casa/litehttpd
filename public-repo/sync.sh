@@ -10,9 +10,22 @@ echo "=== Syncing public repo from private ==="
 echo "Private: $PRIVATE_DIR"
 echo "Public:  $PUBLIC_DIR"
 
+# Preserve the public repo's existing .git across the rebuild. Stash it inside
+# the private repo tree (same owner/permissions) rather than a predictable,
+# world-accessible /tmp path — a shared-host attacker could otherwise pre-create
+# /tmp/litehttpd-public-git with malicious hooks/config that then get pushed.
+GIT_BACKUP="$PRIVATE_DIR/.public-git-backup"
+rm -rf "$GIT_BACKUP"
+if [ -d "$PUBLIC_DIR/.git" ]; then
+    mv "$PUBLIC_DIR/.git" "$GIT_BACKUP"
+fi
+
 rm -rf "$PUBLIC_DIR"
 mkdir -p "$PUBLIC_DIR"
-mv /tmp/litehttpd-public-git "$PUBLIC_DIR/.git" 2>/dev/null || true
+
+if [ -d "$GIT_BACKUP" ]; then
+    mv "$GIT_BACKUP" "$PUBLIC_DIR/.git"
+fi
 
 # Source code
 cp -r "$PRIVATE_DIR/src" "$PUBLIC_DIR/"

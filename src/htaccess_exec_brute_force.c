@@ -10,32 +10,68 @@
 #include "htaccess_shm.h"
 #include "htaccess_cidr.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
+/* Validate a string is a plausible IPv4/IPv6 literal: non-empty, < 46 chars,
+ * and only hex digits, '.', ':'. Rejects garbage / CRLF / injected content so
+ * a spoofed XFF value can't become a malformed SHM key. */
+static int looks_like_ip(const char *s)
+{
+    if (!s || !s[0])
+        return 0;
+    size_t n = 0;
+    for (const char *p = s; *p; p++, n++) {
+        if (n >= 45)
+            return 0;
+        char c = *p;
+        if (!(isxdigit((unsigned char)c) || c == '.' || c == ':'))
+            return 0;
+    }
+    return 1;
+}
+
 /**
- * Extract the leftmost IP from an X-Forwarded-For header value.
- * Returns a strdup'd string or NULL.
+ * Extract the TRUSTED client IP from an X-Forwarded-For header value.
+ *
+ * XFF is a comma-separated list where each proxy APPENDS the address it
+ * received the request from. When we only honour XFF behind a configured
+ * trusted proxy, the address that proxy added is the RIGHTMOST entry — the
+ * leftmost entries are client-supplied and spoofable. We therefore take the
+ * last token and validate it looks like an IP. Returns a strdup'd string or
+ * NULL (caller then falls back to the real peer IP).
  */
 static char *extract_first_ip(const char *xff, int xff_len)
 {
     if (!xff || xff_len <= 0)
         return NULL;
-    /* Skip leading whitespace */
-    const char *p = xff;
     const char *end = xff + xff_len;
-    while (p < end && (*p == ' ' || *p == '\t'))
-        p++;
-    /* Find end of first IP (comma or end) */
-    const char *start = p;
-    while (p < end && *p != ',' && *p != ' ' && *p != '\t')
-        p++;
-    if (p == start)
+    /* Trim trailing whitespace */
+    while (end > xff && (end[-1] == ' ' || end[-1] == '\t'))
+        end--;
+    /* Walk back to the start of the last comma-separated token */
+    const char *start = end;
+    while (start > xff && start[-1] != ',')
+        start--;
+    /* Skip leading whitespace within the token */
+    while (start < end && (*start == ' ' || *start == '\t'))
+        start++;
+    if (start >= end)
         return NULL;
-    return strndup(start, (size_t)(p - start));
+    /* Reject an oversized token before allocating (max IPv6 literal is 45
+     * chars); guards against absurd header values being copied/keyed. */
+    if ((size_t)(end - start) > 45)
+        return NULL;
+    char *ip = strndup(start, (size_t)(end - start));
+    if (ip && !looks_like_ip(ip)) {
+        free(ip);
+        return NULL;
+    }
+    return ip;
 }
 
 /**
@@ -107,6 +143,7 @@ int exec_brute_force(lsi_session_t *session,
     int throttle_ms = BF_DEFAULT_THROTTLE_MS;
     int use_xff = 0;
     const char *whitelist_cidrs = NULL;
+    const char *trusted_proxy_cidrs = NULL;
     const char *protect_paths[32];
     int num_paths = 0;
     brute_force_record_t *rec;
@@ -141,6 +178,9 @@ int exec_brute_force(lsi_session_t *session,
         case DIR_BRUTE_FORCE_WHITELIST:
             whitelist_cidrs = dir->value;
             break;
+        case DIR_BRUTE_FORCE_TRUSTED_PROXY:
+            trusted_proxy_cidrs = dir->value;
+            break;
         case DIR_BRUTE_FORCE_PROTECT_PATH:
             if (num_paths < 32 && dir->value)
                 protect_paths[num_paths++] = dir->value;
@@ -154,16 +194,28 @@ int exec_brute_force(lsi_session_t *session,
     if (!enabled)
         return LSI_OK;
 
-    /* Step 2a: XFF processing — use X-Forwarded-For IP if enabled */
+    /* Step 2a: XFF processing — use X-Forwarded-For IP only when enabled AND
+     * the direct peer is a configured trusted proxy. Without the trusted-proxy
+     * gate any client could spoof X-Forwarded-For to rotate its identity (evade
+     * rate-limiting) or impersonate a whitelisted address. If BruteForceXForwardedFor
+     * is On but no BruteForceTrustedProxy is configured, we refuse to trust the
+     * header and fall back to the real peer IP (fail-safe). */
     const char *effective_ip = client_ip;
     if (use_xff) {
-        int xff_len = 0;
-        const char *xff = lsi_session_get_req_header_by_name(
-            session, "X-Forwarded-For", 15, &xff_len);
-        if (xff && xff_len > 0) {
-            xff_ip = extract_first_ip(xff, xff_len);
-            if (xff_ip)
-                effective_ip = xff_ip;
+        if (!trusted_proxy_cidrs) {
+            lsi_log(session, LSI_LOG_WARN,
+                    "[htaccess] BruteForceXForwardedFor is On but no "
+                    "BruteForceTrustedProxy configured; ignoring X-Forwarded-For "
+                    "and using the direct peer IP");
+        } else if (is_ip_whitelisted(client_ip, trusted_proxy_cidrs)) {
+            int xff_len = 0;
+            const char *xff = lsi_session_get_req_header_by_name(
+                session, "X-Forwarded-For", 15, &xff_len);
+            if (xff && xff_len > 0) {
+                xff_ip = extract_first_ip(xff, xff_len);
+                if (xff_ip)
+                    effective_ip = xff_ip;
+            }
         }
     }
 
@@ -265,6 +317,7 @@ int exec_brute_force(lsi_session_t *session,
             /* Window expired — reset record (only when counting) */
             if (count_attempt && is_post) {
                 memset(&new_rec, 0, sizeof(new_rec));
+                new_rec.magic = BF_RECORD_MAGIC;
                 strncpy(new_rec.ip, effective_ip, sizeof(new_rec.ip) - 1);
                 new_rec.ip[sizeof(new_rec.ip) - 1] = '\0';
                 new_rec.attempt_count = 1;
@@ -277,6 +330,7 @@ int exec_brute_force(lsi_session_t *session,
         /* Step 5: No record — create new one (only when counting) */
         if (count_attempt && is_post) {
             memset(&new_rec, 0, sizeof(new_rec));
+            new_rec.magic = BF_RECORD_MAGIC;
             strncpy(new_rec.ip, effective_ip, sizeof(new_rec.ip) - 1);
             new_rec.ip[sizeof(new_rec.ip) - 1] = '\0';
             new_rec.attempt_count = 1;

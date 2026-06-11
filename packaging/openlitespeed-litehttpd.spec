@@ -1,5 +1,5 @@
 %global ols_version  1.8.5
-%global litehttpd_version 2.1.3
+%global litehttpd_version 2.1.4
 %global install_dir  /usr/local/lsws
 %define debug_package %{nil}
 # Disable all brp-* post-install processing to prevent binary replacement
@@ -8,7 +8,7 @@
 
 Name:           openlitespeed-litehttpd
 Version:        %{ols_version}
-Release:        2.litehttpd%{?dist}
+Release:        3.litehttpd%{?dist}
 Summary:        OpenLiteSpeed with LiteHTTPD patches (fully static, like official)
 AutoReqProv:    no
 
@@ -162,7 +162,12 @@ cd %{_builddir}
 tar xzf %{SOURCE9} -C . 2>/dev/null || true
 [ -d litehttpd-module/src ] || { echo "FATAL: litehttpd-module-src.tar.gz missing or invalid"; exit 1; }
 cd litehttpd-module
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS="-O2 -DNDEBUG" 2>&1 | tail -3
+# Build the network-facing module with exploit-mitigation flags. CMakeLists.txt
+# already applies stack protector / FORTIFY / RELRO; passing %optflags here adds
+# the distro's hardening on top (this spec disables brp-* post-processing, so
+# nothing reintroduces these flags otherwise).
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+      -DCMAKE_C_FLAGS="%{optflags} -DNDEBUG" 2>&1 | tail -3
 cmake --build build --target litehttpd_htaccess -j$(nproc) 2>&1 | tail -3
 [ -f build/litehttpd_htaccess.so ] || { echo "FATAL: Module build failed!"; exit 1; }
 strip build/litehttpd_htaccess.so
@@ -284,6 +289,15 @@ fi
 %{_unitdir}/lshttpd.service
 
 %changelog
+* Wed Jun 11 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-3.litehttpd
+- Security hardening (litehttpd module 2.1.4):
+  - Fix Require user/group auth fail-open; Require user enforced, unknown
+    Require forms fail closed (also inside RequireAny/RequireAll)
+  - Confine AuthUserFile to the document root (O_NOFOLLOW + TOCTOU re-check)
+  - BruteForceTrustedProxy gates X-Forwarded-For (anti-spoof)
+  - SHM private segment names + magic guard; expression DoS/ReDoS guards
+  - Build with stack-protector-strong, FORTIFY, full RELRO, noexecstack
+
 * Tue Apr 07 2026 LiteHTTPD <noreply@web.casa> - 1.8.5-2.litehttpd
 - Switch to fully static build (match official LiteSpeed approach)
 - All third-party libs built from source via litespeedtech/third-party

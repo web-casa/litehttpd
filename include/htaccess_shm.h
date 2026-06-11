@@ -20,10 +20,16 @@
 extern "C" {
 #endif
 
+/* Magic/version marker stamped into every record. Used to detect a shared
+ * memory segment written with an incompatible record layout (e.g. a foreign
+ * process or an older module version) before trusting its contents. */
+#define BF_RECORD_MAGIC 0x4C485401u  /* "LHT" + version 1 */
+
 /**
  * IP tracking record for brute force protection.
  */
 typedef struct {
+    unsigned magic;          /* BF_RECORD_MAGIC — layout/version guard */
     char    ip[46];          /* IPv4 or IPv6 address string */
     int     attempt_count;   /* Failed attempt count */
     time_t  first_attempt;   /* Time of first attempt in current window */

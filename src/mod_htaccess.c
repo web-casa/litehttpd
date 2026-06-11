@@ -288,16 +288,52 @@ static char *build_target_dir(const char *doc_root, int doc_root_len,
 }
 
 /* ------------------------------------------------------------------ */
-/*  Helper: extract filename from URI                                  */
-/*  Returns pointer into the URI string (no allocation).               */
+/*  Helper: length-bounded substring search                            */
+/*  The request URI from get_req_uri() is a length-delimited slice of  */
+/*  the request buffer and is NOT guaranteed to be NUL-terminated at   */
+/*  uri_len. strstr() on it can read past the slice (OOB). This finds  */
+/*  `needle` within hay[0..hay_len) without relying on a terminator.   */
+/* ------------------------------------------------------------------ */
+
+static const char *mem_find(const char *hay, int hay_len, const char *needle)
+{
+    if (!hay || hay_len <= 0 || !needle)
+        return NULL;
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || (int)nlen > hay_len)
+        return NULL;
+    for (int i = 0; i + (int)nlen <= hay_len; i++) {
+        if (memcmp(hay + i, needle, nlen) == 0)
+            return hay + i;
+    }
+    return NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Helper: extract filename (last path segment) from a length-counted */
+/*  URI. The URI from get_req_uri() is NOT guaranteed NUL-terminated   */
+/*  at uri_len, so we return a NUL-terminated copy in a thread-local    */
+/*  buffer. Callers use the result with strcmp()/regex/printf safely.   */
+/*  The result stays valid until the next extract_filename() call on    */
+/*  the same thread (callers use it immediately / within one loop).     */
 /* ------------------------------------------------------------------ */
 
 static const char *extract_filename(const char *uri, int uri_len)
 {
+    static __thread char fnbuf[1024];
+    fnbuf[0] = '\0';
+    if (!uri || uri_len <= 0)
+        return fnbuf;
     int i = uri_len;
     while (i > 0 && uri[i - 1] != '/')
         i--;
-    return uri + i;
+    int n = uri_len - i;                 /* filename length (no terminator) */
+    if (n < 0) n = 0;
+    if (n > (int)sizeof(fnbuf) - 1)
+        n = (int)sizeof(fnbuf) - 1;      /* truncate pathologically long names */
+    memcpy(fnbuf, uri + i, (size_t)n);
+    fnbuf[n] = '\0';
+    return fnbuf;
 }
 
 /* ------------------------------------------------------------------ */
@@ -389,6 +425,8 @@ static const char *directive_type_str(directive_type_t type)
     case DIR_AUTH_NAME:                      return "AuthName";
     case DIR_AUTH_USER_FILE:                 return "AuthUserFile";
     case DIR_REQUIRE_VALID_USER:            return "Require valid-user";
+    case DIR_REQUIRE_USER:                  return "Require user";
+    case DIR_REQUIRE_GROUP:                 return "Require group";
     case DIR_REQUIRE_ENV:                  return "Require env";
     case DIR_ADD_HANDLER:                   return "AddHandler";
     case DIR_SET_HANDLER:                   return "SetHandler";
@@ -403,6 +441,7 @@ static const char *directive_type_str(directive_type_t type)
     case DIR_BRUTE_FORCE_X_FORWARDED_FOR:   return "BruteForceXForwardedFor";
     case DIR_BRUTE_FORCE_WHITELIST:         return "BruteForceWhitelist";
     case DIR_BRUTE_FORCE_PROTECT_PATH:      return "BruteForceProtectPath";
+    case DIR_BRUTE_FORCE_TRUSTED_PROXY:     return "BruteForceTrustedProxy";
     case DIR_SETENVIF_NOCASE:               return "SetEnvIfNoCase";
     case DIR_HEADER_EDIT:                   return "Header edit";
     case DIR_HEADER_EDIT_STAR:              return "Header edit*";
@@ -521,6 +560,8 @@ static int container_acl_denies(const htaccess_directive_t *children,
         case DIR_REQUIRE_IP:
         case DIR_REQUIRE_NOT_IP:
         case DIR_REQUIRE_VALID_USER:
+        case DIR_REQUIRE_USER:
+        case DIR_REQUIRE_GROUP:
         case DIR_REQUIRE_ENV:
         case DIR_REQUIRE_ANY_OPEN:
         case DIR_REQUIRE_ALL_OPEN:
@@ -716,6 +757,8 @@ static int exec_if_child_request(lsi_session_t *session,
     case DIR_AUTH_NAME:
     case DIR_AUTH_USER_FILE:
     case DIR_REQUIRE_VALID_USER:
+    case DIR_REQUIRE_USER:
+    case DIR_REQUIRE_GROUP:
     case DIR_REQUIRE_ALL_GRANTED:
     case DIR_REQUIRE_ALL_DENIED:
     case DIR_REQUIRE_IP:
@@ -896,8 +939,8 @@ static int on_uri_map(lsi_session_t *session)
         const char *fname = extract_filename(uri, uri_len);
         if (fname && fname[0] == '.' && fname[1] == 'h' && fname[2] == 't') {
             lsi_log(session, LSI_LOG_INFO,
-                    "mod_htaccess: blocked access to %s (protected .ht* file)",
-                    uri);
+                    "mod_htaccess: blocked access to %.*s (protected .ht* file)",
+                    uri_len, uri);
             lsi_session_set_status(session, 403);
             lsi_session_end_resp(session);
             return LSI_DENY;
@@ -968,28 +1011,35 @@ static int on_uri_map(lsi_session_t *session)
      * Scans the full URI for .php within uploads path to prevent
      * PATH_INFO bypass (e.g., /wp-content/uploads/shell.php/anything). */
     {
-        const char *uploads = strstr(uri, "/wp-content/uploads/");
+        const char *uri_end = uri + uri_len;
+        const char *uploads = mem_find(uri, uri_len, "/wp-content/uploads/");
         if (uploads) {
             const char *scan = uploads + 20; /* skip "/wp-content/uploads/" */
-            while (scan < uri + uri_len) {
-                const char *dot = strstr(scan, ".php");
+            while (scan < uri_end) {
+                const char *dot = mem_find(scan, (int)(uri_end - scan), ".php");
                 if (!dot) break;
-                /* Check it's a real extension: followed by \0, /, ? or more extension */
-                char after = dot[4];
+                /* Check it's a real extension: followed by end, /, ? or more
+                 * extension. dot[4] is only valid when within bounds. */
+                const char *after_p = dot + 4;
+                char after = (after_p < uri_end) ? *after_p : '\0';
                 if (after == '\0' || after == '/' || after == '?' ||
                     after == '5' || after == '7') { /* .php5, .php7 */
                     lsi_log(session, LSI_LOG_INFO,
-                            "mod_htaccess: blocked PHP in uploads: %s", uri);
+                            "mod_htaccess: blocked PHP in uploads: %.*s",
+                            uri_len, uri);
                     lsi_session_set_status(session, 403);
                     lsi_session_end_resp(session);
                     return LSI_DENY;
                 }
                 scan = dot + 4;
             }
-            /* Also check .phtml and .phar */
-            if (strstr(uploads, ".phtml") || strstr(uploads, ".phar")) {
+            /* Also check .phtml and .phar within the uploads slice */
+            int uploads_len = (int)(uri_end - uploads);
+            if (mem_find(uploads, uploads_len, ".phtml") ||
+                mem_find(uploads, uploads_len, ".phar")) {
                 lsi_log(session, LSI_LOG_INFO,
-                        "mod_htaccess: blocked PHP in uploads: %s", uri);
+                        "mod_htaccess: blocked PHP in uploads: %.*s",
+                        uri_len, uri);
                 lsi_session_set_status(session, 403);
                 lsi_session_end_resp(session);
                 return LSI_DENY;
@@ -1057,6 +1107,8 @@ static int on_uri_map(lsi_session_t *session)
                 scan->type == DIR_REQUIRE_IP ||
                 scan->type == DIR_REQUIRE_NOT_IP ||
                 scan->type == DIR_REQUIRE_VALID_USER ||
+                scan->type == DIR_REQUIRE_USER ||
+                scan->type == DIR_REQUIRE_GROUP ||
                 scan->type == DIR_REQUIRE_ENV ||
                 scan->type == DIR_REQUIRE_ANY_OPEN ||
                 scan->type == DIR_REQUIRE_ALL_OPEN) {
