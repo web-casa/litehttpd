@@ -10,6 +10,34 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Shared library output
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# ---------------------------------------------------------------------------
+# Security hardening flags
+#
+# This module is loaded into a network-facing web server and parses
+# semi-trusted .htaccess files plus fully untrusted request data, so it is
+# built with standard exploit-mitigation flags. These are applied to all
+# targets defined below (module, tool, tests). The RPM spec also passes the
+# distro %optflags; these ensure hardening even in a plain cmake build.
+# ---------------------------------------------------------------------------
+include(CheckCCompilerFlag)
+set(HARDENING_C_FLAGS)
+foreach(_flag
+        -fstack-protector-strong
+        -fstack-clash-protection
+        -Wformat
+        -Werror=format-security)
+    string(MAKE_C_IDENTIFIER "HAVE${_flag}" _flag_var)
+    check_c_compiler_flag("${_flag}" ${_flag_var})
+    if(${_flag_var})
+        list(APPEND HARDENING_C_FLAGS "${_flag}")
+    endif()
+endforeach()
+add_compile_options(${HARDENING_C_FLAGS})
+# _FORTIFY_SOURCE requires optimization; only meaningful in non-Debug builds.
+add_compile_definitions($<$<NOT:$<CONFIG:Debug>>:_FORTIFY_SOURCE=2>)
+# Full RELRO + immediate binding and non-executable stack for all links.
+add_link_options(-Wl,-z,relro,-z,now -Wl,-z,noexecstack)
+
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)
 

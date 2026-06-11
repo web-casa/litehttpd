@@ -92,6 +92,10 @@ public:
     void SetUp() override {
         mock_lsiapi::reset_global_state();
         session_.reset();
+        /* htpasswd fixtures live under /tmp; exec_auth_basic() confines
+         * AuthUserFile to the document-root subtree, so treat /tmp as the
+         * document root for these property tests. */
+        session_.set_doc_root("/tmp");
     }
 protected:
     MockSession session_;

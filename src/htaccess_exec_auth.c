@@ -15,6 +15,8 @@
 #include <strings.h>
 #include <unistd.h>
 #include <crypt.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <sys/stat.h>
 
 /** Maximum base64-encoded credential length we accept (user:pass). */
@@ -101,6 +103,181 @@ int htpasswd_check(const char *hash, const char *password)
 }
 
 /**
+ * Check whether `user` appears in a space/tab-separated username list.
+ * Comparison is exact and case-sensitive (matching Apache htpasswd semantics).
+ */
+static int username_in_list(const char *user, const char *list)
+{
+    if (!user || !list)
+        return 0;
+    size_t ulen = strlen(user);
+    const char *p = list;
+    while (*p) {
+        while (*p == ' ' || *p == '\t')
+            p++;
+        const char *start = p;
+        while (*p && *p != ' ' && *p != '\t')
+            p++;
+        size_t tlen = (size_t)(p - start);
+        if (tlen == ulen && memcmp(start, user, ulen) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/**
+ * Evaluate whether `user` satisfies the "Require user" username constraints in
+ * one level of the Require tree, honouring container boolean semantics:
+ *   - mode 0 (OR: top level / RequireAny): satisfied if ANY user constraint at
+ *     this level matches (or any nested container is satisfied).
+ *   - mode 1 (AND: RequireAll): satisfied only if EVERY user constraint matches
+ *     and every nested container is satisfied — so "<RequireAll> Require user
+ *     alice; Require user bob </RequireAll>" requires BOTH (i.e. denies alice),
+ *     instead of the previous flat-OR which would have let alice through.
+ *
+ * Non-user directives (ip/env/valid-user/...) are NOT evaluated here — they are
+ * handled by exec_require against the request. In OR mode we therefore do NOT
+ * credit a non-user branch as satisfying the username (we can't tell here if it
+ * matched), keeping the decision fail-closed.
+ *
+ * `*seen` is set if any DIR_REQUIRE_USER constraint exists in this subtree.
+ * Recurses through the two levels of nesting the parser permits.
+ */
+static int eval_user_tree(const htaccess_directive_t *list, int mode,
+                          const char *user, int depth, int *seen)
+{
+    const htaccess_directive_t *dir;
+    int or_match = 0;       /* OR mode: did some user branch match? */
+    int and_ok = 1;         /* AND mode: have all user constraints matched? */
+
+    for (dir = list; dir; dir = dir->next) {
+        if (dir->type == DIR_REQUIRE_USER) {
+            *seen = 1;
+            int m = username_in_list(user, dir->value);
+            if (mode == 1) { if (!m) and_ok = 0; }
+            else           { if (m)  or_match = 1; }
+        } else if ((dir->type == DIR_REQUIRE_ANY_OPEN ||
+                    dir->type == DIR_REQUIRE_ALL_OPEN) && depth < 2) {
+            int sub_mode = (dir->type == DIR_REQUIRE_ALL_OPEN) ? 1 : 0;
+            int sub_seen = 0;
+            int r = eval_user_tree(dir->data.require_container.children,
+                                   sub_mode, user, depth + 1, &sub_seen);
+            if (sub_seen) {
+                *seen = 1;
+                if (mode == 1) { if (!r) and_ok = 0; }
+                else           { if (r)  or_match = 1; }
+            }
+            /* A nested container with no user constraint does not affect the
+             * username decision at this level. */
+        }
+    }
+    return (mode == 1) ? and_ok : or_match;
+}
+
+/**
+ * After successful authentication, enforce any "Require user" username lists.
+ * Returns 1 if access is permitted. A bare top-level "Require valid-user"
+ * widens acceptance to any valid user (require_any_valid_user); otherwise the
+ * username must satisfy the Require tree's user constraints (see eval_user_tree).
+ */
+static int user_satisfies_require(const char *user,
+                                  const htaccess_directive_t *directives,
+                                  int require_any_valid_user)
+{
+    if (require_any_valid_user)
+        return 1;
+
+    int has_user_constraint = 0;
+    /* Top-level Require list is an implicit OR (mode 0). */
+    int ok = eval_user_tree(directives, 0, user, 0, &has_user_constraint);
+
+    /* No "Require user" constraint at all → any valid user is fine. */
+    if (!has_user_constraint)
+        return 1;
+    return ok;
+}
+
+/**
+ * Open an AuthUserFile safely. Performs ALL security checks in one place:
+ *   - reject relative paths and ".." traversal,
+ *   - confine the resolved path to the document-root subtree (prevents using
+ *     the Basic-Auth endpoint as an oracle against /etc/shadow or other
+ *     tenants' files); fail closed if the docroot can't be determined,
+ *   - open the canonical path with O_NOFOLLOW + fstat() to close the
+ *     realpath()->open() TOCTOU window (a final-component symlink swap) and
+ *     ensure a regular file.
+ * Returns an open FILE* (caller fclose) or NULL on any rejection/error.
+ */
+static FILE *open_confined_htpasswd(lsi_session_t *session, const char *path)
+{
+    if (!path || !path[0] || path[0] != '/' || strstr(path, ".."))
+        return NULL;
+
+    int dr_len = 0;
+    const char *doc_root = lsi_session_get_doc_root(session, &dr_len);
+    char real_auth[PATH_MAX];
+    char real_root[PATH_MAX];
+    if (!doc_root || dr_len <= 0 ||
+        !realpath(path, real_auth) || !realpath(doc_root, real_root))
+        return NULL;
+
+    size_t rr_len = strlen(real_root);
+    while (rr_len > 1 && real_root[rr_len - 1] == '/')
+        real_root[--rr_len] = '\0';
+    if (strncmp(real_auth, real_root, rr_len) != 0 ||
+        (real_auth[rr_len] != '\0' && real_auth[rr_len] != '/'))
+        return NULL;
+
+    int fd = open(real_auth, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0)
+        return NULL;
+
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        return NULL;
+    }
+
+    /* TOCTOU defence: O_NOFOLLOW only guards the final component. An attacker
+     * who controls the docroot could swap an *intermediate* directory for a
+     * symlink between realpath() and open(), making the opened file escape the
+     * docroot. Re-resolve the path actually opened (via /proc/self/fd) and
+     * re-confirm it is still beneath the document root. */
+    {
+        char fdlink[64];
+        char opened[PATH_MAX];
+        snprintf(fdlink, sizeof(fdlink), "/proc/self/fd/%d", fd);
+        ssize_t rl = readlink(fdlink, opened, sizeof(opened) - 1);
+        if (rl < 0) {
+            close(fd);
+            return NULL;
+        }
+        opened[rl] = '\0';
+        if (strncmp(opened, real_root, rr_len) != 0 ||
+            (opened[rr_len] != '\0' && opened[rr_len] != '/')) {
+            lsi_log(session, LSI_LOG_ERROR,
+                    "[htaccess] AuthUserFile resolved outside document root "
+                    "after open ('%s') — rejected", opened);
+            close(fd);
+            return NULL;
+        }
+    }
+
+    if (st.st_mode & 0004)
+        lsi_log(session, LSI_LOG_WARN,
+                "[htaccess] AuthUserFile '%s' is world-readable (mode %o), "
+                "consider restricting permissions",
+                real_auth, (unsigned)(st.st_mode & 0777));
+
+    FILE *fp = fdopen(fd, "r");
+    if (!fp) {
+        close(fd);
+        return NULL;
+    }
+    return fp;
+}
+
+/**
  * Parse "Basic <base64>" from Authorization header.
  * Returns 1 on success, fills user/pass (caller frees).
  */
@@ -165,7 +342,8 @@ int exec_auth_basic(lsi_session_t *session,
     const char *auth_type = NULL;
     const char *auth_name = NULL;
     const char *auth_user_file = NULL;
-    int require_valid_user = 0;
+    int require_valid_user = 0;       /* auth required (valid-user OR user list) */
+    int require_any_valid_user = 0;   /* a bare "Require valid-user" is present */
 
     const htaccess_directive_t *dir;
     for (dir = directives; dir; dir = dir->next) {
@@ -181,20 +359,36 @@ int exec_auth_basic(lsi_session_t *session,
             break;
         case DIR_REQUIRE_VALID_USER:
             require_valid_user = 1;
+            require_any_valid_user = 1;
+            break;
+        case DIR_REQUIRE_USER:
+            /* "Require user u1 u2" — authentication required; the username
+             * list is enforced post-auth by user_satisfies_require(). */
+            require_valid_user = 1;
             break;
         case DIR_REQUIRE_ANY_OPEN:
         case DIR_REQUIRE_ALL_OPEN: {
-            /* Recursively scan inside RequireAny/RequireAll for valid-user */
+            /* Recursively scan inside RequireAny/RequireAll for valid-user/user.
+             * NOTE: a "valid-user" found INSIDE a container does NOT set
+             * require_any_valid_user. Only a top-level bare "Require valid-user"
+             * widens acceptance to any authenticated user (top-level Require is
+             * an implicit OR). Inside a RequireAll, "valid-user" must coexist
+             * with — not override — any "Require user" username constraint, so
+             * widening there would be a fail-open. Both only require that auth
+             * happens (require_valid_user); the username list is then enforced
+             * by user_satisfies_require(). */
             const htaccess_directive_t *child;
             for (child = dir->data.require_container.children; child; child = child->next) {
-                if (child->type == DIR_REQUIRE_VALID_USER)
+                if (child->type == DIR_REQUIRE_VALID_USER ||
+                    child->type == DIR_REQUIRE_USER)
                     require_valid_user = 1;
                 /* Check nested containers too */
                 if ((child->type == DIR_REQUIRE_ANY_OPEN ||
                      child->type == DIR_REQUIRE_ALL_OPEN)) {
                     const htaccess_directive_t *gc;
                     for (gc = child->data.require_container.children; gc; gc = gc->next) {
-                        if (gc->type == DIR_REQUIRE_VALID_USER)
+                        if (gc->type == DIR_REQUIRE_VALID_USER ||
+                            gc->type == DIR_REQUIRE_USER)
                             require_valid_user = 1;
                     }
                 }
@@ -221,6 +415,19 @@ int exec_auth_basic(lsi_session_t *session,
     if (!require_valid_user)
         return LSI_OK;
 
+    /* KNOWN LIMITATION (intentional, fail-closed): access control is split
+     * across two phases — exec_require() evaluates ip/env/valid-user against
+     * the request, while this function enforces credentials and "Require user"
+     * username lists. Neither phase sees the other's per-branch result. So a
+     * mixed OR such as
+     *     <RequireAny> Require ip 10.0.0.0/8 ; Require user alice </RequireAny>
+     * is evaluated more strictly than Apache: a user coming from 10.0.0.0/8 who
+     * is not "alice" is still challenged/denied here. This OVER-DENIES (safe,
+     * fail-closed) rather than risking a fail-open. Granting exactly like Apache
+     * would require evaluating the whole Require boolean tree together with the
+     * authenticated identity in a single pass (a larger refactor of the
+     * exec_require/exec_auth split). */
+
     /* AuthUserFile is required */
     if (!auth_user_file) {
         lsi_log(session, LSI_LOG_ERROR,
@@ -245,52 +452,13 @@ int exec_auth_basic(lsi_session_t *session,
         return LSI_ERROR;
     }
 
-    /* Validate AuthUserFile path — reject traversal and symlinks.
-     * Resolve to real path and ensure no ".." components. */
-    if (!auth_user_file[0] || auth_user_file[0] != '/' ||
-        strstr(auth_user_file, "..")) {
-        lsi_log(session, LSI_LOG_ERROR,
-                "[htaccess] AuthUserFile path rejected (traversal): %s",
-                auth_user_file);
-        free(user);
-        free(pass);
-        lsi_session_set_status(session, 500);
-        return LSI_ERROR;
-    }
-
-    /* Open htpasswd file — use lstat to reject symlinks */
-    struct stat auth_st;
-    if (lstat(auth_user_file, &auth_st) != 0) {
-        lsi_log(session, LSI_LOG_ERROR,
-                "[htaccess] AuthUserFile not found: %s", auth_user_file);
-        free(user);
-        free(pass);
-        lsi_session_set_status(session, 500);
-        return LSI_ERROR;
-    }
-
-    if (S_ISLNK(auth_st.st_mode)) {
-        lsi_log(session, LSI_LOG_ERROR,
-                "[htaccess] AuthUserFile is a symlink, rejected: %s",
-                auth_user_file);
-        free(user);
-        free(pass);
-        lsi_session_set_status(session, 500);
-        return LSI_ERROR;
-    }
-
-    /* Warn if htpasswd file has insecure permissions (world-readable) */
-    if (auth_st.st_mode & 0004) {
-        lsi_log(session, LSI_LOG_WARN,
-                "[htaccess] AuthUserFile '%s' is world-readable (mode %o), "
-                "consider restricting permissions",
-                auth_user_file, (unsigned)(auth_st.st_mode & 0777));
-    }
-
-    FILE *fp = fopen(auth_user_file, "r");
+    /* Open the htpasswd file with all path/confinement/symlink checks applied
+     * atomically (see open_confined_htpasswd). Any rejection → 500 fail-closed. */
+    FILE *fp = open_confined_htpasswd(session, auth_user_file);
     if (!fp) {
         lsi_log(session, LSI_LOG_ERROR,
-                "[htaccess] Cannot open AuthUserFile: %s", auth_user_file);
+                "[htaccess] AuthUserFile rejected or unreadable: %s",
+                auth_user_file);
         free(user);
         free(pass);
         lsi_session_set_status(session, 500);
@@ -321,10 +489,9 @@ int exec_auth_basic(lsi_session_t *session,
     }
     fclose(fp);
 
-    free(user);
-    free(pass);
-
     if (!authenticated) {
+        free(user);
+        free(pass);
         if (auth_name)
             lsi_session_set_www_authenticate(session, auth_name,
                                              (int)strlen(auth_name));
@@ -332,6 +499,20 @@ int exec_auth_basic(lsi_session_t *session,
         return LSI_ERROR;
     }
 
+    /* Credentials valid — now enforce any "Require user" username list.
+     * A bare "Require valid-user" widens acceptance to any valid user. */
+    if (!user_satisfies_require(user, directives, require_any_valid_user)) {
+        lsi_log(session, LSI_LOG_DEBUG,
+                "[htaccess] user '%s' authenticated but not in Require user list",
+                user);
+        free(user);
+        free(pass);
+        lsi_session_set_status(session, 403);
+        return LSI_ERROR;
+    }
+
+    free(user);
+    free(pass);
     return LSI_OK;
 }
 
@@ -363,15 +544,10 @@ int check_auth_credentials(lsi_session_t *session,
         !parse_basic_auth(auth_header, auth_len, &user, &pass))
         return 0;
 
-    /* Validate against htpasswd — skip symlink/traversal checks here
-     * (exec_auth_basic does full validation when it runs) */
-    struct stat st;
-    if (lstat(auth_user_file, &st) != 0 || S_ISLNK(st.st_mode)) {
-        free(user); free(pass);
-        return 0;
-    }
-
-    FILE *fp = fopen(auth_user_file, "r");
+    /* Apply the SAME confinement/symlink/TOCTOU checks as exec_auth_basic.
+     * This pre-validation path must not become a way to read or time-probe
+     * arbitrary server-readable files outside the document root. */
+    FILE *fp = open_confined_htpasswd(session, auth_user_file);
     if (!fp) { free(user); free(pass); return 0; }
 
     char line[512];

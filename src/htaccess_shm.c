@@ -18,9 +18,17 @@
 /*  MODE 1: OLS native ls_shmhash (preferred — cross-process)          */
 /* ================================================================== */
 
-/* SHM pool and hash table names matching CyberPanel */
-#define SHM_POOL_NAME  "BFProt"
-#define SHM_HASH_NAME  "IPQuota"
+/* SHM pool and hash table names.
+ *
+ * These are intentionally LiteHTTPD-private and DISTINCT from CyberPanel's
+ * "BFProt"/"IPQuota". Attaching to a segment created by another process whose
+ * per-entry value layout differs from brute_force_record_t would make the
+ * fixed-size memcpy() below read/write out of bounds (cross-process heap
+ * corruption). Using our own names guarantees the layout is always ours. The
+ * BF_RECORD_MAGIC guard provides a second line of defence against a stale or
+ * incompatible segment left by an older module version. */
+#define SHM_POOL_NAME  "LHTbf"
+#define SHM_HASH_NAME  "LHTipq"
 #define SHM_POOL_SIZE  (1024 * 1024)  /* 1 MB */
 #define SHM_HASH_SIZE  2048
 
@@ -68,7 +76,12 @@ static brute_force_record_t *native_shm_get(const char *ip)
     if (rec)
         memcpy(&g_shm_get_buf, rec, sizeof(brute_force_record_t));
     api->shmhash_unlock(g_shm_ht);
-    return rec ? &g_shm_get_buf : NULL;
+    if (!rec)
+        return NULL;
+    /* Reject records that don't carry our magic — stale/incompatible data. */
+    if (g_shm_get_buf.magic != BF_RECORD_MAGIC)
+        return NULL;
+    return &g_shm_get_buf;
 }
 
 static int native_shm_update(const char *ip, const brute_force_record_t *record)
@@ -82,8 +95,10 @@ static int native_shm_update(const char *ip, const brute_force_record_t *record)
     if (off > 0 && val_off > 0) {
         brute_force_record_t *rec = (brute_force_record_t *)
             api->shmhash_off2ptr(g_shm_ht, val_off);
-        if (rec)
+        if (rec) {
             memcpy(rec, record, sizeof(brute_force_record_t));
+            rec->magic = BF_RECORD_MAGIC;
+        }
     }
     /* Note: if entry doesn't exist, ls_shmhash_get creates it */
     api->shmhash_unlock(g_shm_ht);
@@ -271,30 +286,30 @@ static int native_shm_atomic_increment(const char *ip, time_t now,
 
     ls_shmoff_t val_off = 0;
     ls_shmoff_t off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip), &val_off);
+    if ((off <= 0 || val_off <= 0)) {
+        /* shmhash_get may create the entry lazily — retry once to obtain the
+         * offset of the freshly created (zeroed) slot. */
+        off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip), &val_off);
+    }
     if (off > 0 && val_off > 0) {
         brute_force_record_t *rec = (brute_force_record_t *)
             api->shmhash_off2ptr(g_shm_ht, val_off);
         if (rec) {
-            rec->attempt_count++;
-            if (out)
-                memcpy(out, rec, sizeof(brute_force_record_t));
-        }
-    } else {
-        /* Entry doesn't exist yet — shmhash_get may have created a zeroed
-         * slot. Write initial record. */
-        off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip), &val_off);
-        if (off > 0 && val_off > 0) {
-            brute_force_record_t *rec = (brute_force_record_t *)
-                api->shmhash_off2ptr(g_shm_ht, val_off);
-            if (rec) {
+            if (rec->magic == BF_RECORD_MAGIC) {
+                /* Existing, valid record — increment in place. */
+                rec->attempt_count++;
+            } else {
+                /* Freshly created (zeroed) slot or incompatible data —
+                 * (re)initialize as a new record. */
                 memset(rec, 0, sizeof(brute_force_record_t));
+                rec->magic = BF_RECORD_MAGIC;
                 strncpy(rec->ip, ip, sizeof(rec->ip) - 1);
                 rec->ip[sizeof(rec->ip) - 1] = '\0';
                 rec->attempt_count = 1;
                 rec->first_attempt = now;
-                if (out)
-                    memcpy(out, rec, sizeof(brute_force_record_t));
             }
+            if (out)
+                memcpy(out, rec, sizeof(brute_force_record_t));
         }
     }
 
@@ -318,6 +333,7 @@ static int builtin_shm_atomic_increment(const char *ip, time_t now,
     /* No record — create new one */
     brute_force_record_t new_rec;
     memset(&new_rec, 0, sizeof(new_rec));
+    new_rec.magic = BF_RECORD_MAGIC;
     strncpy(new_rec.ip, ip, sizeof(new_rec.ip) - 1);
     new_rec.ip[sizeof(new_rec.ip) - 1] = '\0';
     new_rec.attempt_count = 1;

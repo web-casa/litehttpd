@@ -447,6 +447,23 @@ static int print_directive(strbuf_t *sb, const htaccess_directive_t *d)
         if (strbuf_append(sb, "Require valid-user") != 0) return -1;
         break;
 
+    case DIR_REQUIRE_USER:
+        if (strbuf_append(sb, "Require user ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_REQUIRE_GROUP:
+        /* d->value holds the full unsupported requirement text (e.g.
+         * "group admins" or "ldap-group ...") captured verbatim by the
+         * parser, so emit it after a bare "Require " to round-trip cleanly. */
+        if (strbuf_append(sb, "Require ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
     case DIR_REQUIRE_ENV:
         if (strbuf_append(sb, "Require env ") != 0) return -1;
         if (d->name) {
@@ -627,6 +644,13 @@ static int print_directive(strbuf_t *sb, const htaccess_directive_t *d)
 
     case DIR_BRUTE_FORCE_PROTECT_PATH:
         if (strbuf_append(sb, "BruteForceProtectPath ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_BRUTE_FORCE_TRUSTED_PROXY:
+        if (strbuf_append(sb, "BruteForceTrustedProxy ") != 0) return -1;
         if (d->value) {
             if (strbuf_append(sb, d->value) != 0) return -1;
         }

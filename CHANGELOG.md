@@ -2,6 +2,65 @@
 
 All notable changes to litehttpd will be documented in this file.
 
+## [2.1.4] - 2026-06-11
+
+Security hardening release. Audited with a multi-agent review plus external
+(Codex) cross-review; all identified fail-open paths are closed. No functional
+directives were removed; a few behaviours are intentionally stricter (see
+"Changed" / "Security").
+
+### Security
+- **Auth fail-open fixed (critical):** `Require user` and `Require group` were
+  silently dropped by the parser, leaving a directory protected by
+  `AuthType Basic` served to everyone with no authentication. `Require user`
+  is now fully implemented (username-list enforcement); `Require group` and any
+  other unrecognised `Require` form now **fail closed** (deny) instead of being
+  dropped. This also applies inside `<RequireAny>`/`<RequireAll>` (previously
+  dropped by the container allow-list).
+- **`<RequireAll>` AND semantics for usernames:** multiple `Require user` lists
+  inside `<RequireAll>` are now AND-combined (must match all), not OR-combined.
+- **Nested container logic fix:** a `<RequireAll>` nested in `<RequireAny>` no
+  longer leaks its children into the outer `RequireAny` (which silently turned
+  AND into OR).
+- **AuthUserFile confinement:** `AuthUserFile` is now restricted to the
+  document-root subtree and opened with `O_NOFOLLOW` + post-open `/proc/self/fd`
+  re-validation (closes a symlink/TOCTOU path-escape that allowed using the
+  Basic-Auth endpoint as a password-test oracle against arbitrary files such as
+  `/etc/shadow`). `check_auth_credentials()` shares the same confined opener.
+- **Brute-force X-Forwarded-For spoofing fixed:** `BruteForceXForwardedFor` now
+  requires the new **`BruteForceTrustedProxy <cidr-list>`** directive; XFF is
+  only honoured when the direct peer is a trusted proxy, the rightmost
+  (proxy-added) token is used, validated as an IP, and length-capped. Without a
+  trusted-proxy list, XFF is ignored and the real peer IP is used.
+- **Shared-memory hardening:** brute-force SHM uses LiteHTTPD-private segment
+  names (no longer collides with CyberPanel's `BFProt`/`IPQuota`) and a
+  magic/version guard, preventing cross-process record-layout corruption.
+- **Expression-engine DoS guards:** `tolower()`/`toupper()` nesting is now
+  depth-limited (stack-exhaustion), and regex matching caps untrusted subject
+  length (ReDoS).
+- **Memory-safety / overflow:** length-bounded URI scanning (no OOB reads on a
+  non-NUL-terminated request URI), `Expires` duration integer-overflow guards,
+  and a `time_t` overflow cap on the `Expires` date.
+
+### Added
+- `Require user <u1 u2 ...>` username-list authorization.
+- `BruteForceTrustedProxy <cidr-list>` directive.
+
+### Changed
+- `AuthUserFile` outside the document root is now rejected (was: any absolute
+  path). Place `.htpasswd` within the site's document root.
+- `BruteForceXForwardedFor On` now has no effect unless
+  `BruteForceTrustedProxy` is also configured (fail-safe default).
+- Build now applies exploit-mitigation flags (`-fstack-protector-strong`,
+  `-fstack-clash-protection`, `_FORTIFY_SOURCE=2`, full RELRO, `-z noexecstack`,
+  `-Werror=format-security`); the RPM spec passes distro `%optflags`.
+
+### Notes
+- Known fail-CLOSED limitation: a mixed `<RequireAny>` combining a non-auth
+  branch (e.g. `Require ip`) with `Require user` is evaluated more strictly than
+  Apache — a user from the allowed IP who is not in the user list is still
+  challenged/denied. This over-denies (safe) rather than risking a fail-open.
+
 ## [2.0.3] - 2026-04-09
 
 ### Fixed
