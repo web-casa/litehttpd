@@ -46,16 +46,6 @@ jobs:
       - name: Run confconv tests
         run: ctest --test-dir build -R "confconv_tests" --output-on-failure --parallel $(nproc)
 
-      - name: Upload build artifacts
-        if: matrix.build_type == 'Release'
-        uses: actions/upload-artifact@v7
-        with:
-          name: build-release
-          path: |
-            build/litehttpd_htaccess.so
-            build/litehttpd-confconv
-          retention-days: 1
-
   # ── Job 2: Apache httpd Behaviour Comparison ────────────────────────
   apache-comparison:
     runs-on: ubuntu-latest
@@ -178,12 +168,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v7
-        with:
-          name: build-release
-          path: build/
 
       - name: Install build deps
         run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
