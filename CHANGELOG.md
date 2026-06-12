@@ -45,6 +45,15 @@ directives were removed; a few behaviours are intentionally stricter (see
 ### Added
 - `Require user <u1 u2 ...>` username-list authorization.
 - `BruteForceTrustedProxy <cidr-list>` directive.
+- **Binary tarball distribution** (distro-independent, glibc 2.28+), alongside
+  the RPMs, published to the GitHub Release and `rpms.litehttpd.com`:
+  - `openlitespeed-litehttpd-<ver>-x86_64-linux.tgz` — complete patched OLS +
+    module + `install.sh` (fresh install, like the official OLS tarball).
+  - `litehttpd-ols-patch-<ver>-x86_64-linux.tgz` — overlay for an existing
+    **official OLS of the same version**: backs up and replaces the binary +
+    adds the module (full features; install.sh verifies the version).
+  - `litehttpd-module-<ver>-x86_64-linux.tgz` — module-only overlay for an
+    existing OLS of **any** version (no binary change).
 
 ### Changed
 - `AuthUserFile` outside the document root is now rejected (was: any absolute

@@ -52,6 +52,30 @@ jobs:
           dnf install ./litehttpd-*.$(uname -m).rpm
           ```
 
+          ### Binary tarballs (distro-independent, glibc >= 2.28)
+
+          Extract and run the bundled `install.sh` — like the official OLS tarball.
+
+          | Tarball | Use when | Effect |
+          |---------|----------|--------|
+          | `openlitespeed-litehttpd-*-x86_64-linux.tgz` | Fresh install / no OLS yet | Installs the **complete patched OLS + module** to `/usr/local/lsws` |
+          | `litehttpd-ols-patch-*-x86_64-linux.tgz` | You already run **official OLS (same version)** | Overlay: backs up & **replaces the binary** + adds module (full features) |
+          | `litehttpd-module-*-x86_64-linux.tgz` | You already run **official OLS (any version)** | Overlay: **module only**, no binary change (RewriteRule/php_value not executed) |
+
+          ```bash
+          # Full install (no OLS yet)
+          tar xzf openlitespeed-litehttpd-*-x86_64-linux.tgz
+          cd openlitespeed-litehttpd-* && sudo ./install.sh
+
+          # Already have official OLS — add full features (binary must match version)
+          tar xzf litehttpd-ols-patch-*-x86_64-linux.tgz
+          cd litehttpd-ols-patch-* && sudo ./install.sh
+
+          # Already have official OLS — module only (any version)
+          tar xzf litehttpd-module-*-x86_64-linux.tgz
+          cd litehttpd-module-* && sudo ./install.sh
+          ```
+
           ### .so Files (Ubuntu/Debian/Docker)
 
           | File | Platform |
@@ -312,12 +336,59 @@ jobs:
                 [ "$P1" -ge 1 ] && [ "$P2" -ge 1 ] && [ "$P3" -ge 1 ] || \
                   { echo "FATAL: Patches missing from RPM binary!"; exit 1; }
               fi
+
+              # ── (el8 leg only) Assemble binary tarballs from the install tree ──
+              # The patched binary/module are identical across el8/el9/el10 legs
+              # (all built on almalinux:8), so build the dist-agnostic tarballs once.
+              if [ "${{ matrix.dist_tag }}" = "el8" ]; then
+                OLSVER=$(grep "%global ols_version" /src/packaging/openlitespeed-litehttpd.spec | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+                MODVER=$(grep "^Version:" /src/packaging/litehttpd.spec | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
+                LSWS=$(echo /root/rpmbuild/BUILDROOT/*/usr/local/lsws)
+                PB="$LSWS/bin/openlitespeed"
+                MOD="$LSWS/modules/litehttpd_htaccess.so"
+                ST=/tmp/tarballs; rm -rf $ST; mkdir -p $ST
+                echo "=== Assembling tarballs (OLS $OLSVER, module $MODVER) ==="
+
+                # 1) Full standalone: complete patched OLS + module + installer
+                FULL="openlitespeed-litehttpd-${OLSVER}"
+                mkdir -p "$ST/$FULL/lsws"
+                cp -a "$LSWS/." "$ST/$FULL/lsws/"
+                echo TGZ > "$ST/$FULL/lsws/PLAT"
+                install -m 755 /src/packaging/tarball/install-full.sh "$ST/$FULL/install.sh"
+                tar czf /output/${FULL}-x86_64-linux.tgz -C $ST "$FULL"
+
+                # 2) Overlay B: patched binary + module + installer (version-locked)
+                PATCH="litehttpd-ols-patch-${OLSVER}"
+                mkdir -p "$ST/$PATCH"
+                install -m 755 "$PB"  "$ST/$PATCH/openlitespeed"
+                install -m 755 "$MOD" "$ST/$PATCH/litehttpd_htaccess.so"
+                echo "$OLSVER" > "$ST/$PATCH/VERSION"
+                install -m 755 /src/packaging/tarball/install-patch.sh "$ST/$PATCH/install.sh"
+                tar czf /output/${PATCH}-x86_64-linux.tgz -C $ST "$PATCH"
+
+                # 3) Overlay A: module only + installer (version-independent)
+                MODP="litehttpd-module-${MODVER}"
+                mkdir -p "$ST/$MODP"
+                install -m 755 "$MOD" "$ST/$MODP/litehttpd_htaccess.so"
+                install -m 755 /src/packaging/tarball/install-module.sh "$ST/$MODP/install.sh"
+                tar czf /output/${MODP}-x86_64-linux.tgz -C $ST "$MODP"
+
+                echo "=== Tarballs built ==="; ls -lh /output/*.tgz
+              fi
             '
 
       - name: Attach RPM to release
         run: |
           for i in 1 2 3; do
             gh release upload "$GITHUB_REF_NAME" output/openlitespeed-litehttpd-*.rpm --clobber && break
+            echo "upload retry $i"; sleep $((i*5))
+          done
+
+      - name: Attach binary tarballs to release
+        if: matrix.dist_tag == 'el8'
+        run: |
+          for i in 1 2 3; do
+            gh release upload "$GITHUB_REF_NAME" output/*.tgz --clobber && break
             echo "upload retry $i"; sleep $((i*5))
           done
 
@@ -348,10 +419,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Download RPMs from release
+      - name: Download RPMs + tarballs from release
         run: |
           mkdir -p artifacts
           gh release download "$GITHUB_REF_NAME" --dir artifacts --pattern '*.rpm'
+          gh release download "$GITHUB_REF_NAME" --dir artifacts --pattern '*.tgz' || true
           ls -lh artifacts/
 
       - name: Install tools
@@ -422,6 +494,10 @@ jobs:
           # Copy GPG public key and setup script to root
           cp packaging/RPM-GPG-KEY-litehttpd repo/
           cp packaging/setup-repo.sh repo/setup.sh
+
+          # Publish the binary tarballs at the repo root so they get a stable
+          # URL (https://rpms.litehttpd.com/<name>-x86_64-linux.tgz).
+          cp artifacts/*.tgz repo/ 2>/dev/null || true
 
           # Generate static index.html directory listings
           bash packaging/generate-index.sh repo
