@@ -318,7 +318,9 @@ jobs:
               cp /src/tools/ols_config_writer.c /root/rpmbuild/SOURCES/
               cp /src/tools/ols_config_writer.h /root/rpmbuild/SOURCES/
               cp /tmp/litehttpd-module-src.tar.gz /root/rpmbuild/SOURCES/
-              rpmbuild -bb --define "_topdir /root/rpmbuild" \
+              # --noclean keeps BUILDROOT after packaging so the el8 leg can
+              # assemble the binary tarballs from the install tree below.
+              rpmbuild -bb --noclean --define "_topdir /root/rpmbuild" \
                 --define "dist .${{ matrix.dist_tag }}" \
                 /src/packaging/openlitespeed-litehttpd.spec
               find /root/rpmbuild/RPMS -name "openlitespeed-litehttpd-*.rpm" ! -name "*debug*" \
@@ -344,6 +346,7 @@ jobs:
                 OLSVER=$(grep "%global ols_version" /src/packaging/openlitespeed-litehttpd.spec | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
                 MODVER=$(grep "^Version:" /src/packaging/litehttpd.spec | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
                 LSWS=$(echo /root/rpmbuild/BUILDROOT/*/usr/local/lsws)
+                [ -d "$LSWS" ] || { echo "FATAL: install tree not found at $LSWS (BUILDROOT cleaned?)"; exit 1; }
                 PB="$LSWS/bin/openlitespeed"
                 MOD="$LSWS/modules/litehttpd_htaccess.so"
                 ST=/tmp/tarballs; rm -rf $ST; mkdir -p $ST
