@@ -3,7 +3,7 @@ title: Introduction
 description: What is LiteHTTPD and why use it
 ---
 
-LiteHTTPD is an Apache .htaccess compatibility solution for [OpenLiteSpeed](https://openlitespeed.org/), consisting of the `litehttpd_htaccess.so` LSIAPI module and a patched OLS binary. Together they achieve 90%+ Apache compatibility with 80 supported directives.
+LiteHTTPD is an Apache .htaccess compatibility solution for [OpenLiteSpeed](https://openlitespeed.org/), consisting of the `litehttpd_htaccess.so` LSIAPI module and a patched OLS binary. Together they achieve 90%+ Apache compatibility with 83 supported directive types.
 
 ## Why LiteHTTPD?
 
@@ -31,7 +31,7 @@ The module reads `.htaccess` files from the document root up to the request path
 
 LiteHTTPD (Full) is the recommended installation. It includes the `litehttpd_htaccess.so` module plus 4 OLS patches that enable full RewriteRule execution, `php_value`/`php_flag` support, and engine-level `Options -Indexes`.
 
-For environments where the OLS binary cannot be modified (Docker images, shared hosting), LiteHTTPD-Thin provides the module alone with 70+ directives but without RewriteRule execution or `php_value` support.
+For environments where the OLS binary cannot be modified (Docker images, shared hosting), LiteHTTPD-Thin provides the module alone with 83 parsed directive types but without RewriteRule execution or `php_value` support.
 
 See [Editions](/getting-started/editions/) for a detailed feature comparison.
 

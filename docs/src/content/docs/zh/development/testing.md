@@ -28,7 +28,7 @@ ctest --test-dir build -R "confconv_tests" --output-on-failure
 
 ## 一致性检查
 
-验证全部 80 种指令类型在解析器、打印器、执行器、目录遍历器、释放和生成器中均有实现：
+验证全部 83 种指令类型在解析器、打印器、执行器、目录遍历器、释放和生成器中均有实现：
 
 ```bash
 bash tests/check_consistency.sh
@@ -66,4 +66,4 @@ bash integration-tests/apps/wordpress/verify.sh
 
 - **PR 门禁** (ci.yml)：构建、单元/属性/兼容性测试、ASan/UBSan、Apache 对比、OLS E2E
 - **每夜构建** (nightly.yml)：模糊测试、冒烟测试、集成测试（4 个 PHP 应用）
-- **发布** (release.yml)：多平台构建（x86_64 + ARM64）、RPM 打包
+- **发布** (release.yml)：x86_64 平台构建、RPM 打包和发布资产上传

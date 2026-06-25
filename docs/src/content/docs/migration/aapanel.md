@@ -7,7 +7,7 @@ description: Switch from aaPanel's OLS to LiteHTTPD
 
 aaPanel (宝塔面板) installs OLS via its App Store. It uses standard OLS paths (`/usr/local/lsws/`) but manages config files through the panel UI. Stock aaPanel OLS has **no .htaccess support** beyond basic `RewriteFile` processing — which is why many aaPanel + OLS users find that `.htaccess` rules don't work.
 
-LiteHTTPD adds full `.htaccess` support (80 directives) to your aaPanel OLS setup.
+LiteHTTPD adds full `.htaccess` support (83 directive types) to your aaPanel OLS setup.
 
 ## Installation
 

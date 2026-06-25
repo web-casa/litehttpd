@@ -37,7 +37,7 @@ errorPage 403 {
 
 ## .htaccess 配置（LiteHTTPD 模块）
 
-使用 LiteHTTPD 模块（`ols_htaccess.so`）时，您可以在 `.htaccess` 文件中使用 Apache 风格的 `ErrorDocument` 指令：
+使用 LiteHTTPD 模块（`litehttpd_htaccess.so`）时，您可以在 `.htaccess` 文件中使用 Apache 风格的 `ErrorDocument` 指令：
 
 ```apacheconf
 ErrorDocument 404 /errors/404.html

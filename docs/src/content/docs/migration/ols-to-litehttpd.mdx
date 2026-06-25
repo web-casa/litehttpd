@@ -9,13 +9,13 @@ import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 
 If you are running stock OpenLiteSpeed (installed via the [official repo](https://docs.openlitespeed.org/installation/), [ols1clk.sh script](https://docs.openlitespeed.org/installation/script/), or manual download), adding LiteHTTPD gives you full `.htaccess` support without changing your existing configuration.
 
-Stock OLS only handles a small subset of `.htaccess` directives (primarily `RewriteFile` for basic rewrite rules). LiteHTTPD adds 80 directives including `Header`, `Require`, `FilesMatch`, `AuthType Basic`, `If/ElseIf/Else`, and more.
+Stock OLS only handles a small subset of `.htaccess` directives (primarily `RewriteFile` for basic rewrite rules). LiteHTTPD adds 83 directive types including `Header`, `Require`, `FilesMatch`, `AuthType Basic`, `If/ElseIf/Else`, and more.
 
 ## What You Gain
 
 | Feature | Stock OLS | With LiteHTTPD |
 |---------|-----------|----------------|
-| .htaccess directives | ~6 (RewriteFile only) | **80** |
+| .htaccess directive types | ~6 (RewriteFile only) | **83** |
 | `Require all denied` | Returns 200 (broken) | Returns 403 |
 | `Header set` | Ignored | Applied |
 | `RewriteRule [R=301]` | 404 | 301 redirect |

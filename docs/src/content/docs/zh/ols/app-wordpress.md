@@ -90,7 +90,7 @@ virtualhost example {
   # 启用 .htaccess 处理
   rewrite {
     enable                1
-    autoLoadHtaccess      1
+    autoLoadHtaccess      0
   }
 }
 ```
@@ -104,7 +104,7 @@ OLS 需要重写规则来支持 WordPress 的友好固定链接。有两种方�
 ```apacheconf
 rewrite {
   enable                  1
-  autoLoadHtaccess        1
+  autoLoadHtaccess        0
 
   rules                   <<<END_rules
     RewriteEngine On

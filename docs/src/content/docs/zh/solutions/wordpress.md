@@ -53,7 +53,7 @@ cp litehttpd_htaccess.so /usr/local/lsws/modules/
 echo 'module litehttpd_htaccess { ls_enabled 1 }' >> /usr/local/lsws/conf/httpd_config.conf
 
 # Enable .htaccess for WordPress vhost
-echo -e "allowOverride 255\nautoLoadHtaccess 1" >> /usr/local/lsws/conf/vhosts/wordpress/vhconf.conf
+echo -e "allowOverride 255\nautoLoadHtaccess 0" >> /usr/local/lsws/conf/vhosts/wordpress/vhconf.conf
 
 # Restart
 /usr/local/lsws/bin/lswsctrl restart

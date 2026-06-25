@@ -15,7 +15,8 @@ description: MIME type and content configuration directives
 | `ForceType` | `ForceType MIME-type` |
 | `DirectoryIndex` | `DirectoryIndex filename [filename ...]` |
 | `RemoveType` | `RemoveType extension [extension ...]` |
-| `RemoveHandler` | `RemoveHandler extension [extension ...]` |
+
+Handler mapping directives such as `AddHandler`, `SetHandler`, `RemoveHandler`, and `Action` are documented separately because LiteHTTPD parses them but does not change OLS request handling. See [Handlers](/directives/handlers/).
 
 ## Examples
 

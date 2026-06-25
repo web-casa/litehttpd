@@ -120,7 +120,7 @@ module cache {
 To load the LiteHTTPD module for .htaccess support:
 
 ```apacheconf
-module ols_htaccess {
+module litehttpd_htaccess {
     ls_enabled                1
 }
 ```

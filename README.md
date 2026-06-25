@@ -4,7 +4,7 @@
 
 > **RPM Repository**: [rpms.litehttpd.com](https://rpms.litehttpd.com/) · **Documentation**: [docs.litehttpd.com](https://docs.litehttpd.com/) · **Source Code**: [GitHub](https://github.com/web-casa/litehttpd)
 
-Full Apache .htaccess compatibility module for OpenLiteSpeed. 80 directives, 100% WordPress compatibility, 2.5x faster static performance than Apache.
+Full Apache .htaccess compatibility module for OpenLiteSpeed. 83 directive types, 100% WordPress compatibility, 2.5x faster static performance than Apache.
 
 ## Quick Install
 
@@ -18,11 +18,11 @@ RPM includes: patched OLS binary + litehttpd module + auto-configuration. Browse
 
 ## Features
 
-- **80 .htaccess directives** — Header, Redirect, RewriteRule/RewriteCond, SetEnv, Expires, php_value/php_flag, Options, Require, AuthType Basic, DirectoryIndex, FilesMatch, and more
+- **83 .htaccess directive types** — Header, Redirect, RewriteRule/RewriteCond, SetEnv, Expires, php_value/php_flag, Options, Require, AuthType Basic, DirectoryIndex, FilesMatch, and more
 - **If/ElseIf/Else** conditional blocks with full **ap_expr** engine
 - **RewriteOptions** inherit/IgnoreInherit and **RewriteMap** txt/rnd/int
 - **IPv6 CIDR** access control with `Require ip` prefix matching
-- **WordPress brute-force protection** (8 directives)
+- **WordPress brute-force protection** (9 directives)
 - **AllowOverride** category filtering (AuthConfig, FileInfo, Indexes, Limit, Options)
 - **readApacheConf**: embedded Apache config parser in OLS binary (like CyberPanel/LSWS)
 - **litehttpd-confconv**: Apache httpd.conf to OLS config converter (65+ directives)
@@ -34,7 +34,7 @@ RPM includes: patched OLS binary + litehttpd module + auto-configuration. Browse
 | | LiteHTTPD-Full | LiteHTTPD-Thin |
 |-|----------------|---------------|
 | **Install** | `dnf install openlitespeed-litehttpd` | Copy `.so` to stock OLS |
-| **Directives** | 80 (all features) | 70+ (no RewriteRule execution, no php_value) |
+| **Directives** | 83 parsed types | 83 parsed types; no RewriteRule execution or php_value passthrough |
 | **Best for** | Production, full Apache migration | Quick evaluation, Docker |
 
 ## Performance
@@ -52,7 +52,7 @@ WordPress plugin compatibility: **9/9 match Apache** (Wordfence, Yoast SEO, W3 T
 
 ## vs CyberPanel .htaccess Module
 
-LiteHTTPD supports **80 directives** vs CyberPanel's ~29. All CyberPanel features are covered, plus 27 additional capabilities including RewriteRule execution, If/ElseIf/Else conditionals, ap_expr engine, Require directives, AuthType Basic, Options, AllowOverride, and readApacheConf.
+LiteHTTPD supports **83 directive types** vs CyberPanel's ~29. All CyberPanel features are covered, plus additional capabilities including RewriteRule execution, If/ElseIf/Else conditionals, ap_expr engine, Require directives, AuthType Basic, Options, AllowOverride, and readApacheConf.
 
 ## OLS Patches
 

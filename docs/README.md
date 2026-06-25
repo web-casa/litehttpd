@@ -1,49 +1,52 @@
-# Starlight Starter Kit: Basics
+# LiteHTTPD Documentation Site
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+This is the Astro + Starlight documentation site for LiteHTTPD.
 
-```
-pnpm create astro@latest -- --template starlight
-```
+## Local Development
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-## 🚀 Project Structure
-
-Inside of your Astro + Starlight project, you'll see the following folders and files:
-
-```
-.
-├── public/
-├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
+```bash
+pnpm install
+pnpm dev
 ```
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+The dev server runs at `http://localhost:4321`.
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
+## Build
 
-Static assets, like favicons, can be placed in the `public/` directory.
+```bash
+pnpm build
+pnpm preview
+```
 
-## 🧞 Commands
+The static site is written to `dist/`.
 
-All commands are run from the root of the project, from a terminal:
+`pnpm build` runs `scripts/sync-directories-links.mjs` first. This fetches the
+latest `link.json` and `assets/logos/` from
+`https://github.com/yeagoo/directories-links` so the footer and links page use
+fresh directory and documentation-site links for every build.
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `pnpm install`             | Installs dependencies                            |
-| `pnpm dev`             | Starts local dev server at `localhost:4321`      |
-| `pnpm build`           | Build your production site to `./dist/`          |
-| `pnpm preview`         | Preview your build locally, before deploying     |
-| `pnpm astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `pnpm astro -- --help` | Get help using the Astro CLI                     |
+To update links without building:
 
-## 👀 Want to learn more?
+```bash
+pnpm sync-links
+```
 
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+## Content Layout
+
+- English docs: `src/content/docs/`
+- Simplified Chinese docs: `src/content/docs/zh/`
+- Sidebar and site metadata: `astro.config.mjs`
+- Shared components: `src/components/`
+- Theme overrides: `src/styles/custom.css`
+
+When adding a page, add both English and Chinese versions and register the slug in `astro.config.mjs` if it should appear in the sidebar.
+
+## Maintenance Checks
+
+Before publishing:
+
+```bash
+pnpm build
+```
+
+Also check that internal links use existing slugs, for example `/directives/overview/` rather than a directory without an index page.

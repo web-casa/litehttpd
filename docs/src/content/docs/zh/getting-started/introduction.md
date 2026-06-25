@@ -3,7 +3,7 @@ title: 简介
 description: LiteHTTPD 是什么，为什么要使用它
 ---
 
-LiteHTTPD 是 [OpenLiteSpeed](https://openlitespeed.org/) 的 Apache .htaccess 兼容方案，由 `litehttpd_htaccess.so` LSIAPI 模块和打补丁的 OLS 二进制文件组成。两者配合可实现 90% 以上的 Apache 兼容性，支持 80 条指令。
+LiteHTTPD 是 [OpenLiteSpeed](https://openlitespeed.org/) 的 Apache .htaccess 兼容方案，由 `litehttpd_htaccess.so` LSIAPI 模块和打补丁的 OLS 二进制文件组成。两者配合可实现 90% 以上的 Apache 兼容性，支持 83 个指令类型。
 
 ## 为什么选择 LiteHTTPD？
 
@@ -31,7 +31,7 @@ LiteHTTPD 由 `litehttpd_htaccess.so` LSIAPI 模块和（Full 版中的）打补
 
 LiteHTTPD（完整版）是推荐的安装方式。它包含 `litehttpd_htaccess.so` 模块以及 4 个 OLS 补丁，可实现完整的 RewriteRule 执行、`php_value`/`php_flag` 支持和引擎级 `Options -Indexes`。
 
-对于无法修改 OLS 二进制文件的环境（Docker 镜像、共享主机），LiteHTTPD-Thin 仅提供模块本身，支持 70+ 指令，但不包含 RewriteRule 执行和 `php_value` 支持。
+对于无法修改 OLS 二进制文件的环境（Docker 镜像、共享主机），LiteHTTPD-Thin 仅提供模块本身，支持 83 个已解析指令类型，但不包含 RewriteRule 执行和 `php_value` 支持。
 
 详见[版本对比](/zh/getting-started/editions/)。
 

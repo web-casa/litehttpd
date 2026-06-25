@@ -15,7 +15,8 @@ description: 内容类型指令参考
 | `ForceType` | `ForceType MIME-type` |
 | `DirectoryIndex` | `DirectoryIndex filename [filename ...]` |
 | `RemoveType` | `RemoveType extension [extension ...]` |
-| `RemoveHandler` | `RemoveHandler extension [extension ...]` |
+
+`AddHandler`、`SetHandler`、`RemoveHandler` 和 `Action` 等处理器映射指令单独说明，因为 LiteHTTPD 会解析这些指令，但不会改变 OLS 的请求处理方式。参见[处理器](/zh/directives/handlers/)。
 
 ## 示例
 

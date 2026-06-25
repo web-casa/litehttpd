@@ -131,7 +131,7 @@ context /static/ {
 
 ## .htaccess Support with LiteHTTPD
 
-OpenLiteSpeed has limited built-in .htaccess support. For full Apache-compatible .htaccess processing, use the LiteHTTPD module (`ols_htaccess.so`).
+OpenLiteSpeed has limited built-in .htaccess support. For full Apache-compatible .htaccess processing, use the LiteHTTPD module (`litehttpd_htaccess.so`).
 
 ### Enable .htaccess Processing
 
@@ -140,15 +140,15 @@ In the virtual host config:
 ```apacheconf
 general {
     allowOverride           All
-    autoLoadHtaccess        1
+    autoLoadHtaccess        0
     configFile              $VH_ROOT/vhconf.conf
 }
 ```
 
 - **allowOverride** -- Controls which .htaccess directive categories are permitted. Values: `All`, `None`, or a combination of `AuthConfig`, `FileInfo`, `Indexes`, `Limit`, `Options`.
-- **autoLoadHtaccess** -- When set to `1`, OLS automatically loads and processes .htaccess files from the document root hierarchy.
+- **autoLoadHtaccess** -- Keep this set to `0` when LiteHTTPD is loaded. OLS native `.htaccess` processing is limited and can double-process directives that LiteHTTPD already handles.
 
-With the LiteHTTPD module loaded, these settings enable full .htaccess support including rewrite rules, access control, MIME types, and more. See the [directive reference](/directives/) for the complete list of supported directives.
+With the LiteHTTPD module loaded, these settings enable full .htaccess support including rewrite rules, access control, MIME types, and more. See the [directive reference](/directives/overview/) for the complete list of supported directives.
 
 ## Rewrite Rules
 

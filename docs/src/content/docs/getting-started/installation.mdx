@@ -12,10 +12,10 @@ LiteHTTPD (Full) is the default and recommended edition. It includes the patched
 ### Prerequisites
 
 - OpenLiteSpeed 1.7.0 or later
-- Linux x86_64 (ARM64 not yet supported)
+- Linux x86_64 for RPM installs (ARM64 RPMs are not currently published)
 
 <Tabs>
-<TabItem label="RPM Repo (EL 9) -- recommended">
+<TabItem label="RPM Repo (EL 8/9/10) -- recommended">
 
 <Steps>
 1. Add the LiteHTTPD RPM repository and install:
@@ -68,7 +68,8 @@ LiteHTTPD (Full) is the default and recommended edition. It includes the patched
    cd openlitespeed
    patch -p1 < /path/to/patches/0001-lsiapi-phpconfig.patch
    patch -p1 < /path/to/patches/0002-lsiapi-rewrite.patch
-   # Apply patches 0003, 0004
+   patch -p1 < /path/to/patches/0003-readapacheconf.patch
+   patch -p1 < /path/to/patches/0004-autoindex-403.patch
    bash build.sh
    ```
 

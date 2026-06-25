@@ -28,7 +28,7 @@ ctest --test-dir build -R "confconv_tests" --output-on-failure
 
 ## Consistency Check
 
-Validates all 80 directive types are implemented across parser, printer, executor, dirwalker, free, and generator:
+Validates all 83 directive types are implemented across parser, printer, executor, dirwalker, free, and generator:
 
 ```bash
 bash tests/check_consistency.sh
@@ -66,4 +66,4 @@ bash integration-tests/apps/wordpress/verify.sh
 
 - **PR gate** (ci.yml): build, unit/property/compat tests, ASan/UBSan, Apache comparison, OLS E2E
 - **Nightly** (nightly.yml): fuzzing, smoke tests, integration tests (4 PHP apps)
-- **Release** (release.yml): multi-platform build (x86_64 + ARM64), RPM packaging
+- **Release** (release.yml): x86_64 platform builds, RPM packaging, and release asset uploads

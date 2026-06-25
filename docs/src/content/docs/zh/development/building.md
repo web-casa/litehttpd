@@ -30,7 +30,7 @@ cmake --build build -j$(nproc) --target litehttpd_htaccess
 cmake -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j$(nproc)
 
-# 运行全部 1036 个测试
+# 运行全部 1,036 个测试
 ctest --test-dir build --output-on-failure -j$(nproc)
 ```
 
