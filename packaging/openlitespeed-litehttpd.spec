@@ -80,7 +80,7 @@ BuildRequires:  libaio-devel
 BuildRequires:  expat-devel
 BuildRequires:  libxml2-devel
 BuildRequires:  zlib-devel
-BuildRequires:  libstdc++-static
+BuildRequires:  libstdc++-devel
 BuildRequires:  systemd-rpm-macros
 
 Provides:       openlitespeed = %{ols_version}

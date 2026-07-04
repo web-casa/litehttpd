@@ -35,13 +35,29 @@ RUN set -eux; \
         rpm-build gcc gcc-c++ cmake make bison autoconf automake libtool \
         systemd-rpm-macros which git wget ca-certificates clang patch perl \
         golang tar gzip findutils binutils libcap-devel libaio-devel \
-        expat-devel libxml2-devel zlib-devel libstdc++-static; \
+        expat-devel libxml2-devel zlib-devel libstdc++-devel; \
+      extra_repos=""; \
+      for repo in powertools crb; do \
+        if dnf repolist all | awk '{print $1}' | grep -qx "$repo"; then \
+          extra_repos="${extra_repos} --enablerepo=${repo}"; \
+        fi; \
+      done; \
+      # shellcheck disable=SC2086 \
+      dnf -y --setopt=install_weak_deps=False ${extra_repos} install libstdc++-static || true; \
     else \
       yum -y --setopt=install_weak_deps=False install \
         rpm-build gcc gcc-c++ cmake3 make bison autoconf automake libtool \
         systemd-rpm-macros which git wget ca-certificates clang patch perl \
         tar gzip findutils binutils libcap-devel libaio-devel expat-devel \
-        libxml2-devel zlib-devel libstdc++-static; \
+        libxml2-devel zlib-devel libstdc++-devel; \
+      extra_repos=""; \
+      for repo in powertools crb; do \
+        if yum repolist all | awk '{print $1}' | grep -qx "$repo"; then \
+          extra_repos="${extra_repos} --enablerepo=${repo}"; \
+        fi; \
+      done; \
+      # shellcheck disable=SC2086 \
+      yum -y --setopt=install_weak_deps=False ${extra_repos} install libstdc++-static || true; \
       yum -y --setopt=install_weak_deps=False install golang || true; \
       command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake; \
     fi; \
