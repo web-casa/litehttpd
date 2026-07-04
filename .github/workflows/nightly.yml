@@ -320,6 +320,7 @@ jobs:
 
   apps-matrix-do-release-gate:
     if: github.event_name == 'workflow_dispatch' && inputs.run_do_release_gate == '1'
+    needs: apps-matrix-runtime-images
     uses: ./.github/workflows/apps-matrix-do-release-gate.yml
     permissions:
       contents: read
@@ -334,6 +335,8 @@ jobs:
       artifact_mode: summary
       enforce_budgets: "0"
       image_tag: ${{ github.sha }}
+      apache_image: ${{ needs.apps-matrix-runtime-images.outputs.apache_image }}
+      ols_module_image: ${{ needs.apps-matrix-runtime-images.outputs.ols_module_image }}
 
   # ── Integration Tests: 4 PHP Apps (moved from ci.yml) ─────────────
   integration-tests:

@@ -59,6 +59,16 @@ on:
         required: false
         type: string
         default: ""
+      apache_image:
+        description: "Optional prebuilt Apache runtime image. When set with ols_module_image, skips the runtime image build job."
+        required: false
+        type: string
+        default: ""
+      ols_module_image:
+        description: "Optional prebuilt patched OLS runtime image. When set with apache_image, skips the runtime image build job."
+        required: false
+        type: string
+        default: ""
 
   workflow_dispatch:
     inputs:
@@ -102,6 +112,14 @@ on:
         description: "Runtime image tag. Defaults to the commit SHA"
         required: false
         default: ""
+      apache_image:
+        description: "Optional prebuilt Apache runtime image. When set with ols_module_image, skips the runtime image build job."
+        required: false
+        default: ""
+      ols_module_image:
+        description: "Optional prebuilt patched OLS runtime image. When set with apache_image, skips the runtime image build job."
+        required: false
+        default: ""
 
 concurrency:
   group: apps-matrix-do-release-gate-${{ github.ref }}
@@ -109,6 +127,7 @@ concurrency:
 
 jobs:
   apps-matrix-runtime-images:
+    if: inputs.apache_image == '' || inputs.ols_module_image == ''
     uses: ./.github/workflows/apps-matrix-runtime-images.yml
     permissions:
       contents: read
@@ -121,6 +140,7 @@ jobs:
 
   do-release-gate:
     needs: apps-matrix-runtime-images
+    if: always() && !cancelled() && (inputs.apache_image != '' || needs.apps-matrix-runtime-images.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 240
     permissions:
@@ -141,6 +161,8 @@ jobs:
           CONTINUE_ON_FAILURE: ${{ inputs.continue_on_failure }}
           ARTIFACT_MODE: ${{ inputs.artifact_mode }}
           ENFORCE_BUDGETS: ${{ inputs.enforce_budgets }}
+          APACHE_IMAGE: ${{ inputs.apache_image }}
+          OLS_MODULE_IMAGE: ${{ inputs.ols_module_image }}
         run: |
           printf '%s\n' "${SCENARIOS}" | tr ', ' '\n' | sed '/^$/d' | while read -r scenario; do
             case "${scenario}" in
@@ -168,6 +190,16 @@ jobs:
             echo "Unsupported droplet_image characters" >&2
             exit 1
           fi
+          if { [ -n "${APACHE_IMAGE}" ] && [ -z "${OLS_MODULE_IMAGE}" ]; } || { [ -z "${APACHE_IMAGE}" ] && [ -n "${OLS_MODULE_IMAGE}" ]; }; then
+            echo "apache_image and ols_module_image must be provided together" >&2
+            exit 1
+          fi
+          for image in "${APACHE_IMAGE}" "${OLS_MODULE_IMAGE}"; do
+            if [ -n "${image}" ] && ! printf '%s' "${image}" | grep -Eq '^[A-Za-z0-9._:@/-]+$'; then
+              echo "Unsupported runtime image characters: ${image}" >&2
+              exit 1
+            fi
+          done
 
       - name: Install local runner dependencies
         run: |
@@ -190,8 +222,8 @@ jobs:
           APPS_MATRIX_DO_DOCKER_REGISTRY: ghcr.io
           APPS_MATRIX_DO_DOCKER_USERNAME: ${{ github.actor }}
           APPS_MATRIX_DO_DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-          APPS_MATRIX_DO_APACHE_IMAGE: ${{ needs.apps-matrix-runtime-images.outputs.apache_image }}
-          APPS_MATRIX_DO_OLS_MODULE_IMAGE: ${{ needs.apps-matrix-runtime-images.outputs.ols_module_image }}
+          APPS_MATRIX_DO_APACHE_IMAGE: ${{ inputs.apache_image || needs.apps-matrix-runtime-images.outputs.apache_image }}
+          APPS_MATRIX_DO_OLS_MODULE_IMAGE: ${{ inputs.ols_module_image || needs.apps-matrix-runtime-images.outputs.ols_module_image }}
           APPS_MATRIX_DO_NAME: apps-matrix-${{ github.run_id }}-${{ github.run_attempt }}
         run: bash scripts/apps-matrix-do-vps-test.sh
 
