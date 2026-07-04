@@ -63,6 +63,7 @@ install_laravel() {
     deploy_htaccess "$(cat <<'HTEOF'
 <IfModule mod_rewrite.c>
     RewriteEngine On
+    RewriteRule ^public(/.*)?$ - [L]
     RewriteRule ^(.*)$ public/$1 [L]
 </IfModule>
 HTEOF
