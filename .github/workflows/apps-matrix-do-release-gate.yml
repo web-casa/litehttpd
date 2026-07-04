@@ -7,6 +7,59 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 on:
+  workflow_call:
+    inputs:
+      scenarios:
+        description: "Scenario list, heavy, wordpress, cms, framework, or a single scenario"
+        required: false
+        type: string
+        default: wordpress
+      engines:
+        description: "Engine list. Release gate should usually use apache,ols_module"
+        required: false
+        type: string
+        default: apache,ols_module
+      droplet_image:
+        description: "Optional DO image slug or snapshot ID. Empty uses ubuntu-24-04-x64"
+        required: false
+        type: string
+        default: ""
+      skip_dep_install:
+        description: "Set to 1 when droplet_image is a prepared apps-matrix snapshot"
+        required: false
+        type: string
+        default: "0"
+      droplet_size:
+        description: "DigitalOcean size slug"
+        required: false
+        type: string
+        default: s-4vcpu-8gb
+      region:
+        description: "DigitalOcean region"
+        required: false
+        type: string
+        default: sfo3
+      continue_on_failure:
+        description: "Set to 1 to keep running remaining scenarios after a failure"
+        required: false
+        type: string
+        default: "0"
+      artifact_mode:
+        description: "summary or full"
+        required: false
+        type: string
+        default: summary
+      enforce_budgets:
+        description: "Set to 1 only after enough p95 samples have been ratcheted"
+        required: false
+        type: string
+        default: "0"
+      image_tag:
+        description: "Runtime image tag. Defaults to the commit SHA"
+        required: false
+        type: string
+        default: ""
+
   workflow_dispatch:
     inputs:
       scenarios:

@@ -10,6 +10,27 @@ on:
   schedule:
     - cron: '17 3 * * *'  # 3:17 UTC daily
   workflow_dispatch:       # manual trigger
+    inputs:
+      run_do_release_gate:
+        description: "Set to 1 to also run the DigitalOcean apps-matrix release gate"
+        required: false
+        default: "0"
+      do_release_gate_scenarios:
+        description: "DO gate scenarios: wordpress, cms, framework, heavy, all, or a single scenario"
+        required: false
+        default: wordpress
+      do_release_gate_droplet_image:
+        description: "Optional DO image slug or snapshot ID"
+        required: false
+        default: ""
+      do_release_gate_skip_dep_install:
+        description: "Set to 1 when using a prepared apps-matrix snapshot"
+        required: false
+        default: "0"
+      do_release_gate_continue_on_failure:
+        description: "Set to 1 to keep running remaining scenarios after a failure"
+        required: false
+        default: "0"
 
 jobs:
   apps-matrix-runtime-images:
@@ -296,6 +317,23 @@ jobs:
           name: apps-matrix-full-${{ matrix.scenario }}
           path: ${{ runner.temp }}/apps-matrix-full-summary/${{ matrix.scenario }}
           if-no-files-found: ignore
+
+  apps-matrix-do-release-gate:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_do_release_gate == '1'
+    uses: ./.github/workflows/apps-matrix-do-release-gate.yml
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+    with:
+      scenarios: ${{ inputs.do_release_gate_scenarios }}
+      engines: apache,ols_module
+      droplet_image: ${{ inputs.do_release_gate_droplet_image }}
+      skip_dep_install: ${{ inputs.do_release_gate_skip_dep_install }}
+      continue_on_failure: ${{ inputs.do_release_gate_continue_on_failure }}
+      artifact_mode: summary
+      enforce_budgets: "0"
+      image_tag: ${{ github.sha }}
 
   # ── Integration Tests: 4 PHP Apps (moved from ci.yml) ─────────────
   integration-tests:
