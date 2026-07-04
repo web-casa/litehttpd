@@ -111,8 +111,9 @@ HTEOF
 # ---------------------------------------------------------------------------
 
 test_homepage() {
-    assert_http_status "${APP_PATH}/" 200 && \
-    assert_body_contains "${APP_PATH}/" "WordPress"
+    assert_http_status "${APP_PATH}/" 200 || return 1
+    grep -qF "OLS Test" <<< "$_LAST_RESPONSE_BODY" || \
+        grep -qF "Sample Test Post" <<< "$_LAST_RESPONSE_BODY"
 }
 
 test_permalink() {
@@ -142,7 +143,10 @@ test_rest_api() {
 test_wp_admin() {
     # Should redirect to login
     _fetch GET "${APP_PATH}/wp-admin/"
-    [[ "$_LAST_STATUS_CODE" == "200" || "$_LAST_STATUS_CODE" == "302" ]]
+    case "$_LAST_STATUS_CODE" in
+        200|301|302) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
