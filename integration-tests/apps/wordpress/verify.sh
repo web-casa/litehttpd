@@ -13,6 +13,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/../../lib/assert.sh"
 
 APP_PATH="/wordpress"
+APP_CANONICAL_PATH="/wordpress/"
 APP_DIR="/var/www/vhosts/localhost/html/wordpress"
 DB_NAME="wordpress"
 DB_USER="appuser"
@@ -48,7 +49,7 @@ install_wordpress() {
 
     docker_exec wp core install \
         --path="$APP_DIR" --allow-root \
-        --url="http://localhost:8088${APP_PATH}" \
+        --url="http://localhost:8088${APP_CANONICAL_PATH}" \
         --title="OLS Test" --admin_user=admin --admin_password=admin123 \
         --admin_email="test@example.com" --skip-email
 
@@ -111,9 +112,22 @@ HTEOF
 # ---------------------------------------------------------------------------
 
 test_homepage() {
-    assert_http_status "${APP_PATH}/" 200 || \
-        assert_http_status "${APP_PATH}/index.php" 200 || \
-        return 1
+    _fetch GET "${APP_CANONICAL_PATH}"
+    case "$_LAST_STATUS_CODE" in
+        200) ;;
+        301|302)
+            local location
+            location=$(echo "$_LAST_RESPONSE_HEADERS" \
+                | grep -i "^location:" | head -1 \
+                | sed "s/^[^:]*: *//" | tr -d '\r')
+            [[ "$location" == *"${APP_CANONICAL_PATH}"* ]] || return 1
+            _fetch GET "${APP_PATH}/sample-test-post/"
+            [[ "$_LAST_STATUS_CODE" == "200" ]] || return 1
+            ;;
+        *)
+            assert_http_status "${APP_PATH}/index.php" 200 || return 1
+            ;;
+    esac
     grep -qF "OLS Test" <<< "$_LAST_RESPONSE_BODY" || \
         grep -qF "Sample Test Post" <<< "$_LAST_RESPONSE_BODY" || \
         grep -qF "Hello from OLS" <<< "$_LAST_RESPONSE_BODY"

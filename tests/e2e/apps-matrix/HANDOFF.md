@@ -87,6 +87,9 @@ also includes module compatibility fixes that were exposed by real CMS runs.
   `MATRIX_READY_PATH_DRUPAL=/core/misc/drupal.js` because stock Drupal
   `.htaccess` denies non-whitelisted PHP files and the homepage depends on full
   Drupal PHP bootstrap
+- Drupal real-app cases use `/user/login` for dynamic front-controller health.
+  The synthetic `_probe/router.php` JSON route is reserved for stub fixtures
+  because real Drupal consumes clean URLs through its own router.
 - module parsing/execution now covers Drupal-style `FallbackResource /index.php`
   and Apache `Header onsuccess ...` syntax observed in stock CMS `.htaccess`
 
