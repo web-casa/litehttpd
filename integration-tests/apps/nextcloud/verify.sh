@@ -99,8 +99,9 @@ HTEOF
 # ---------------------------------------------------------------------------
 
 test_login_page() {
-    # Nextcloud redirects / to /login on fresh install
-    _fetch GET "${APP_PATH}/"
+    # Use the front controller explicitly; directory-index rewrite differs
+    # between OLS images, while status.php verifies the direct PHP mapping.
+    _fetch GET "${APP_PATH}/index.php/login"
     [[ "$_LAST_STATUS_CODE" == "200" || "$_LAST_STATUS_CODE" == "302" ]]
 }
 
