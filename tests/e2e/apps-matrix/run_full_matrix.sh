@@ -104,7 +104,13 @@ wait_for_url() {
 
 ready_url() {
     local base="$1"
+    local scenario="${2:-}"
     local path="${MATRIX_READY_PATH:-/}"
+    case "${scenario}" in
+        drupal)
+            path="${MATRIX_READY_PATH_DRUPAL:-/}"
+            ;;
+    esac
     if [[ "${path}" != /* ]]; then
         path="/${path}"
     fi
@@ -451,16 +457,16 @@ run_scenario() {
         return 1
     }
 
-    wait_for_url apache "$(ready_url "${MATRIX_APACHE_URL}")" || {
+    wait_for_url apache "$(ready_url "${MATRIX_APACHE_URL}" "${scenario}")" || {
         finish_scenario_failure "${scenario}" "${PHASE}" "${started}"
         return 1
     }
-    wait_for_url ols_module "$(ready_url "${MATRIX_OLS_MODULE_URL}")" || {
+    wait_for_url ols_module "$(ready_url "${MATRIX_OLS_MODULE_URL}" "${scenario}")" || {
         finish_scenario_failure "${scenario}" "${PHASE}" "${started}"
         return 1
     }
     if engine_enabled ols_native; then
-        wait_for_url ols_native "$(ready_url "${MATRIX_OLS_NATIVE_URL}")" || {
+        wait_for_url ols_native "$(ready_url "${MATRIX_OLS_NATIVE_URL}" "${scenario}")" || {
             finish_scenario_failure "${scenario}" "${PHASE}" "${started}"
             return 1
         }

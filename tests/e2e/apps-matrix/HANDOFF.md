@@ -83,7 +83,9 @@ also includes module compatibility fixes that were exposed by real CMS runs.
 - budget ratchet wrapper in `scripts/apps-matrix-ratchet-budgets.sh`, backed by
   sample-count checks in `lib/tune_budgets.py`
 - compose readiness uses the harness PHP probe by default through
-  `MATRIX_READY_PATH=/_probe/server.php`
+  `MATRIX_READY_PATH=/_probe/server.php`; Drupal defaults to
+  `MATRIX_READY_PATH_DRUPAL=/` because stock Drupal `.htaccess` denies
+  non-whitelisted PHP files
 - module parsing/execution now covers Drupal-style `FallbackResource /index.php`
   and Apache `Header onsuccess ...` syntax observed in stock CMS `.htaccess`
 
