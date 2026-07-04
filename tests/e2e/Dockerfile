@@ -1,4 +1,5 @@
-FROM litespeedtech/openlitespeed:latest
+ARG OLS_E2E_BASE_IMAGE=litespeedtech/openlitespeed:1.9.1-lsphp82
+FROM ${OLS_E2E_BASE_IMAGE}
 
 # Runtime dependency for the dynamically linked FilesMatch PCRE2 support.
 RUN apt-get update && apt-get install -y --no-install-recommends \

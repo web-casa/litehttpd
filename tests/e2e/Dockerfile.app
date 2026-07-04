@@ -1,5 +1,7 @@
-FROM litespeedtech/openlitespeed:latest
+ARG OLS_APP_BASE_IMAGE=litespeedtech/openlitespeed:1.9.1-lsphp82
+FROM ${OLS_APP_BASE_IMAGE}
 # Requirements: 13.2, 13.3, 13.6
+ARG OLS_APP_LSPHP_VERSION=82
 
 RUN set -eux; \
     apt-get update; \
@@ -10,17 +12,26 @@ RUN set -eux; \
     has_candidate() { \
         apt-cache policy "$1" | awk '/Candidate:/ { found=1; candidate=$2 } END { exit(found && candidate != "(none)" ? 0 : 1) }'; \
     }; \
+    case "${OLS_APP_LSPHP_VERSION}" in auto|[0-9][0-9]) ;; *) echo "Unsupported OLS_APP_LSPHP_VERSION=${OLS_APP_LSPHP_VERSION}" >&2; exit 1 ;; esac; \
     php_pkg=""; \
-    for candidate in $(apt-cache search --names-only '^lsphp[0-9]+$' | awk '{print $1}' | sort -Vr); do \
-        missing=0; \
-        for suffix in ${required_suffixes}; do \
-            has_candidate "${candidate}${suffix}" || missing=1; \
+    if [ "${OLS_APP_LSPHP_VERSION}" = auto ]; then \
+        for candidate in $(apt-cache search --names-only '^lsphp[0-9]+$' | awk '{print $1}' | sort -Vr); do \
+            missing=0; \
+            for suffix in ${required_suffixes}; do \
+                has_candidate "${candidate}${suffix}" || missing=1; \
+            done; \
+            if [ "${missing}" -eq 0 ]; then \
+                php_pkg="${candidate}"; \
+                break; \
+            fi; \
         done; \
-        if [ "${missing}" -eq 0 ]; then \
-            php_pkg="${candidate}"; \
-            break; \
-        fi; \
-    done; \
+    else \
+        php_pkg="lsphp${OLS_APP_LSPHP_VERSION}"; \
+        has_candidate "${php_pkg}"; \
+        for suffix in ${required_suffixes}; do \
+            has_candidate "${php_pkg}${suffix}"; \
+        done; \
+    fi; \
     if [ -n "${php_pkg}" ]; then \
         packages="${php_pkg}"; \
         for suffix in ${required_suffixes} ${optional_suffixes}; do \
