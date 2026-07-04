@@ -283,6 +283,46 @@ static char *build_target_dir(const char *doc_root, int doc_root_len, const char
     return result;
 }
 
+static int directory_has_common_index(lsi_session_t *session, const char *target_dir)
+{
+    static const char *const candidates[] = {
+        "index.php",
+        "index.html",
+        "index.htm",
+        "default.html",
+        "default.htm",
+        NULL
+    };
+    size_t dir_len;
+    int need_slash;
+
+    if (!session || !target_dir)
+        return 0;
+
+    dir_len = strlen(target_dir);
+    need_slash = (dir_len > 0 && target_dir[dir_len - 1] != '/') ? 1 : 0;
+
+    for (int i = 0; candidates[i] != NULL; ++i) {
+        size_t name_len = strlen(candidates[i]);
+        char *path = (char *)malloc(dir_len + (size_t)need_slash + name_len + 1);
+        if (!path)
+            return 0;
+
+        memcpy(path, target_dir, dir_len);
+        if (need_slash)
+            path[dir_len] = '/';
+        memcpy(path + dir_len + (size_t)need_slash, candidates[i], name_len + 1);
+
+        if (lsi_session_file_exists(session, path)) {
+            free(path);
+            return 1;
+        }
+        free(path);
+    }
+
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Helper: length-bounded substring search                            */
 /*  The request URI from get_req_uri() is a length-delimited slice of  */
@@ -1505,37 +1545,43 @@ static int on_uri_map(lsi_session_t *session)
     }
 
     /* (g) Options */
+    int indexes_state = 0;
     for (dir = directives; dir != NULL; dir = dir->next) {
-        if (dir->type == DIR_OPTIONS)
+        if (dir->type == DIR_OPTIONS) {
             exec_options(session, dir);
-    }
-
-    /* Enforce Options -Indexes in the module as a fail-closed fallback.
-     * Patched OLS also handles this in the autoindex path, but stock OLS does
-     * not honor our per-request directory option hint. */
-    if (uri_len > 0 && uri[uri_len - 1] == '/') {
-        int indexes_state = 0;
-        for (dir = directives; dir != NULL; dir = dir->next) {
-            if (dir->type == DIR_OPTIONS && dir->data.options.indexes != 0)
+            if (dir->data.options.indexes != 0)
                 indexes_state = dir->data.options.indexes;
-        }
-        if (indexes_state < 0) {
-            lsi_log(session, LSI_LOG_DEBUG,
-                    "mod_htaccess: directory listing denied by Options -Indexes");
-            lsi_session_set_status(session, 403);
-            lsi_session_end_resp(session);
-            free(target_dir);
-            htaccess_directives_free(directives);
-            return LSI_DENY;
         }
     }
 
     /* (h) DirectoryIndex — only for directory requests (URI ends with /) */
+    int directory_index_found = 0;
     if (uri_len > 0 && uri[uri_len - 1] == '/') {
         for (dir = directives; dir != NULL; dir = dir->next) {
-            if (dir->type == DIR_DIRECTORY_INDEX)
-                exec_directory_index(session, dir, target_dir);
+            if (dir->type == DIR_DIRECTORY_INDEX) {
+                int di_rc = exec_directory_index(session, dir, target_dir);
+                if (di_rc > 0)
+                    directory_index_found = 1;
+                else if (di_rc == LSI_ERROR)
+                    log_directive_fail(session, dir, directive_type_str(dir->type),
+                                       "directory index error");
+            }
         }
+    }
+
+    /* Enforce Options -Indexes in the module as a fail-closed fallback only
+     * when no index file can satisfy the directory request. Patched OLS also
+     * handles this in the autoindex path, but stock OLS does not honor our
+     * per-request directory option hint. */
+    if (uri_len > 0 && uri[uri_len - 1] == '/' && indexes_state < 0 &&
+        !directory_index_found && !directory_has_common_index(session, target_dir)) {
+        lsi_log(session, LSI_LOG_DEBUG,
+                "mod_htaccess: directory listing denied by Options -Indexes");
+        lsi_session_set_status(session, 403);
+        lsi_session_end_resp(session);
+        free(target_dir);
+        htaccess_directives_free(directives);
+        return LSI_DENY;
     }
 
     /* (i) If/ElseIf/Else conditional blocks — request-phase children */

@@ -482,6 +482,39 @@ TEST_F(ContainerSemanticsTest, OptionsMinusIndexesDeniesDirectoryRequest)
     EXPECT_EQ(session_.get_status_code(), 403);
 }
 
+TEST_F(ContainerSemanticsTest, OptionsMinusIndexesAllowsCommonIndexFile)
+{
+    setup_htaccess("/var/www/.htaccess", "Options -Indexes");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/");
+    session_.set_client_ip("10.0.0.1");
+    session_.add_existing_file("/var/www/index.php");
+
+    int rc = call_req_hook();
+
+    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_NE(session_.get_status_code(), 403);
+    EXPECT_TRUE(session_.get_internal_uri().empty());
+}
+
+TEST_F(ContainerSemanticsTest, OptionsMinusIndexesAllowsExplicitDirectoryIndex)
+{
+    setup_htaccess("/var/www/.htaccess", "Options -Indexes\n"
+                                         "DirectoryIndex app.php\n");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/");
+    session_.set_client_ip("10.0.0.1");
+    session_.add_existing_file("/var/www/app.php");
+
+    int rc = call_req_hook();
+
+    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_NE(session_.get_status_code(), 403);
+    EXPECT_EQ(session_.get_internal_uri(), "/app.php");
+}
+
 /* ================================================================== */
 /*  行为一致性专项: 扩展继承和容器测试                                  */
 /* ================================================================== */
