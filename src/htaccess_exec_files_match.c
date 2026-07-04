@@ -7,6 +7,10 @@
  *
  * Validates: Requirements 9.1, 9.2, 9.3
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "htaccess_exec_files_match.h"
 #include "htaccess_exec_header.h"
 #include "htaccess_exec_error_doc.h"

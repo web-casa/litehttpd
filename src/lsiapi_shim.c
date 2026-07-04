@@ -13,6 +13,10 @@
  * Tests link against mock_lsiapi.cpp instead.
  */
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "ls.h"
 #include <dlfcn.h>
 #include <stdarg.h>
