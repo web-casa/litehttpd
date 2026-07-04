@@ -497,9 +497,10 @@ ssh "${ssh_opts[@]}" "root@${ip}" true >/dev/null 2>&1 || fail "SSH did not beco
 if [[ "${SKIP_DEP_INSTALL}" == "1" ]]; then
     log "checking remote dependencies from prepared image"
 ssh "${ssh_opts[@]}" "root@${ip}" 'set -eux
-for cmd in bash bzip2 composer curl docker git gzip mariadb php rsync tar unzip; do
+for cmd in bash bzip2 composer curl docker git gzip php rsync tar unzip; do
   command -v "$cmd"
 done
+command -v mariadb || command -v mysql
 docker version
 docker compose version
 php -v
@@ -527,7 +528,7 @@ fi
 wait_for_apt
 apt-get update
 wait_for_apt
-apt-get install -y ca-certificates curl git rsync tar gzip bzip2 unzip composer default-mysql-client php-cli php-curl php-gd php-intl php-mbstring php-mysql php-xml php-zip
+apt-get install -y ca-certificates curl git rsync tar gzip bzip2 unzip composer default-mysql-client mariadb-client php-cli php-curl php-gd php-intl php-mbstring php-mysql php-xml php-zip
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 chmod a+r /etc/apt/keyrings/docker.asc

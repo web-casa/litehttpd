@@ -199,7 +199,7 @@ fi
 wait_for_apt
 apt-get update
 wait_for_apt
-apt-get install -y ca-certificates curl git rsync tar gzip bzip2 unzip composer default-mysql-client php-cli php-curl php-gd php-intl php-mbstring php-mysql php-xml php-zip
+apt-get install -y ca-certificates curl git rsync tar gzip bzip2 unzip composer default-mysql-client mariadb-client php-cli php-curl php-gd php-intl php-mbstring php-mysql php-xml php-zip
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 chmod a+r /etc/apt/keyrings/docker.asc
