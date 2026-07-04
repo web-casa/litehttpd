@@ -14,12 +14,29 @@ html_escape() {
 
 # URL-encode path segment
 url_encode() {
-    printf '%s' "$1" | sed 's/ /%20/g; s/#/%23/g; s/?/%3F/g; s/%/%25/g'
+    local input="$1"
+    local encoded=""
+    local i char hex
+    local LC_ALL=C
+
+    for ((i = 0; i < ${#input}; i++)); do
+        char="${input:i:1}"
+        case "$char" in
+            [a-zA-Z0-9.~_-])
+                encoded="${encoded}${char}"
+                ;;
+            *)
+                printf -v hex '%%%02X' "'$char"
+                encoded="${encoded}${hex}"
+                ;;
+        esac
+    done
+    printf '%s' "$encoded"
 }
 
 generate_html() {
     local dir="$1"
-    local rel_path="${dir#$REPO_DIR}"
+    local rel_path="${dir#"$REPO_DIR"}"
     rel_path="${rel_path#/}"
     rel_path="${rel_path%/}"
     local title="/"
@@ -82,12 +99,14 @@ generate_html() {
     local breadcrumb='<a href="/">root</a>'
     if [ -n "$rel_path" ]; then
         local accum=""
+        local accum_href=""
         IFS='/' read -ra parts <<< "$rel_path"
         for part in "${parts[@]}"; do
             accum="$accum/$part"
+            accum_href="$accum_href/$(url_encode "$part")"
             local safe_part
             safe_part=$(html_escape "$part")
-            breadcrumb="$breadcrumb / <a href=\"$accum/\">$safe_part</a>"
+            breadcrumb="$breadcrumb / <a href=\"$accum_href/\">$safe_part</a>"
         done
     fi
 

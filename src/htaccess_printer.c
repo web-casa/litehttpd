@@ -265,6 +265,11 @@ static int print_directive(strbuf_t *sb, const htaccess_directive_t *d)
         }
         break;
 
+    case DIR_FALLBACK_RESOURCE:
+        if (strbuf_append(sb, "FallbackResource ") != 0) return -1;
+        if (d->value && strbuf_append(sb, d->value) != 0) return -1;
+        break;
+
     /* --- FilesMatch block --- */
     case DIR_FILES_MATCH:
         if (strbuf_append(sb, "<FilesMatch \"") != 0) return -1;

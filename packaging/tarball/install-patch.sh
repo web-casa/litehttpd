@@ -36,6 +36,48 @@ if [ ! -f "$NEWBIN" ] || [ ! -f "$SO" ]; then
     echo "ERROR: tarball payload missing — re-extract the package." >&2
     exit 1
 fi
+
+have_library() {
+    lib="$1"
+    if command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -q "$lib"; then
+        return 0
+    fi
+    for dir in /lib /lib64 /usr/lib /usr/lib64 \
+        /lib/aarch64-linux-gnu /usr/lib/aarch64-linux-gnu \
+        /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu
+    do
+        [ -e "$dir/$lib" ] && return 0
+    done
+    return 1
+}
+
+ensure_runtime_deps() {
+    # EL10 no longer ships libcrypt.so.1 by default, but the EL8-built patched
+    # OLS binary still needs that compatibility library.
+    have_library libcrypt.so.1 && return 0
+
+    echo "Installing runtime compatibility dependency: libcrypt.so.1"
+    if command -v dnf >/dev/null 2>&1; then
+        dnf -y install libxcrypt-compat
+    elif command -v yum >/dev/null 2>&1; then
+        yum -y install libxcrypt-compat
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update
+        apt-get install -y libcrypt1
+    else
+        echo "ERROR: libcrypt.so.1 is missing and no supported package manager was found." >&2
+        echo "Install libxcrypt-compat (EL) or libcrypt1 (Debian/Ubuntu), then re-run." >&2
+        exit 1
+    fi
+
+    have_library libcrypt.so.1 || {
+        echo "ERROR: libcrypt.so.1 is still missing after dependency installation." >&2
+        exit 1
+    }
+}
+
+ensure_runtime_deps
+
 BIN="$PREFIX/bin/openlitespeed"
 if [ ! -x "$BIN" ]; then
     echo "ERROR: OpenLiteSpeed not found at $BIN." >&2

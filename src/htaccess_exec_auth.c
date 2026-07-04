@@ -6,7 +6,9 @@
  *
  * Validates: Requirements 10.1-10.9
  */
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include "htaccess_exec_auth.h"
 
 #include <stdio.h>
@@ -24,14 +26,14 @@
 
 /* Base64 decode table */
 static const unsigned char b64_table[256] = {
-    ['A']=0,['B']=1,['C']=2,['D']=3,['E']=4,['F']=5,['G']=6,['H']=7,
-    ['I']=8,['J']=9,['K']=10,['L']=11,['M']=12,['N']=13,['O']=14,['P']=15,
-    ['Q']=16,['R']=17,['S']=18,['T']=19,['U']=20,['V']=21,['W']=22,['X']=23,
-    ['Y']=24,['Z']=25,['a']=26,['b']=27,['c']=28,['d']=29,['e']=30,['f']=31,
-    ['g']=32,['h']=33,['i']=34,['j']=35,['k']=36,['l']=37,['m']=38,['n']=39,
-    ['o']=40,['p']=41,['q']=42,['r']=43,['s']=44,['t']=45,['u']=46,['v']=47,
-    ['w']=48,['x']=49,['y']=50,['z']=51,['0']=52,['1']=53,['2']=54,['3']=55,
-    ['4']=56,['5']=57,['6']=58,['7']=59,['8']=60,['9']=61,['+']=62,['/']=63,
+    ['A'] = 0,  ['B'] = 1,  ['C'] = 2,  ['D'] = 3,  ['E'] = 4,  ['F'] = 5,  ['G'] = 6,  ['H'] = 7,
+    ['I'] = 8,  ['J'] = 9,  ['K'] = 10, ['L'] = 11, ['M'] = 12, ['N'] = 13, ['O'] = 14, ['P'] = 15,
+    ['Q'] = 16, ['R'] = 17, ['S'] = 18, ['T'] = 19, ['U'] = 20, ['V'] = 21, ['W'] = 22, ['X'] = 23,
+    ['Y'] = 24, ['Z'] = 25, ['a'] = 26, ['b'] = 27, ['c'] = 28, ['d'] = 29, ['e'] = 30, ['f'] = 31,
+    ['g'] = 32, ['h'] = 33, ['i'] = 34, ['j'] = 35, ['k'] = 36, ['l'] = 37, ['m'] = 38, ['n'] = 39,
+    ['o'] = 40, ['p'] = 41, ['q'] = 42, ['r'] = 43, ['s'] = 44, ['t'] = 45, ['u'] = 46, ['v'] = 47,
+    ['w'] = 48, ['x'] = 49, ['y'] = 50, ['z'] = 51, ['0'] = 52, ['1'] = 53, ['2'] = 54, ['3'] = 55,
+    ['4'] = 56, ['5'] = 57, ['6'] = 58, ['7'] = 59, ['8'] = 60, ['9'] = 61, ['+'] = 62, ['/'] = 63,
 };
 
 /**
@@ -40,12 +42,11 @@ static const unsigned char b64_table[256] = {
 /* Validate that a character is valid base64 */
 static int is_b64_char(unsigned char c)
 {
-    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-           (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=';
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '+' ||
+           c == '/' || c == '=';
 }
 
-static int base64_decode(const char *in, size_t in_len,
-                         unsigned char *out, size_t out_cap)
+static int base64_decode(const char *in, size_t in_len, unsigned char *out, size_t out_cap)
 {
     size_t i, j = 0;
     unsigned char buf[4];
@@ -58,17 +59,23 @@ static int base64_decode(const char *in, size_t in_len,
         for (k = 0; k < 4 && (i + k) < in_len; k++) {
             unsigned char c = (unsigned char)in[i + k];
             if (!is_b64_char(c))
-                return -1;  /* reject invalid characters */
-            if (c == '=') { pad++; buf[k] = 0; }
-            else buf[k] = b64_table[c];
+                return -1; /* reject invalid characters */
+            if (c == '=') {
+                pad++;
+                buf[k] = 0;
+            } else
+                buf[k] = b64_table[c];
         }
         /* Incomplete group (fewer than 4 chars without padding) */
         if (k < 4 && pad == 0)
             return -1;
-        if (j + 3 > out_cap) return -1;
+        if (j + 3 > out_cap)
+            return -1;
         out[j++] = (buf[0] << 2) | (buf[1] >> 4);
-        if (pad < 2) out[j++] = (buf[1] << 4) | (buf[2] >> 2);
-        if (pad < 1) out[j++] = (buf[2] << 6) | buf[3];
+        if (pad < 2)
+            out[j++] = (buf[1] << 4) | (buf[2] >> 2);
+        if (pad < 1)
+            out[j++] = (buf[2] << 6) | buf[3];
     }
     return (int)j;
 }
@@ -143,29 +150,39 @@ static int username_in_list(const char *user, const char *list)
  * `*seen` is set if any DIR_REQUIRE_USER constraint exists in this subtree.
  * Recurses through the two levels of nesting the parser permits.
  */
-static int eval_user_tree(const htaccess_directive_t *list, int mode,
-                          const char *user, int depth, int *seen)
+static int eval_user_tree(const htaccess_directive_t *list, int mode, const char *user, int depth,
+                          int *seen)
 {
     const htaccess_directive_t *dir;
-    int or_match = 0;       /* OR mode: did some user branch match? */
-    int and_ok = 1;         /* AND mode: have all user constraints matched? */
+    int or_match = 0; /* OR mode: did some user branch match? */
+    int and_ok = 1;   /* AND mode: have all user constraints matched? */
 
     for (dir = list; dir; dir = dir->next) {
         if (dir->type == DIR_REQUIRE_USER) {
             *seen = 1;
             int m = username_in_list(user, dir->value);
-            if (mode == 1) { if (!m) and_ok = 0; }
-            else           { if (m)  or_match = 1; }
-        } else if ((dir->type == DIR_REQUIRE_ANY_OPEN ||
-                    dir->type == DIR_REQUIRE_ALL_OPEN) && depth < 2) {
+            if (mode == 1) {
+                if (!m)
+                    and_ok = 0;
+            } else {
+                if (m)
+                    or_match = 1;
+            }
+        } else if ((dir->type == DIR_REQUIRE_ANY_OPEN || dir->type == DIR_REQUIRE_ALL_OPEN) &&
+                   depth < 2) {
             int sub_mode = (dir->type == DIR_REQUIRE_ALL_OPEN) ? 1 : 0;
             int sub_seen = 0;
-            int r = eval_user_tree(dir->data.require_container.children,
-                                   sub_mode, user, depth + 1, &sub_seen);
+            int r = eval_user_tree(dir->data.require_container.children, sub_mode, user, depth + 1,
+                                   &sub_seen);
             if (sub_seen) {
                 *seen = 1;
-                if (mode == 1) { if (!r) and_ok = 0; }
-                else           { if (r)  or_match = 1; }
+                if (mode == 1) {
+                    if (!r)
+                        and_ok = 0;
+                } else {
+                    if (r)
+                        or_match = 1;
+                }
             }
             /* A nested container with no user constraint does not affect the
              * username decision at this level. */
@@ -180,8 +197,7 @@ static int eval_user_tree(const htaccess_directive_t *list, int mode,
  * widens acceptance to any valid user (require_any_valid_user); otherwise the
  * username must satisfy the Require tree's user constraints (see eval_user_tree).
  */
-static int user_satisfies_require(const char *user,
-                                  const htaccess_directive_t *directives,
+static int user_satisfies_require(const char *user, const htaccess_directive_t *directives,
                                   int require_any_valid_user)
 {
     if (require_any_valid_user)
@@ -217,8 +233,7 @@ static FILE *open_confined_htpasswd(lsi_session_t *session, const char *path)
     const char *doc_root = lsi_session_get_doc_root(session, &dr_len);
     char real_auth[PATH_MAX];
     char real_root[PATH_MAX];
-    if (!doc_root || dr_len <= 0 ||
-        !realpath(path, real_auth) || !realpath(doc_root, real_root))
+    if (!doc_root || dr_len <= 0 || !realpath(path, real_auth) || !realpath(doc_root, real_root))
         return NULL;
 
     size_t rr_len = strlen(real_root);
@@ -257,7 +272,8 @@ static FILE *open_confined_htpasswd(lsi_session_t *session, const char *path)
             (opened[rr_len] != '\0' && opened[rr_len] != '/')) {
             lsi_log(session, LSI_LOG_ERROR,
                     "[htaccess] AuthUserFile resolved outside document root "
-                    "after open ('%s') — rejected", opened);
+                    "after open ('%s') — rejected",
+                    opened);
             close(fd);
             return NULL;
         }
@@ -281,8 +297,7 @@ static FILE *open_confined_htpasswd(lsi_session_t *session, const char *path)
  * Parse "Basic <base64>" from Authorization header.
  * Returns 1 on success, fills user/pass (caller frees).
  */
-static int parse_basic_auth(const char *auth_header, int auth_len,
-                            char **out_user, char **out_pass)
+static int parse_basic_auth(const char *auth_header, int auth_len, char **out_user, char **out_pass)
 {
     if (!auth_header || auth_len < 7)
         return 0;
@@ -332,8 +347,7 @@ static int parse_basic_auth(const char *auth_header, int auth_len,
     return 1;
 }
 
-int exec_auth_basic(lsi_session_t *session,
-                    const htaccess_directive_t *directives)
+int exec_auth_basic(lsi_session_t *session, const htaccess_directive_t *directives)
 {
     if (!session || !directives)
         return LSI_OK;
@@ -342,8 +356,8 @@ int exec_auth_basic(lsi_session_t *session,
     const char *auth_type = NULL;
     const char *auth_name = NULL;
     const char *auth_user_file = NULL;
-    int require_valid_user = 0;       /* auth required (valid-user OR user list) */
-    int require_any_valid_user = 0;   /* a bare "Require valid-user" is present */
+    int require_valid_user = 0;     /* auth required (valid-user OR user list) */
+    int require_any_valid_user = 0; /* a bare "Require valid-user" is present */
 
     const htaccess_directive_t *dir;
     for (dir = directives; dir; dir = dir->next) {
@@ -379,16 +393,13 @@ int exec_auth_basic(lsi_session_t *session,
              * by user_satisfies_require(). */
             const htaccess_directive_t *child;
             for (child = dir->data.require_container.children; child; child = child->next) {
-                if (child->type == DIR_REQUIRE_VALID_USER ||
-                    child->type == DIR_REQUIRE_USER)
+                if (child->type == DIR_REQUIRE_VALID_USER || child->type == DIR_REQUIRE_USER)
                     require_valid_user = 1;
                 /* Check nested containers too */
-                if ((child->type == DIR_REQUIRE_ANY_OPEN ||
-                     child->type == DIR_REQUIRE_ALL_OPEN)) {
+                if ((child->type == DIR_REQUIRE_ANY_OPEN || child->type == DIR_REQUIRE_ALL_OPEN)) {
                     const htaccess_directive_t *gc;
                     for (gc = child->data.require_container.children; gc; gc = gc->next) {
-                        if (gc->type == DIR_REQUIRE_VALID_USER ||
-                            gc->type == DIR_REQUIRE_USER)
+                        if (gc->type == DIR_REQUIRE_VALID_USER || gc->type == DIR_REQUIRE_USER)
                             require_valid_user = 1;
                     }
                 }
@@ -430,8 +441,7 @@ int exec_auth_basic(lsi_session_t *session,
 
     /* AuthUserFile is required */
     if (!auth_user_file) {
-        lsi_log(session, LSI_LOG_ERROR,
-                "[htaccess] AuthUserFile not specified");
+        lsi_log(session, LSI_LOG_ERROR, "[htaccess] AuthUserFile not specified");
         lsi_session_set_status(session, 500);
         return LSI_ERROR;
     }
@@ -442,12 +452,10 @@ int exec_auth_basic(lsi_session_t *session,
 
     char *user = NULL;
     char *pass = NULL;
-    if (!auth_header || auth_len <= 0 ||
-        !parse_basic_auth(auth_header, auth_len, &user, &pass)) {
+    if (!auth_header || auth_len <= 0 || !parse_basic_auth(auth_header, auth_len, &user, &pass)) {
         /* No credentials — send 401 */
         if (auth_name)
-            lsi_session_set_www_authenticate(session, auth_name,
-                                             (int)strlen(auth_name));
+            lsi_session_set_www_authenticate(session, auth_name, (int)strlen(auth_name));
         lsi_session_set_status(session, 401);
         return LSI_ERROR;
     }
@@ -456,8 +464,7 @@ int exec_auth_basic(lsi_session_t *session,
      * atomically (see open_confined_htpasswd). Any rejection → 500 fail-closed. */
     FILE *fp = open_confined_htpasswd(session, auth_user_file);
     if (!fp) {
-        lsi_log(session, LSI_LOG_ERROR,
-                "[htaccess] AuthUserFile rejected or unreadable: %s",
+        lsi_log(session, LSI_LOG_ERROR, "[htaccess] AuthUserFile rejected or unreadable: %s",
                 auth_user_file);
         free(user);
         free(pass);
@@ -471,14 +478,16 @@ int exec_auth_basic(lsi_session_t *session,
     while (fgets(line, sizeof(line), fp)) {
         /* Remove trailing newline */
         size_t len = strlen(line);
-        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
             line[--len] = '\0';
 
         char *colon = strchr(line, ':');
-        if (!colon) continue;
+        if (!colon)
+            continue;
         *colon = '\0';
 
-        if (strcmp(line, user) != 0) continue;
+        if (strcmp(line, user) != 0)
+            continue;
 
         /* Found user — check password */
         const char *hash = colon + 1;
@@ -493,8 +502,7 @@ int exec_auth_basic(lsi_session_t *session,
         free(user);
         free(pass);
         if (auth_name)
-            lsi_session_set_www_authenticate(session, auth_name,
-                                             (int)strlen(auth_name));
+            lsi_session_set_www_authenticate(session, auth_name, (int)strlen(auth_name));
         lsi_session_set_status(session, 401);
         return LSI_ERROR;
     }
@@ -503,8 +511,7 @@ int exec_auth_basic(lsi_session_t *session,
      * A bare "Require valid-user" widens acceptance to any valid user. */
     if (!user_satisfies_require(user, directives, require_any_valid_user)) {
         lsi_log(session, LSI_LOG_DEBUG,
-                "[htaccess] user '%s' authenticated but not in Require user list",
-                user);
+                "[htaccess] user '%s' authenticated but not in Require user list", user);
         free(user);
         free(pass);
         lsi_session_set_status(session, 403);
@@ -516,18 +523,20 @@ int exec_auth_basic(lsi_session_t *session,
     return LSI_OK;
 }
 
-int check_auth_credentials(lsi_session_t *session,
-                           const htaccess_directive_t *directives)
+int check_auth_credentials(lsi_session_t *session, const htaccess_directive_t *directives)
 {
-    if (!session || !directives) return 0;
+    if (!session || !directives)
+        return 0;
 
     /* Find auth config */
     const char *auth_type = NULL;
     const char *auth_user_file = NULL;
     const htaccess_directive_t *dir;
     for (dir = directives; dir; dir = dir->next) {
-        if (dir->type == DIR_AUTH_TYPE) auth_type = dir->value;
-        else if (dir->type == DIR_AUTH_USER_FILE) auth_user_file = dir->value;
+        if (dir->type == DIR_AUTH_TYPE)
+            auth_type = dir->value;
+        else if (dir->type == DIR_AUTH_USER_FILE)
+            auth_user_file = dir->value;
     }
 
     if (!auth_type || strcasecmp(auth_type, "Basic") != 0)
@@ -540,24 +549,28 @@ int check_auth_credentials(lsi_session_t *session,
     const char *auth_header = lsi_session_get_auth_header(session, &auth_len);
     char *user = NULL;
     char *pass = NULL;
-    if (!auth_header || auth_len <= 0 ||
-        !parse_basic_auth(auth_header, auth_len, &user, &pass))
+    if (!auth_header || auth_len <= 0 || !parse_basic_auth(auth_header, auth_len, &user, &pass))
         return 0;
 
     /* Apply the SAME confinement/symlink/TOCTOU checks as exec_auth_basic.
      * This pre-validation path must not become a way to read or time-probe
      * arbitrary server-readable files outside the document root. */
     FILE *fp = open_confined_htpasswd(session, auth_user_file);
-    if (!fp) { free(user); free(pass); return 0; }
+    if (!fp) {
+        free(user);
+        free(pass);
+        return 0;
+    }
 
     char line[512];
     int valid = 0;
     while (fgets(line, sizeof(line), fp)) {
         size_t len = strlen(line);
-        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
             line[--len] = '\0';
         char *colon = strchr(line, ':');
-        if (!colon) continue;
+        if (!colon)
+            continue;
         *colon = '\0';
         if (strcmp(line, user) == 0 && htpasswd_check(colon + 1, pass) == 1) {
             valid = 1;

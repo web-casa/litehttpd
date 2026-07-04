@@ -1,0 +1,178 @@
+name: Apps Matrix Runtime Images
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: "Primary image tag. Defaults to the commit SHA."
+        required: false
+        type: string
+        default: ""
+      extra_tag:
+        description: "Optional additional tag, for example nightly or release-candidate."
+        required: false
+        type: string
+        default: ""
+      push_images:
+        description: "Set to 1 to push images to GHCR."
+        required: false
+        type: string
+        default: "1"
+      lsphp_version:
+        description: "LiteSpeed PHP package suffix used in the OLS runtime image."
+        required: false
+        type: string
+        default: "82"
+      ols_runtime_image:
+        description: "Base OpenLiteSpeed runtime image that already contains LiteSpeed repos."
+        required: false
+        type: string
+        default: "litespeedtech/openlitespeed:1.9.1-lsphp82"
+    outputs:
+      apache_image:
+        description: "Primary Apache runtime image reference."
+        value: ${{ jobs.build.outputs.apache_image }}
+      ols_module_image:
+        description: "Primary patched OLS runtime image reference."
+        value: ${{ jobs.build.outputs.ols_module_image }}
+
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Primary image tag. Defaults to the commit SHA."
+        required: false
+        default: ""
+      extra_tag:
+        description: "Optional additional tag, for example nightly or release-candidate."
+        required: false
+        default: ""
+      push_images:
+        description: "Set to 1 to push images to GHCR."
+        required: false
+        default: "1"
+      lsphp_version:
+        description: "LiteSpeed PHP package suffix used in the OLS runtime image."
+        required: false
+        default: "82"
+      ols_runtime_image:
+        description: "Base OpenLiteSpeed runtime image that already contains LiteSpeed repos."
+        required: false
+        default: "litespeedtech/openlitespeed:1.9.1-lsphp82"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    outputs:
+      apache_image: ${{ steps.refs.outputs.apache_image }}
+      ols_module_image: ${{ steps.refs.outputs.ols_module_image }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve image references
+        id: refs
+        env:
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          REQUESTED_TAG: ${{ inputs.image_tag }}
+          EXTRA_TAG: ${{ inputs.extra_tag }}
+          PUSH_IMAGES: ${{ inputs.push_images }}
+          LSPHP_VERSION: ${{ inputs.lsphp_version }}
+          OLS_RUNTIME_IMAGE: ${{ inputs.ols_runtime_image }}
+        run: |
+          case "${PUSH_IMAGES}" in
+            0|1) ;;
+            *) echo "Unsupported push_images: ${PUSH_IMAGES}" >&2; exit 1 ;;
+          esac
+          case "${LSPHP_VERSION}" in
+            auto|[0-9][0-9]) ;;
+            *) echo "Unsupported lsphp_version: ${LSPHP_VERSION}" >&2; exit 1 ;;
+          esac
+          if ! printf '%s' "${OLS_RUNTIME_IMAGE}" | grep -Eq '^[A-Za-z0-9._:@/-]+$'; then
+            echo "Unsupported ols_runtime_image characters" >&2
+            exit 1
+          fi
+
+          tag="${REQUESTED_TAG:-${SHA}}"
+          tag="${tag//\//-}"
+          extra_tag="${EXTRA_TAG//\//-}"
+          if ! printf '%s' "${tag}" | grep -Eq '^[A-Za-z0-9_.-]+$'; then
+            echo "Unsupported image_tag characters" >&2
+            exit 1
+          fi
+          if [ -n "${extra_tag}" ] && ! printf '%s' "${extra_tag}" | grep -Eq '^[A-Za-z0-9_.-]+$'; then
+            echo "Unsupported extra_tag characters" >&2
+            exit 1
+          fi
+
+          repo="$(printf '%s' "${REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          apache_primary="ghcr.io/${repo}/apps-matrix-apache-runtime:${tag}"
+          ols_primary="ghcr.io/${repo}/apps-matrix-ols-module:${tag}"
+
+          {
+            echo "push=${PUSH_IMAGES}"
+            echo "lsphp_version=${LSPHP_VERSION}"
+            echo "ols_runtime_image=${OLS_RUNTIME_IMAGE}"
+            echo "apache_image=${apache_primary}"
+            echo "ols_module_image=${ols_primary}"
+            echo "apache_tags<<EOF"
+            echo "${apache_primary}"
+            if [ -n "${extra_tag}" ]; then
+              echo "ghcr.io/${repo}/apps-matrix-apache-runtime:${extra_tag}"
+            fi
+            echo "EOF"
+            echo "ols_module_tags<<EOF"
+            echo "${ols_primary}"
+            if [ -n "${extra_tag}" ]; then
+              echo "ghcr.io/${repo}/apps-matrix-ols-module:${extra_tag}"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        if: steps.refs.outputs.push == '1'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Apache runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: tests/e2e/apps-matrix/Dockerfile.apache-runtime
+          push: ${{ steps.refs.outputs.push == '1' }}
+          load: ${{ steps.refs.outputs.push != '1' }}
+          tags: ${{ steps.refs.outputs.apache_tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=apps-matrix-apache-runtime
+          cache-to: type=gha,mode=max,scope=apps-matrix-apache-runtime
+
+      - name: Build patched OLS runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: tests/e2e/Dockerfile.custom-ols
+          push: ${{ steps.refs.outputs.push == '1' }}
+          load: ${{ steps.refs.outputs.push != '1' }}
+          tags: ${{ steps.refs.outputs.ols_module_tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            APPS_MATRIX_LSPHP_VERSION=${{ steps.refs.outputs.lsphp_version }}
+            OLS_RUNTIME_IMAGE=${{ steps.refs.outputs.ols_runtime_image }}
+          cache-from: type=gha,scope=apps-matrix-ols-module
+          cache-to: type=gha,mode=max,scope=apps-matrix-ols-module

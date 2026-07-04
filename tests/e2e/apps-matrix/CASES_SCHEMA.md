@@ -23,9 +23,10 @@ This file documents the declarative case format used by `apps-matrix`.
 
 ## Assertion Types
 
-Current planned assertion primitives:
+Current assertion primitives:
 
 - `status_exact: 200`
+- `status_in: 403,404`
 - `location_exact: /target/path`
 - `header_exact: Header-Name=value`
 - `header_contains: Header-Name=substring`
@@ -39,6 +40,11 @@ Current planned assertion primitives:
 `ttl_close` is intentionally approximate. Implementations should derive TTL
 from `Cache-Control: max-age` or `Expires`, then compare engines within a small
 allowed skew, normally `±5s`.
+
+The shared executor treats Apache as the fixture/reference health check,
+`ols_module` as the required compatibility target, and `ols_native` as a
+visible known-difference target. A case where Apache and `ols_module` satisfy
+the assertions but `ols_native` does not becomes `PASS_KNOWN_DIFF`.
 
 ## Deny Rules
 
@@ -67,9 +73,14 @@ Cases may end in:
 
 ## Fixture Requirements
 
-Every scenario implementation should eventually provide:
+Every scenario implementation should provide:
 
 - fixed app/plugin versions,
 - captured final `.htaccess`,
 - `_probe/*.php` endpoints,
 - deterministic data needed for the case paths to exist.
+
+The built-in `stub` fixture mode creates synthetic docroots and route maps for
+harness validation. Real compatibility runs should use externally installed
+apps plus `MATRIX_FIXTURE_MODE=overlay` so probes/assets are deployed while the
+application-generated `.htaccess` remains authoritative.

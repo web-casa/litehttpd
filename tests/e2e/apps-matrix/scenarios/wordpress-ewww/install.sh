@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cat <<'EOF'
-[wordpress-ewww] install contract
-- provision fixed WordPress version
-- install fixed EWWW plugin version
-- enable relevant browser-cache/resource rules
-- create deterministic image assets and known protected original paths
-- capture final generated .htaccess to artifacts
-- place shared _probe/*.php under docroot
-EOF
+SCENARIO="${1:-wordpress-ewww}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# shellcheck source=tests/e2e/apps-matrix/lib/matrix_common.sh
+source "${ROOT_DIR}/lib/matrix_common.sh"
+# shellcheck source=tests/e2e/apps-matrix/lib/fixture_common.sh
+source "${ROOT_DIR}/lib/fixture_common.sh"
+
+matrix_install_fixture "${SCENARIO}" "${SCRIPT_DIR}/cases.yaml"

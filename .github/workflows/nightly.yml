@@ -3,12 +3,26 @@ name: Nightly
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
 on:
   schedule:
     - cron: '17 3 * * *'  # 3:17 UTC daily
   workflow_dispatch:       # manual trigger
 
 jobs:
+  apps-matrix-runtime-images:
+    uses: ./.github/workflows/apps-matrix-runtime-images.yml
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+    with:
+      image_tag: ${{ github.sha }}
+      extra_tag: nightly
+      push_images: "1"
+
   # ── Sanitizer + Fuzz ──────────────────────────────────────────────
   fuzz:
     runs-on: ubuntu-latest
@@ -20,17 +34,32 @@ jobs:
       - name: Install deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build
+          sudo apt-get install -y clang cmake libpcre2-dev ninja-build pkg-config
 
       - name: Build parser fuzzer
         run: |
-          clang -g -O1 -fsanitize=fuzzer,address -I include \
-            -DHTACCESS_UNIT_TEST \
-            tests/fuzz/fuzz_parser.cpp \
+          mkdir -p fuzz-build
+          for src in \
+            src/htaccess_cidr.c \
             src/htaccess_parser.c \
             src/htaccess_directive.c \
-            src/htaccess_expires.c \
-            -lstdc++ -lm \
+            src/htaccess_expr.c \
+            src/htaccess_expires.c; do
+            obj="fuzz-build/$(basename "${src}" .c).o"
+            clang -g -O1 -fsanitize=address -I include \
+              -DHTACCESS_UNIT_TEST \
+              -c "${src}" -o "${obj}"
+          done
+          clang++ -g -O1 -fsanitize=address -I include -I tests \
+            -DHTACCESS_UNIT_TEST \
+            -c tests/mock_lsiapi.cpp -o fuzz-build/mock_lsiapi.o
+          clang++ -g -O1 -fsanitize=address -I include -I tests \
+            -DHTACCESS_UNIT_TEST \
+            -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION \
+            -c tests/fuzz/fuzz_parser.cpp -o fuzz-build/fuzz_parser.o
+          clang++ -g -O1 -fsanitize=fuzzer,address \
+            fuzz-build/*.o \
+            -lm \
             -o fuzz_parser
 
       - name: Run parser fuzzer (5 minutes)
@@ -63,12 +92,12 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install build deps
-        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libpcre2-dev ninja-build pkg-config
 
       - name: Build module
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-          cmake --build build --parallel $(nproc)
+          cmake --build build --parallel "$(nproc)"
 
       - name: Start OLS container
         run: |
@@ -151,12 +180,12 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install build deps
-        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libpcre2-dev ninja-build pkg-config
 
       - name: Build module
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel $(nproc)
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build --parallel "$(nproc)" --target litehttpd_htaccess
 
       - name: Start app stack
         run: docker compose -f tests/e2e/docker-compose.yml up -d --build
@@ -177,6 +206,100 @@ jobs:
         if: always()
         run: docker compose -f tests/e2e/docker-compose.yml down -v
 
+  # ── Apps Matrix Full Three-Engine Run ─────────────────────────────
+  apps-matrix-full:
+    needs: apps-matrix-runtime-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - wordpress-core
+          - wordpress-redirection
+          - laravel
+          - drupal
+          - nextcloud
+          - wordpress-wordfence
+          - wordpress-w3-total-cache
+          - wordpress-litespeed-cache
+          - wordpress-ewww
+          - wordpress-wp-optimize
+          - joomla
+          - mediawiki
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install apps-matrix deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bzip2 composer curl default-mysql-client php-cli php-mysql tar unzip
+
+      - name: Cache apps-matrix downloads
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/apps-matrix-cache/downloads
+          key: apps-matrix-downloads-${{ hashFiles('tests/e2e/apps-matrix/config/versions.env') }}
+          restore-keys: |
+            apps-matrix-downloads-
+
+      - name: Cache Composer packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.composer/cache
+          key: apps-matrix-composer-${{ runner.os }}-${{ hashFiles('tests/e2e/apps-matrix/config/versions.env') }}
+          restore-keys: |
+            apps-matrix-composer-${{ runner.os }}-
+
+      - name: Build apps-matrix fixture image
+        run: docker build -t apps-matrix-fixture -f tests/e2e/apps-matrix/Dockerfile.fixture .
+
+      - name: Run apps-matrix full matrix
+        env:
+          MATRIX_OUT_DIR: ${{ runner.temp }}/apps-matrix-full/${{ matrix.scenario }}
+          MATRIX_SCENARIO: ${{ matrix.scenario }}
+          MATRIX_TIER: nightly
+          MATRIX_FIXTURE_MODE: real
+          MATRIX_REAL_ALLOW_NETWORK: 1
+          MATRIX_REAL_DOWNLOAD_DIR: ${{ runner.temp }}/apps-matrix-cache/downloads
+          MATRIX_REAL_RUN_APP_INSTALL: 0
+          MATRIX_REAL_DEEP_CONFIG: 1
+          MATRIX_REAL_VALIDATE_CONFIG: 1
+          MATRIX_COMPOSE_BUILD: 0
+          MATRIX_APACHE_IMAGE: ${{ needs.apps-matrix-runtime-images.outputs.apache_image }}
+          MATRIX_OLS_MODULE_IMAGE: ${{ needs.apps-matrix-runtime-images.outputs.ols_module_image }}
+          MATRIX_PER_ENGINE_BUDGET_MS: 15000
+          MATRIX_SCENARIO_BUDGET_MS: 3600000
+          MATRIX_ARTIFACT_MODE: summary
+        run: bash tests/e2e/apps-matrix/run_full_matrix.sh
+
+      - name: Prepare apps-matrix summary artifacts
+        if: always()
+        run: |
+          python3 tests/e2e/apps-matrix/lib/collect_artifact_manifest.py \
+            --out-dir "${RUNNER_TEMP}/apps-matrix-full/${{ matrix.scenario }}" \
+            --mode summary \
+            --copy-to "${RUNNER_TEMP}/apps-matrix-full-summary/${{ matrix.scenario }}" \
+            > /dev/null
+
+      - name: Upload apps-matrix summary artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: apps-matrix-full-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/apps-matrix-full-summary/${{ matrix.scenario }}
+          if-no-files-found: ignore
+
   # ── Integration Tests: 4 PHP Apps (moved from ci.yml) ─────────────
   integration-tests:
     runs-on: ubuntu-latest
@@ -186,12 +309,12 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install build deps
-        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ libpcre2-dev ninja-build pkg-config
 
       - name: Build module
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build --parallel $(nproc)
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build --parallel "$(nproc)" --target litehttpd_htaccess
 
       - name: Start integration test stack
         run: docker compose -f integration-tests/docker-compose.yml up -d --build

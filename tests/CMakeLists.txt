@@ -25,6 +25,7 @@ list(FILTER UNIT_TEST_SOURCES EXCLUDE REGEX "test_apacheconf\\.cpp$")
 if(UNIT_TEST_SOURCES)
     add_executable(unit_tests ${UNIT_TEST_SOURCES} ${MODULE_SOURCES} ${MOCK_SOURCES})
     target_compile_definitions(unit_tests PRIVATE MNAME=litehttpd_htaccess HTACCESS_UNIT_TEST)
+    litehttpd_link_pcre2(unit_tests)
     target_link_libraries(unit_tests
         GTest::gtest
         GTest::gtest_main
@@ -52,6 +53,7 @@ file(GLOB PROPERTY_TEST_SOURCES property/*.cpp)
 if(PROPERTY_TEST_SOURCES)
     add_executable(property_tests ${PROPERTY_TEST_SOURCES} ${MODULE_SOURCES} ${MOCK_SOURCES})
     target_compile_definitions(property_tests PRIVATE MNAME=litehttpd_htaccess HTACCESS_UNIT_TEST)
+    litehttpd_link_pcre2(property_tests)
     target_link_libraries(property_tests
         GTest::gtest
         GTest::gtest_main
@@ -70,6 +72,7 @@ if(COMPAT_TEST_SOURCES)
         MNAME=litehttpd_htaccess
         COMPAT_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/tests/compat/htaccess_samples"
     )
+    litehttpd_link_pcre2(compat_tests)
     target_link_libraries(compat_tests
         GTest::gtest
         GTest::gtest_main
