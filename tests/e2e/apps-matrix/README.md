@@ -305,6 +305,10 @@ stage and copies the patched `openlitespeed` binary plus `litehttpd_htaccess.so`
 from `litehttpd-artifacts`, avoiding the WebAdmin `admin_php` compile that the
 runtime image does not copy. Use `--build-arg OLS_RPM_BUILD_MODE=package` only
 when intentionally exercising the full RPM `%install` path.
+The compose wrapper passes `MATRIX_OLS_BUILD_JOBS` and
+`MATRIX_OLS_RPM_BUILD_MODE` through as Docker build args; the DO release-gate
+script exposes the same knobs as `APPS_MATRIX_DO_OLS_BUILD_JOBS` and
+`APPS_MATRIX_DO_OLS_RPM_BUILD_MODE`.
 
 Nightly consumes those images with `MATRIX_COMPOSE_BUILD=0`, so the 12 scenario
 jobs pull the same runtime images instead of rebuilding Apache and patched OLS

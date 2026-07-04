@@ -27,6 +27,8 @@ SSH_RETRIES="${APPS_MATRIX_DO_SSH_RETRIES:-5}"
 COMPOSE_BUILD="${APPS_MATRIX_DO_COMPOSE_BUILD:-1}"
 APACHE_IMAGE="${APPS_MATRIX_DO_APACHE_IMAGE:-}"
 OLS_MODULE_IMAGE="${APPS_MATRIX_DO_OLS_MODULE_IMAGE:-}"
+OLS_BUILD_JOBS="${APPS_MATRIX_DO_OLS_BUILD_JOBS:-}"
+OLS_RPM_BUILD_MODE="${APPS_MATRIX_DO_OLS_RPM_BUILD_MODE:-}"
 SKIP_DEP_INSTALL="${APPS_MATRIX_DO_SKIP_DEP_INSTALL:-0}"
 PREPULL_IMAGES="${APPS_MATRIX_DO_PREPULL_IMAGES:-1}"
 DOCKER_REGISTRY="${APPS_MATRIX_DO_DOCKER_REGISTRY:-}"
@@ -64,6 +66,8 @@ Environment:
   APPS_MATRIX_DO_COMPOSE_BUILD 0 or 1. Default: 1
   APPS_MATRIX_DO_APACHE_IMAGE Optional prebuilt Apache runtime image.
   APPS_MATRIX_DO_OLS_MODULE_IMAGE Optional prebuilt ols_module image.
+  APPS_MATRIX_DO_OLS_BUILD_JOBS Optional patched OLS build parallelism.
+  APPS_MATRIX_DO_OLS_RPM_BUILD_MODE Optional build or package. Dockerfile default: build
   APPS_MATRIX_DO_SKIP_DEP_INSTALL 0 or 1. Set to 1 for prepared DO snapshots. Default: 0
   APPS_MATRIX_DO_PREPULL_IMAGES 0 or 1. Pre-pull prebuilt runtime images. Default: 1
   APPS_MATRIX_DO_DOCKER_REGISTRY Optional Docker registry for private image login.
@@ -370,6 +374,13 @@ fi
 if [[ -n "${OLS_MODULE_IMAGE}" && ! "${OLS_MODULE_IMAGE}" =~ ^[A-Za-z0-9._:@/-]+$ ]]; then
     fail "APPS_MATRIX_DO_OLS_MODULE_IMAGE contains unsupported characters"
 fi
+if [[ -n "${OLS_BUILD_JOBS}" && ! "${OLS_BUILD_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
+    fail "APPS_MATRIX_DO_OLS_BUILD_JOBS must be a positive integer when set"
+fi
+case "${OLS_RPM_BUILD_MODE}" in
+    ""|build|package) ;;
+    *) fail "APPS_MATRIX_DO_OLS_RPM_BUILD_MODE must be build or package when set" ;;
+esac
 if [[ -n "${DOCKER_REGISTRY}" && ! "${DOCKER_REGISTRY}" =~ ^[A-Za-z0-9._:/-]+$ ]]; then
     fail "APPS_MATRIX_DO_DOCKER_REGISTRY contains unsupported characters"
 fi
@@ -401,6 +412,7 @@ rm -rf "${OUT_ROOT}/apps-matrix-out" "${OUT_ROOT}/apps-matrix-out.tgz"
 log "expanded scenarios: ${SCENARIOS}"
 log "engines: ${ENGINES}; phase: ${PHASE}; continue_on_failure: ${CONTINUE_ON_FAILURE}"
 log "compose_build: ${COMPOSE_BUILD}; apache_image: ${APACHE_IMAGE:-<default>}; ols_module_image: ${OLS_MODULE_IMAGE:-<default>}"
+log "ols_build_jobs: ${OLS_BUILD_JOBS:-<default>}; ols_rpm_build_mode: ${OLS_RPM_BUILD_MODE:-<default>}"
 log "skip_dep_install: ${SKIP_DEP_INSTALL}; prepull_images: ${PREPULL_IMAGES}; droplet_image: ${IMAGE}"
 
 if [[ ! -f "${SSH_KEY_PATH}" ]]; then
@@ -644,6 +656,8 @@ LOCAL_REMOTE_LAUNCHER="$(mktemp)"
     printf 'COMPOSE_BUILD=%q\n' "${COMPOSE_BUILD}"
     printf 'APACHE_IMAGE=%q\n' "${APACHE_IMAGE}"
     printf 'OLS_MODULE_IMAGE=%q\n' "${OLS_MODULE_IMAGE}"
+    printf 'OLS_BUILD_JOBS=%q\n' "${OLS_BUILD_JOBS}"
+    printf 'OLS_RPM_BUILD_MODE=%q\n' "${OLS_RPM_BUILD_MODE}"
     printf 'SKIP_DEP_INSTALL=%q\n' "${SKIP_DEP_INSTALL}"
     printf 'PREPULL_IMAGES=%q\n' "${PREPULL_IMAGES}"
     printf 'STRICT_PLUGIN_INSTALL=%q\n' "${STRICT_PLUGIN_INSTALL}"
@@ -668,6 +682,8 @@ continue_on_failure=${CONTINUE_ON_FAILURE}
 compose_build=${COMPOSE_BUILD}
 apache_image=${APACHE_IMAGE}
 ols_module_image=${OLS_MODULE_IMAGE}
+ols_build_jobs=${OLS_BUILD_JOBS}
+ols_rpm_build_mode=${OLS_RPM_BUILD_MODE}
 skip_dep_install=${SKIP_DEP_INSTALL}
 prepull_images=${PREPULL_IMAGES}
 EOF
@@ -689,6 +705,8 @@ MATRIX_ENGINES="${ENGINES}" \
 MATRIX_COMPOSE_BUILD="${COMPOSE_BUILD}" \
 MATRIX_APACHE_IMAGE="${APACHE_IMAGE}" \
 MATRIX_OLS_MODULE_IMAGE="${OLS_MODULE_IMAGE}" \
+MATRIX_OLS_BUILD_JOBS="${OLS_BUILD_JOBS}" \
+MATRIX_OLS_RPM_BUILD_MODE="${OLS_RPM_BUILD_MODE}" \
 MATRIX_PER_ENGINE_BUDGET_MS=30000 \
 MATRIX_ENFORCE_PERF_BUDGET="${ENFORCE_BUDGETS}" \
 MATRIX_ENFORCE_SCENARIO_BUDGET="${ENFORCE_BUDGETS}" \

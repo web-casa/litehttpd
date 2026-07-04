@@ -68,6 +68,9 @@ services:
     build:
       context: ../../..
       dockerfile: tests/e2e/Dockerfile.custom-ols
+      args:
+        OLS_BUILD_JOBS: "${MATRIX_OLS_BUILD_JOBS:-2}"
+        OLS_RPM_BUILD_MODE: "${MATRIX_OLS_RPM_BUILD_MODE:-build}"
     ports:
       - "${MATRIX_OLS_MODULE_PORT:-38080}:8088"
     volumes:
