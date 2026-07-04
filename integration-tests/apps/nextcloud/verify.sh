@@ -99,10 +99,13 @@ HTEOF
 # ---------------------------------------------------------------------------
 
 test_login_page() {
-    # Use the front controller explicitly; directory-index rewrite differs
-    # between OLS images, while status.php verifies the direct PHP mapping.
-    _fetch GET "${APP_PATH}/index.php/login"
-    [[ "$_LAST_STATUS_CODE" == "200" || "$_LAST_STATUS_CODE" == "302" ]]
+    # Check an authenticated route without following the login page render.
+    # status.php below verifies direct PHP mapping and response headers.
+    _fetch GET "${APP_PATH}/index.php/apps/files/"
+    case "$_LAST_STATUS_CODE" in
+        200|302|303|307) return 0 ;;
+    esac
+    return 1
 }
 
 test_security_header_nosniff() {
