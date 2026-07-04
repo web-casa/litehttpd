@@ -23,6 +23,7 @@ ENFORCE_BUDGETS="${APPS_MATRIX_DO_ENFORCE_BUDGETS:-0}"
 CONTINUE_ON_FAILURE="${APPS_MATRIX_DO_CONTINUE_ON_FAILURE:-0}"
 ARTIFACT_MODE="${APPS_MATRIX_DO_ARTIFACT_MODE:-summary}"
 RSYNC_RETRIES="${APPS_MATRIX_DO_RSYNC_RETRIES:-5}"
+SSH_RETRIES="${APPS_MATRIX_DO_SSH_RETRIES:-5}"
 COMPOSE_BUILD="${APPS_MATRIX_DO_COMPOSE_BUILD:-1}"
 APACHE_IMAGE="${APPS_MATRIX_DO_APACHE_IMAGE:-}"
 OLS_MODULE_IMAGE="${APPS_MATRIX_DO_OLS_MODULE_IMAGE:-}"
@@ -59,6 +60,7 @@ Environment:
   APPS_MATRIX_DO_CONTINUE_ON_FAILURE 0 or 1. Default: 0
   APPS_MATRIX_DO_ARTIFACT_MODE summary or full. Default: summary
   APPS_MATRIX_DO_RSYNC_RETRIES positive integer. Default: 5
+  APPS_MATRIX_DO_SSH_RETRIES positive integer. Default: 5
   APPS_MATRIX_DO_COMPOSE_BUILD 0 or 1. Default: 1
   APPS_MATRIX_DO_APACHE_IMAGE Optional prebuilt Apache runtime image.
   APPS_MATRIX_DO_OLS_MODULE_IMAGE Optional prebuilt ols_module image.
@@ -362,6 +364,9 @@ fi
 if [[ ! "${RSYNC_RETRIES}" =~ ^[1-9][0-9]*$ ]]; then
     fail "APPS_MATRIX_DO_RSYNC_RETRIES must be a positive integer"
 fi
+if [[ ! "${SSH_RETRIES}" =~ ^[1-9][0-9]*$ ]]; then
+    fail "APPS_MATRIX_DO_SSH_RETRIES must be a positive integer"
+fi
 if [[ -n "${OLS_MODULE_IMAGE}" && ! "${OLS_MODULE_IMAGE}" =~ ^[A-Za-z0-9._:@/-]+$ ]]; then
     fail "APPS_MATRIX_DO_OLS_MODULE_IMAGE contains unsupported characters"
 fi
@@ -485,6 +490,37 @@ done
 
 ssh_opts=(-i "${SSH_KEY_PATH}" -o StrictHostKeyChecking=no -o UserKnownHostsFile="${OUT_ROOT}/known_hosts" -o ConnectTimeout=10)
 rsync_ssh="ssh -i ${SSH_KEY_PATH} -o StrictHostKeyChecking=no -o UserKnownHostsFile=${OUT_ROOT}/known_hosts -o ConnectTimeout=10"
+ssh_retry() {
+    local label="$1"
+    shift
+    local attempt
+    for attempt in $(seq 1 "${SSH_RETRIES}"); do
+        # shellcheck disable=SC2029  # Call sites intentionally pass client-quoted remote commands.
+        if ssh "${ssh_opts[@]}" "$@"; then
+            return 0
+        fi
+        if [[ "${attempt}" == "${SSH_RETRIES}" ]]; then
+            return 1
+        fi
+        log "${label} SSH retry ${attempt}/${SSH_RETRIES}"
+        sleep $((attempt * 5))
+    done
+}
+scp_retry() {
+    local label="$1"
+    shift
+    local attempt
+    for attempt in $(seq 1 "${SSH_RETRIES}"); do
+        if scp "${ssh_opts[@]}" "$@"; then
+            return 0
+        fi
+        if [[ "${attempt}" == "${SSH_RETRIES}" ]]; then
+            return 1
+        fi
+        log "${label} SCP retry ${attempt}/${SSH_RETRIES}"
+        sleep $((attempt * 5))
+    done
+}
 log "waiting for SSH at ${ip}"
 for _ in $(seq 1 90); do
     if ssh "${ssh_opts[@]}" "root@${ip}" true >/dev/null 2>&1; then
@@ -683,12 +719,17 @@ rm -f /root/apps-matrix-run.exit /root/apps-matrix-run.log
 nohup bash -c 'bash /root/apps-matrix-run.sh > /root/apps-matrix-run.log 2>&1; printf "%s\n" "$?" > /root/apps-matrix-run.exit' >/dev/null 2>&1 &
 REMOTE_LAUNCHER
 
-scp "${ssh_opts[@]}" "${LOCAL_REMOTE_ENV}" "root@${ip}:/root/apps-matrix-run.env" >/dev/null
-scp "${ssh_opts[@]}" "${LOCAL_REMOTE_SCRIPT}" "root@${ip}:/root/apps-matrix-run.sh" >/dev/null
-scp "${ssh_opts[@]}" "${LOCAL_REMOTE_LAUNCHER}" "root@${ip}:/root/apps-matrix-launch.sh" >/dev/null
-ssh "${ssh_opts[@]}" "root@${ip}" "chmod 600 /root/apps-matrix-run.env && chmod +x /root/apps-matrix-run.sh /root/apps-matrix-launch.sh"
+scp_retry "upload remote env" "${LOCAL_REMOTE_ENV}" "root@${ip}:/root/apps-matrix-run.env" >/dev/null || \
+    fail "failed to upload remote env"
+scp_retry "upload remote script" "${LOCAL_REMOTE_SCRIPT}" "root@${ip}:/root/apps-matrix-run.sh" >/dev/null || \
+    fail "failed to upload remote script"
+scp_retry "upload remote launcher" "${LOCAL_REMOTE_LAUNCHER}" "root@${ip}:/root/apps-matrix-launch.sh" >/dev/null || \
+    fail "failed to upload remote launcher"
+ssh_retry "chmod remote launcher" "root@${ip}" "chmod 600 /root/apps-matrix-run.env && chmod +x /root/apps-matrix-run.sh /root/apps-matrix-launch.sh" || \
+    fail "failed to chmod remote launcher"
 remote_status=0
-ssh "${ssh_opts[@]}" "root@${ip}" "bash /root/apps-matrix-launch.sh"
+ssh_retry "launch remote run" "root@${ip}" "bash /root/apps-matrix-launch.sh" || \
+    fail "failed to launch remote apps-matrix run"
 
 log "polling remote apps-matrix run"
 deadline=$(( $(date +%s) + RUN_TIMEOUT_SECONDS ))
@@ -708,8 +749,8 @@ while true; do
 done
 
 log "fetching artifacts"
-scp "${ssh_opts[@]}" "root@${ip}:/root/apps-matrix-run.log" "${OUT_ROOT}/apps-matrix-run.log" >/dev/null 2>&1 || true
-if scp "${ssh_opts[@]}" "root@${ip}:/root/apps-matrix-out.tgz" "${OUT_ROOT}/apps-matrix-out.tgz"; then
+scp_retry "fetch remote run log" "root@${ip}:/root/apps-matrix-run.log" "${OUT_ROOT}/apps-matrix-run.log" >/dev/null 2>&1 || true
+if scp_retry "fetch artifact archive" "root@${ip}:/root/apps-matrix-out.tgz" "${OUT_ROOT}/apps-matrix-out.tgz"; then
     tar xzf "${OUT_ROOT}/apps-matrix-out.tgz" -C "${OUT_ROOT}"
 elif [[ "${remote_status}" -eq 0 ]]; then
     fail "remote apps-matrix run succeeded but artifact archive was not created"
