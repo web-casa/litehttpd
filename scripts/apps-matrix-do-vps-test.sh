@@ -733,8 +733,15 @@ REMOTE_SCRIPT
 cat > "${LOCAL_REMOTE_LAUNCHER}" <<'REMOTE_LAUNCHER'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ -s /root/apps-matrix-run.pid ]; then
+  existing_pid="$(cat /root/apps-matrix-run.pid 2>/dev/null || true)"
+  if [[ "${existing_pid}" =~ ^[0-9]+$ ]] && kill -0 "${existing_pid}" 2>/dev/null; then
+    exit 0
+  fi
+fi
 rm -f /root/apps-matrix-run.exit /root/apps-matrix-run.log
-nohup bash -c 'bash /root/apps-matrix-run.sh > /root/apps-matrix-run.log 2>&1; printf "%s\n" "$?" > /root/apps-matrix-run.exit' >/dev/null 2>&1 &
+nohup bash -c 'bash /root/apps-matrix-run.sh > /root/apps-matrix-run.log 2>&1; status="$?"; printf "%s\n" "${status}" > /root/apps-matrix-run.exit; rm -f /root/apps-matrix-run.pid; exit "${status}"' >/dev/null 2>&1 &
+printf "%s\n" "$!" > /root/apps-matrix-run.pid
 REMOTE_LAUNCHER
 
 scp_retry "upload remote env" "${LOCAL_REMOTE_ENV}" "root@${ip}:/root/apps-matrix-run.env" >/dev/null || \
