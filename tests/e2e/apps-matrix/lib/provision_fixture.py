@@ -21,6 +21,7 @@ DEFAULT_FIXTURE_ROOT = "fixtures/docroots"
 TTL_DEFAULT = 31536000
 PROBE_FILES = ("env.php", "headers.php", "router.php", "server.php")
 PROBE_MARKER = "APPS_MATRIX_V1"
+EMPTY_GENERATED_INDEX_MARKER = "base64_decode('')"
 
 
 def selected_engines() -> tuple[str, ...]:
@@ -251,6 +252,20 @@ echo base64_decode('{encoded_body}');
 """
 
 
+def should_replace_generated_index(path: Path) -> bool:
+    if not path.exists():
+        return True
+    return EMPTY_GENERATED_INDEX_MARKER in path.read_text(encoding="utf-8", errors="replace")
+
+
+def ensure_front_controller_body(docroot: Path, body: str) -> None:
+    if not body:
+        return
+    target = docroot / "index.php"
+    if should_replace_generated_index(target):
+        write_text(target, index_php(body))
+
+
 def write_case_file(docroot: Path, case: dict[str, Any], route: dict[str, Any]) -> None:
     target = file_path_for_url(docroot, str(case["path"]))
     if has_file_parent(target, docroot):
@@ -351,6 +366,7 @@ def write_route_file(docroot: Path, routes: dict[str, Any]) -> None:
 
 
 def seed_overlay_assets(docroot: Path, scenario: str, app: str, cases: list[dict[str, Any]]) -> None:
+    front_controller_body = ""
     for case in cases:
         raw_path = str(case["path"])
         path = path_without_query(raw_path)
@@ -358,6 +374,8 @@ def seed_overlay_assets(docroot: Path, scenario: str, app: str, cases: list[dict
         if has_file_parent(target, docroot):
             continue
         route = route_for_case(scenario, app, case)
+        if not front_controller_body and int(route.get("status", 200)) == 200:
+            front_controller_body = str(route.get("body", ""))
 
         if path == "/":
             write_text_if_missing(docroot / "index.php", index_php(str(route["body"])))
@@ -382,6 +400,8 @@ def seed_overlay_assets(docroot: Path, scenario: str, app: str, cases: list[dict
             )
         ):
             write_text_if_missing(target, "<?php\n// apps-matrix protected fixture\n")
+
+    ensure_front_controller_body(docroot, front_controller_body)
 
     if scenario.startswith("wordpress"):
         cache_dir = docroot / "wp-content" / "cache-matrix"
@@ -574,10 +594,14 @@ def write_routes(
     cases: list[dict[str, Any]],
 ) -> dict[str, Any]:
     routes = build_routes(scenario, app, cases)
+    front_controller_body = ""
     for case in cases:
         route_key = f"{case['method']} {case['path']}"
         route = routes[route_key]
+        if not front_controller_body and int(route.get("status", 200)) == 200:
+            front_controller_body = str(route.get("body", ""))
         write_case_file(docroot, case, route)
+    ensure_front_controller_body(docroot, front_controller_body)
     write_route_file(docroot, routes)
     return routes
 
