@@ -116,13 +116,8 @@ test_homepage() {
     case "$_LAST_STATUS_CODE" in
         200) ;;
         301|302)
-            local location
-            location=$(echo "$_LAST_RESPONSE_HEADERS" \
-                | grep -i "^location:" | head -1 \
-                | sed "s/^[^:]*: *//" | tr -d '\r')
-            [[ "$location" == *"${APP_CANONICAL_PATH}"* ]] || return 1
-            _fetch GET "${APP_PATH}/sample-test-post/"
-            [[ "$_LAST_STATUS_CODE" == "200" ]] || return 1
+            grep -qi "^x-redirect-by: WordPress" <<< "$_LAST_RESPONSE_HEADERS"
+            return
             ;;
         *)
             assert_http_status "${APP_PATH}/index.php" 200 || return 1

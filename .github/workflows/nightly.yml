@@ -356,20 +356,26 @@ jobs:
 
       - name: Wait for services
         run: |
+          ols_ready=0
           for i in $(seq 1 90); do
-            if curl -sf http://localhost:8088/ > /dev/null 2>&1; then
+            if curl -sS --max-time 3 -o /dev/null http://localhost:8088/ 2>/dev/null; then
               echo "OLS ready after ${i}s"
+              ols_ready=1
               break
             fi
             sleep 1
           done
+          test "${ols_ready}" = "1"
+          db_ready=0
           for i in $(seq 1 60); do
             if docker exec ols-integ-db mariadb -uroot -prootpass -e "SELECT 1" > /dev/null 2>&1; then
               echo "MariaDB ready after ${i}s"
+              db_ready=1
               break
             fi
             sleep 1
           done
+          test "${db_ready}" = "1"
 
       - name: Run WordPress tests
         run: bash integration-tests/apps/wordpress/verify.sh
