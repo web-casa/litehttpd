@@ -19,8 +19,21 @@ permissions:
   security-events: write
 
 jobs:
+  private-ghas-notice:
+    name: CodeQL private repository notice
+    if: ${{ github.event.repository.private && vars.CODEQL_PRIVATE_ENABLED != '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Skip CodeQL upload without GHAS
+        run: |
+          echo "CodeQL upload requires GitHub Advanced Security for private repositories."
+          echo "Set repository variable CODEQL_PRIVATE_ENABLED=1 after enabling GHAS to run the analyzer here."
+
   analyze:
     name: Analyze C/C++
+    if: ${{ !github.event.repository.private || vars.CODEQL_PRIVATE_ENABLED == '1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
