@@ -178,6 +178,8 @@ jobs:
           case "${CONTINUE_ON_FAILURE}" in 0|1) ;; *) exit 1 ;; esac
           case "${ARTIFACT_MODE}" in summary|full) ;; *) exit 1 ;; esac
           case "${ENFORCE_BUDGETS}" in 0|1) ;; *) exit 1 ;; esac
+          APPS_MATRIX_BUDGET_ENFORCE_REQUESTED="${ENFORCE_BUDGETS}" \
+            bash scripts/check-apps-matrix-budget-policy.sh
           if ! printf '%s' "${DROPLET_SIZE}" | grep -Eq '^[A-Za-z0-9._-]+$'; then
             echo "Unsupported droplet_size characters" >&2
             exit 1

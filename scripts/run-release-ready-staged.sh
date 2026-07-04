@@ -95,6 +95,15 @@ while IFS= read -r path; do
     copy_or_remove_path "$path"
 done < "$MANIFEST_DIR/in-scope.txt"
 
+(
+    cd "$STAGE_DIR"
+    if ! git diff --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+        git add -A -f
+        git -c user.name=release-ready -c user.email=release-ready@example.invalid \
+            commit -q -m "release-ready overlay"
+    fi
+)
+
 echo "========================================"
 echo " Release Ready Staged Gate"
 echo "========================================"

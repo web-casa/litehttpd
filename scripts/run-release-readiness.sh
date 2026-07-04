@@ -11,6 +11,8 @@ REQUIRE_FULL_ARTIFACTS="${RELEASE_READINESS_REQUIRE_FULL_ARTIFACTS:-0}"
 RUN_DO_GATE="${RELEASE_READINESS_RUN_DO_GATE:-0}"
 BUILD_ARTIFACTS="${RELEASE_READINESS_BUILD_ARTIFACTS:-0}"
 RUN_RPM_REPO="${RELEASE_READINESS_RUN_RPM_REPO:-1}"
+CHECK_SOURCE_ISOLATION="${RELEASE_READINESS_CHECK_SOURCE_ISOLATION:-0}"
+RELEASE_REF="${RELEASE_READINESS_REF:-HEAD}"
 MANIFEST_DIR="${RELEASE_READINESS_MANIFEST_DIR:-out/release-readiness}"
 ARTIFACT_DIRS=()
 
@@ -29,6 +31,8 @@ Options:
   --skip-rpm-repo            Skip RPM repo dry-run.
   --run-do-gate              Dispatch apps-matrix final DO gate.
   --manifest-dir DIR         Write release scope manifests here.
+  --check-source-isolation   Require this checkout to be clean release source.
+  --release-ref REF          Ref used by source/public-sync checks. Default: HEAD.
   -h, --help                 Show this help.
 
 DO gate options are passed via APPS_MATRIX_FINAL_DO_* environment variables or
@@ -78,6 +82,14 @@ while [ "$#" -gt 0 ]; do
             MANIFEST_DIR="$2"
             shift
             ;;
+        --check-source-isolation)
+            CHECK_SOURCE_ISOLATION=1
+            ;;
+        --release-ref)
+            [ "$#" -ge 2 ] || fail "--release-ref requires a value"
+            RELEASE_REF="$2"
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -98,12 +110,21 @@ validate_bool RELEASE_READINESS_REQUIRE_FULL_ARTIFACTS "$REQUIRE_FULL_ARTIFACTS"
 validate_bool RELEASE_READINESS_RUN_DO_GATE "$RUN_DO_GATE"
 validate_bool RELEASE_READINESS_BUILD_ARTIFACTS "$BUILD_ARTIFACTS"
 validate_bool RELEASE_READINESS_RUN_RPM_REPO "$RUN_RPM_REPO"
+validate_bool RELEASE_READINESS_CHECK_SOURCE_ISOLATION "$CHECK_SOURCE_ISOLATION"
 
 scope_args=(--manifest-dir "$MANIFEST_DIR/scope")
 if [ "$STRICT_SCOPE" = "1" ]; then
     scope_args=(--strict "${scope_args[@]}")
 fi
 
+if [ "$CHECK_SOURCE_ISOLATION" = "1" ]; then
+    run_step bash scripts/check-release-source-isolated.sh \
+        --ref "$RELEASE_REF" \
+        --manifest-dir "$MANIFEST_DIR/source"
+fi
+
+run_step bash scripts/check-release-metadata.sh --manifest-dir "$MANIFEST_DIR/metadata"
+run_step bash scripts/check-public-release-sync.sh --ref "$RELEASE_REF" --manifest-dir "$MANIFEST_DIR/public-sync"
 run_step bash scripts/check-release-scope.sh "${scope_args[@]}"
 run_step bash scripts/check-release-matrix.sh
 run_step bash tests/check_patches.sh
@@ -131,7 +152,7 @@ else
     printf '\nSKIP: RPM repo dry-run disabled.\n'
 fi
 
-run_step bash scripts/check-apps-matrix-budget-ratchet.sh
+run_step bash scripts/check-apps-matrix-budget-policy.sh
 
 if [ "$RUN_DO_GATE" = "1" ]; then
     run_step bash scripts/apps-matrix-final-do-gate.sh

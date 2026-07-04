@@ -37,12 +37,20 @@ Commands:
                  Run release-ready in a clean temp tree with only release-scoped dirty files.
   release-readiness
                  Release scope, matrix, package, repo, apps-matrix budget, optional DO gate.
+  release-source-isolated
+                 Require release packaging to run from a clean checkout/worktree.
+  release-metadata
+                 Validate tag, changelog, spec versions, and release-note metadata.
+  release-public-sync
+                 Report public mirror sync delta without mutating public-repo.
   release-scope  Report dirty files inside/outside the release scope.
   release-matrix Validate release.yml matrix and release safety checks.
   release-artifacts
                  Validate release artifact names and matrix coverage.
   apps-matrix-budget-ratchet
                  Check apps-matrix p95 sample sufficiency before budget enforcement.
+  apps-matrix-budget-policy
+                 Validate advisory/enforced apps-matrix budget policy.
   apps-matrix-final-do-gate
                  Dispatch/watch the final apps-matrix DO release gate.
   assemble-release-tarballs
@@ -79,6 +87,8 @@ Environment:
                              Default: 0; fail if repo matrix is incomplete.
   APPS_MATRIX_BUDGET_RATCHET_REQUIRED=0|1
                              Default: 0; make insufficient budget samples fatal.
+  APPS_MATRIX_BUDGET_ENFORCE_REQUESTED=0|1
+                             Used by apps-matrix-budget-policy before enabling budgets.
   RELEASE_READINESS_*        Controls scripts/run-release-readiness.sh.
 USAGE
 }
@@ -399,11 +409,15 @@ run_release_preflight() {
 }
 
 run_release_ready() {
+    bash scripts/check-release-source-isolated.sh
+    bash scripts/check-release-metadata.sh
     RELEASE_SCOPE_STRICT=1 bash scripts/check-release-scope.sh
+    bash scripts/check-public-release-sync.sh
     bash scripts/check-release-matrix.sh
     RELEASE_REQUIRE_FULL_ARTIFACTS=1 bash scripts/check-release-artifacts.sh
     run_patch_checks
     REPO_REQUIRE_FULL_MATRIX=1 bash scripts/check-rpm-repo-dry-run.sh
+    bash scripts/check-apps-matrix-budget-policy.sh
 }
 
 run_release_ready_staged() {
@@ -416,6 +430,10 @@ run_release_readiness() {
 
 run_apps_matrix_budget_ratchet() {
     bash scripts/check-apps-matrix-budget-ratchet.sh "$@"
+}
+
+run_apps_matrix_budget_policy() {
+    bash scripts/check-apps-matrix-budget-policy.sh "$@"
 }
 
 run_apps_matrix_final_do_gate() {
@@ -443,6 +461,15 @@ case "$command" in
     release-readiness)
         run_release_readiness "$@"
         ;;
+    release-source-isolated)
+        bash scripts/check-release-source-isolated.sh "$@"
+        ;;
+    release-metadata)
+        bash scripts/check-release-metadata.sh "$@"
+        ;;
+    release-public-sync)
+        bash scripts/check-public-release-sync.sh "$@"
+        ;;
     release-scope)
         bash scripts/check-release-scope.sh
         ;;
@@ -454,6 +481,9 @@ case "$command" in
         ;;
     apps-matrix-budget-ratchet)
         run_apps_matrix_budget_ratchet "$@"
+        ;;
+    apps-matrix-budget-policy)
+        run_apps_matrix_budget_policy "$@"
         ;;
     apps-matrix-final-do-gate)
         run_apps_matrix_final_do_gate "$@"

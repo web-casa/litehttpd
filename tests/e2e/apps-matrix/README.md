@@ -272,6 +272,12 @@ scripts/apps-matrix-ratchet-budgets.sh tests/e2e/apps-matrix/out/full-matrix
 number of successful samples. Only enable workflow/DO `enforce_budgets=1` after
 that ratchet step passes against representative p95 data.
 
+The release-facing policy lives in `config/budget-policy.env` and is validated
+by `scripts/check-apps-matrix-budget-policy.sh`. Keep the policy in `advisory`
+mode for releases that do not yet have enough p95 samples; switch it to
+`enforced` only after `scripts/apps-matrix-ratchet-budgets.sh` has updated
+`config/budgets.env` from representative successful CI/DO artifacts.
+
 ## Runtime Image Prebuilds
 
 `.github/workflows/apps-matrix-runtime-images.yml` builds the two shared

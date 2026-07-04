@@ -76,6 +76,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@v5
+
       - name: Validate inputs
         env:
           REQUESTED_PHASE: ${{ inputs.phase }}
@@ -107,6 +109,8 @@ jobs:
             0|1) ;;
             *) echo "Unsupported enforce_budgets: ${ENFORCE_BUDGETS}" >&2; exit 1 ;;
           esac
+          APPS_MATRIX_BUDGET_ENFORCE_REQUESTED="${ENFORCE_BUDGETS}" \
+            bash scripts/check-apps-matrix-budget-policy.sh
           case "${HEALTH_PROBES}" in
             0|1) ;;
             *) echo "Unsupported health_probes: ${HEALTH_PROBES}" >&2; exit 1 ;;

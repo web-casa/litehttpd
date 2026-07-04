@@ -86,10 +86,14 @@ is_release_scope() {
         scripts/apps-matrix-do-vps-test.sh | \
         scripts/build-release-module-artifacts.sh | \
         scripts/build-release-ols-artifacts.sh | \
+        scripts/check-apps-matrix-budget-policy.sh | \
         scripts/check-apps-matrix-budget-ratchet.sh | \
         scripts/check-release-matrix.sh | \
         scripts/check-release-artifacts.sh | \
+        scripts/check-release-metadata.sh | \
+        scripts/check-release-source-isolated.sh | \
         scripts/check-release-scope.sh | \
+        scripts/check-public-release-sync.sh | \
         scripts/check-rpm-repo-dry-run.sh | \
         scripts/create-release-source-cache.sh | \
         scripts/run-release-readiness.sh | \

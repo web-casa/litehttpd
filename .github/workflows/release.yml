@@ -15,11 +15,41 @@ permissions:
   contents: write
 
 jobs:
+  preflight:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Validate release source isolation
+        run: |
+          bash scripts/check-release-source-isolated.sh \
+            --ref "$GITHUB_SHA" \
+            --expect-sha "$GITHUB_SHA" \
+            --manifest-dir out/release-preflight/source
+
+      - name: Validate release metadata
+        run: |
+          bash scripts/check-release-metadata.sh \
+            --tag "$GITHUB_REF_NAME" \
+            --manifest-dir out/release-preflight/metadata
+
+      - name: Validate budget policy
+        run: bash scripts/check-apps-matrix-budget-policy.sh
+
+      - name: Report public mirror sync delta
+        run: |
+          bash scripts/check-public-release-sync.sh \
+            --ref "$GITHUB_SHA" \
+            --manifest-dir out/release-preflight/public-sync
+
   # ── Create a draft GitHub Release up front ─────────────────────────
   # Build jobs attach their outputs to THIS release instead of using
   # actions/upload-artifact. Release assets do NOT count against the
   # Actions artifact-storage quota, so releases never get blocked by it.
   create-release:
+    needs: [preflight]
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
@@ -32,7 +62,7 @@ jobs:
           cat > /tmp/notes.md <<'NOTES'
           ## litehttpd v__VERSION__
 
-          Apache .htaccess compatibility module for OpenLiteSpeed (83 directives, 1047 tests).
+          Apache .htaccess compatibility module for OpenLiteSpeed (84 directive types, full CI/release-gate coverage).
 
           ### RPM Packages (x86_64 and aarch64)
 
