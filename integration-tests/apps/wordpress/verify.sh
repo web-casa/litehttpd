@@ -113,15 +113,13 @@ HTEOF
 
 test_homepage() {
     _fetch GET "${APP_CANONICAL_PATH}"
-    local status
-    status="$(printf '%s' "${_LAST_STATUS_CODE}" | tr -cd '0-9')"
-    case "$status" in
-        200) ;;
-        301|302)
+    case "${_LAST_RESPONSE_HEADERS}" in
+        *"HTTP/"*" 301 "*|*"HTTP/"*" 302 "*)
             # OLS can surface WordPress' canonical redirect for the app root;
             # the permalink and REST checks below verify actual rendering.
             return 0
             ;;
+        *"HTTP/"*" 200 "*) ;;
         *)
             assert_http_status "${APP_PATH}/index.php" 200 || return 1
             ;;
