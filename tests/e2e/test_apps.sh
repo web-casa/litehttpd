@@ -923,10 +923,6 @@ install_sucuri() {
   Order Allow,Deny
   Deny from all
 </Files>
-<FilesMatch "\.(php|phtml)$">
-  Order Allow,Deny
-  Deny from all
-</FilesMatch>
 Options -Indexes
 Header always set X-Content-Type-Options "nosniff"
 Header always set X-Frame-Options "SAMEORIGIN"
@@ -2546,9 +2542,43 @@ install_laravel() {
             --no-interaction --prefer-dist --no-dev
     "
 
+    # Laravel 12 defaults to sqlite-backed bootstrap checks.  The app e2e
+    # image intentionally keeps PHP lean, so use the existing MariaDB service.
+    docker exec "${OLS_CONTAINER}" bash -c "
+        mariadb --ssl=0 -h db -uroot -prootpass -e \"
+            CREATE DATABASE IF NOT EXISTS laravel;
+            GRANT ALL ON laravel.* TO 'appuser'@'%';
+            FLUSH PRIVILEGES;
+        \"
+        cd ${OLS_DOCROOT}/laravel
+        cat > .env <<'LARENV'
+APP_NAME=Laravel
+APP_ENV=testing
+APP_KEY=
+APP_DEBUG=true
+APP_URL=http://localhost:8088/laravel/public
+LOG_CHANNEL=stack
+LOG_LEVEL=debug
+DB_CONNECTION=mysql
+DB_HOST=db
+DB_PORT=3306
+DB_DATABASE=laravel
+DB_USERNAME=appuser
+DB_PASSWORD=apppass
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+CACHE_STORE=file
+CACHE_DRIVER=file
+QUEUE_CONNECTION=sync
+MAIL_MAILER=array
+LARENV
+    "
+
     # Generate APP_KEY if not already set (Req 19.1)
     docker exec "${OLS_CONTAINER}" bash -c "
-        cd ${OLS_DOCROOT}/laravel && php artisan key:generate --force
+        cd ${OLS_DOCROOT}/laravel
+        php artisan key:generate --force
+        php artisan config:clear || true
     "
 
     # Create a test API route (Req 19.5)
@@ -2761,7 +2791,7 @@ install_joomla() {
     fi
 
     docker exec "${OLS_CONTAINER}" bash -c "
-        mariadb -h db -uroot -prootpass -e \"
+        mariadb --ssl=0 -h db -uroot -prootpass -e \"
             CREATE DATABASE IF NOT EXISTS joomla;
             GRANT ALL ON joomla.* TO 'appuser'@'%';
             FLUSH PRIVILEGES;
@@ -2852,7 +2882,7 @@ install_mediawiki() {
     fi
 
     docker exec "${OLS_CONTAINER}" bash -euc "
-        mariadb -h db -uroot -prootpass -e \"
+        mariadb --ssl=0 -h db -uroot -prootpass -e \"
             CREATE DATABASE IF NOT EXISTS mediawiki;
             GRANT ALL ON mediawiki.* TO 'appuser'@'%';
             FLUSH PRIVILEGES;
