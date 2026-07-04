@@ -2536,18 +2536,14 @@ install_laravel() {
         fi
     '
 
-    # Create Laravel project via Composer (Req 19.1)
-    # Pin to Laravel 10.x which supports PHP 8.1 (Laravel 11+ requires 8.2+)
-    # Use --ignore-platform-req=ext-* to avoid extension issues, and set platform
-    # PHP version to prevent Composer from resolving deps needing newer PHP.
+    # Create Laravel project via Composer (Req 19.1).  Use the current
+    # supported major for PHP 8.2+ so Composer's security advisory policy does
+    # not block the install on old Laravel 10 framework releases.
     docker exec "${OLS_CONTAINER}" bash -c "
         export COMPOSER_ALLOW_SUPERUSER=1
-        composer create-project laravel/laravel:'^10.0' \
+        composer create-project laravel/laravel:'^12.0' \
             '${OLS_DOCROOT}/laravel' \
             --no-interaction --prefer-dist --no-dev
-        cd '${OLS_DOCROOT}/laravel'
-        composer config platform.php 8.1.34
-        composer update --no-interaction --prefer-dist --no-dev
     "
 
     # Generate APP_KEY if not already set (Req 19.1)
@@ -2558,16 +2554,17 @@ install_laravel() {
     # Create a test API route (Req 19.5)
     docker exec "${OLS_CONTAINER}" bash -c "
         cd ${OLS_DOCROOT}/laravel
-        # Ensure routes/api.php exists and add our test route
+        # Use web.php so the route is loaded across Laravel 10+ skeletons,
+        # including newer skeletons where API routes are opt-in.
         mkdir -p routes
-        if [ ! -f routes/api.php ]; then
-            echo '<?php' > routes/api.php
-            echo '' >> routes/api.php
-            echo 'use Illuminate\Support\Facades\Route;' >> routes/api.php
+        if [ ! -f routes/web.php ]; then
+            echo '<?php' > routes/web.php
+            echo '' >> routes/web.php
+            echo 'use Illuminate\Support\Facades\Route;' >> routes/web.php
         fi
         # Append the test route
-        echo '' >> routes/api.php
-        echo \"Route::get('/test', function() { return response()->json(['status' => 'ok']); });\" >> routes/api.php
+        echo '' >> routes/web.php
+        echo \"Route::get('/api/test', function() { return response()->json(['status' => 'ok']); });\" >> routes/web.php
     "
 
     # Fix ownership so OLS (nobody:nogroup) can read/write
