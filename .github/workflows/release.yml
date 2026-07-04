@@ -32,16 +32,16 @@ jobs:
           cat > /tmp/notes.md <<'NOTES'
           ## litehttpd v__VERSION__
 
-          Apache .htaccess compatibility module for OpenLiteSpeed (80 directives, 1017 tests).
+          Apache .htaccess compatibility module for OpenLiteSpeed (83 directives, 1047 tests).
 
-          ### RPM Packages (x86_64)
+          ### RPM Packages (x86_64 and aarch64)
 
           | Package | Description |
           |---------|-------------|
-          | `openlitespeed-litehttpd-*.el8.x86_64.rpm` | Patched OLS + bundled module (EL 8) |
-          | `openlitespeed-litehttpd-*.el9.x86_64.rpm` | Patched OLS + bundled module (EL 9) |
-          | `openlitespeed-litehttpd-*.el10.x86_64.rpm` | Patched OLS + bundled module (EL 10) |
-          | `litehttpd-*.el9.x86_64.rpm` | Standalone module RPM (EL 9) |
+          | `openlitespeed-litehttpd-*.el8.<arch>.rpm` | Patched OLS + bundled module (EL 8) |
+          | `openlitespeed-litehttpd-*.el9.<arch>.rpm` | Patched OLS + bundled module (EL 9) |
+          | `openlitespeed-litehttpd-*.el10.<arch>.rpm` | Patched OLS + bundled module (EL 10) |
+          | `litehttpd-*.el9.<arch>.rpm` | Standalone module RPM (EL 9) |
 
           ```bash
           # Install both (replaces stock OLS, enables php_value + RewriteRule)
@@ -58,9 +58,9 @@ jobs:
 
           | Tarball | Use when | Effect |
           |---------|----------|--------|
-          | `openlitespeed-litehttpd-*-x86_64-linux.tgz` | Fresh install / no OLS yet | Installs the **complete patched OLS + module** to `/usr/local/lsws` |
-          | `litehttpd-ols-patch-*-x86_64-linux.tgz` | You already run **official OLS (same version)** | Overlay: backs up & **replaces the binary** + adds module (full features) |
-          | `litehttpd-module-*-x86_64-linux.tgz` | You already run **official OLS (any version)** | Overlay: **module only**, no binary change (RewriteRule/php_value not executed) |
+          | `openlitespeed-litehttpd-*-<arch>-linux.tgz` | Fresh install / no OLS yet | Installs the **complete patched OLS + module** to `/usr/local/lsws` |
+          | `litehttpd-ols-patch-*-<arch>-linux.tgz` | You already run **official OLS (same version)** | Overlay: backs up & **replaces the binary** + adds module (full features) |
+          | `litehttpd-module-*-<arch>-linux.tgz` | You already run **official OLS (any version)** | Overlay: **module only**, no binary change (RewriteRule/php_value not executed) |
 
           ```bash
           # Full install (no OLS yet)
@@ -84,6 +84,10 @@ jobs:
           | `litehttpd_htaccess-el9-x86_64.so` | EL 9 x86_64 |
           | `litehttpd_htaccess-el10-x86_64.so` | EL 10 x86_64 |
           | `litehttpd_htaccess-ubuntu22-x86_64.so` | Ubuntu 22.04+, Debian 12+ x86_64 |
+          | `litehttpd_htaccess-el8-aarch64.so` | EL 8 aarch64 |
+          | `litehttpd_htaccess-el9-aarch64.so` | EL 9 aarch64 |
+          | `litehttpd_htaccess-el10-aarch64.so` | EL 10 aarch64 |
+          | `litehttpd_htaccess-ubuntu22-aarch64.so` | Ubuntu 22.04+, Debian 12+ aarch64 |
 
           ### OLS Patches
 
@@ -98,7 +102,7 @@ jobs:
 
           ### Requirements
           - OpenLiteSpeed >= 1.7.0
-          - glibc >= 2.34
+          - Full OLS RPMs/tarballs are built on EL8 and require glibc >= 2.28
           - For `php_value`/`php_flag` + `RewriteRule`: install `openlitespeed-litehttpd` RPM or apply both patches
           NOTES
           sed -i "s/__VERSION__/${VERSION}/g" /tmp/notes.md
@@ -120,7 +124,7 @@ jobs:
           - container: almalinux:8
             suffix: el8-x86_64
             platform: linux/amd64
-            pkg_cmd: "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel && ln -sf /usr/bin/cmake3 /usr/bin/cmake"
+            pkg_cmd: "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel && (command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake)"
           - container: almalinux:9
             suffix: el9-x86_64
             platform: linux/amd64
@@ -132,6 +136,26 @@ jobs:
           - container: ubuntu:22.04
             suffix: ubuntu22-x86_64
             platform: linux/amd64
+            pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev"
+          - container: almalinux:8
+            suffix: el8-aarch64
+            platform: linux/arm64
+            qemu: true
+            pkg_cmd: "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel && (command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake)"
+          - container: almalinux:9
+            suffix: el9-aarch64
+            platform: linux/arm64
+            qemu: true
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+          - container: almalinux:10
+            suffix: el10-aarch64
+            platform: linux/arm64
+            qemu: true
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+          - container: ubuntu:22.04
+            suffix: ubuntu22-aarch64
+            platform: linux/arm64
+            qemu: true
             pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev"
 
     runs-on: ubuntu-22.04
@@ -159,7 +183,7 @@ jobs:
               ${{ matrix.pkg_cmd }} 2>&1 | tail -2
               mkdir /tmp/build && cd /tmp/build
               tar cf - -C /src --exclude=build --exclude=.git . | tar xf -
-              cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS="-O2 -DNDEBUG"
+              cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_C_FLAGS="-O2 -DNDEBUG"
               cmake --build build --target litehttpd_htaccess -j$(nproc)
               strip build/litehttpd_htaccess.so
               cp build/litehttpd_htaccess.so /output/litehttpd_htaccess-${{ matrix.suffix }}.so
@@ -167,13 +191,18 @@ jobs:
 
       - name: Attach .so to release
         run: |
+          uploaded=0
           for i in 1 2 3; do
-            gh release upload "$GITHUB_REF_NAME" \
-              output/litehttpd_htaccess-${{ matrix.suffix }}.so --clobber && break
+            if gh release upload "$GITHUB_REF_NAME" \
+              output/litehttpd_htaccess-${{ matrix.suffix }}.so --clobber; then
+              uploaded=1
+              break
+            fi
             echo "upload retry $i"; sleep $((i*5))
           done
+          [ "$uploaded" -eq 1 ]
 
-  # ── Build litehttpd RPM (EL9, x86_64) ──────────────────────────────
+  # ── Build litehttpd RPM (EL9, x86_64/aarch64) ──────────────────────
   build-rpm-module:
     needs: [create-release]
     strategy:
@@ -182,6 +211,10 @@ jobs:
           - container: almalinux:9
             platform: linux/amd64
             arch_suffix: x86_64
+          - container: almalinux:9
+            platform: linux/arm64
+            arch_suffix: aarch64
+            qemu: true
 
     runs-on: ubuntu-22.04
     env:
@@ -197,23 +230,23 @@ jobs:
 
       - name: Extract version from spec
         id: ver
-        run: echo "version=$(grep '^Version:' packaging/litehttpd.spec | awk '{print $2}')" >> $GITHUB_OUTPUT
+        run: echo "version=$(grep '^Version:' packaging/litehttpd.spec | awk '{print $2}')" >> "$GITHUB_OUTPUT"
 
       - name: Build RPM
         env:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           mkdir -p output
-          tar czf /tmp/litehttpd-${VERSION}.tar.gz \
+          tar czf "/tmp/litehttpd-${VERSION}.tar.gz" \
             --transform="s,^\.,litehttpd-${VERSION}," \
             --exclude=build --exclude=.git .
 
           docker run --rm \
             --platform ${{ matrix.platform }} \
             -v ${{ github.workspace }}:/src:ro \
-            -v /tmp/litehttpd-${VERSION}.tar.gz:/tmp/litehttpd-${VERSION}.tar.gz:ro \
+            -v "/tmp/litehttpd-${VERSION}.tar.gz:/tmp/litehttpd-${VERSION}.tar.gz:ro" \
             -v ${{ github.workspace }}/output:/output \
-            -e VERSION=${VERSION} \
+            -e VERSION="${VERSION}" \
             ${{ matrix.container }} \
             bash -c '
               set -e
@@ -228,12 +261,17 @@ jobs:
 
       - name: Attach RPM to release
         run: |
+          uploaded=0
           for i in 1 2 3; do
-            gh release upload "$GITHUB_REF_NAME" output/litehttpd-*.rpm --clobber && break
+            if gh release upload "$GITHUB_REF_NAME" output/litehttpd-*.rpm --clobber; then
+              uploaded=1
+              break
+            fi
             echo "upload retry $i"; sleep $((i*5))
           done
+          [ "$uploaded" -eq 1 ]
 
-  # ── Build openlitespeed-litehttpd RPM (EL8/9/10, x86_64) ─────────────
+  # ── Build openlitespeed-litehttpd RPM (EL8/9/10, x86_64/aarch64) ────
   build-rpm-ols:
     needs: [create-release]
     strategy:
@@ -246,12 +284,36 @@ jobs:
           - container: almalinux:8
             dist_tag: el8
             pkg_cmd: yum
+            platform: linux/amd64
+            asset_arch: x86_64
           - container: almalinux:8
             dist_tag: el9
             pkg_cmd: yum
+            platform: linux/amd64
+            asset_arch: x86_64
           - container: almalinux:8
             dist_tag: el10
             pkg_cmd: yum
+            platform: linux/amd64
+            asset_arch: x86_64
+          - container: almalinux:8
+            dist_tag: el8
+            pkg_cmd: yum
+            platform: linux/arm64
+            asset_arch: aarch64
+            qemu: true
+          - container: almalinux:8
+            dist_tag: el9
+            pkg_cmd: yum
+            platform: linux/arm64
+            asset_arch: aarch64
+            qemu: true
+          - container: almalinux:8
+            dist_tag: el10
+            pkg_cmd: yum
+            platform: linux/arm64
+            asset_arch: aarch64
+            qemu: true
 
     runs-on: ubuntu-22.04
     timeout-minutes: 120
@@ -260,11 +322,23 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Set up QEMU for ARM builds
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Validate patch and release target
+        run: bash tests/check_patches.sh
+
       - name: Download OLS source
         run: |
-          git clone --depth 1 --recurse-submodules --branch v1.8.5 \
+          git config --global http.version HTTP/1.1 || true
+          git config --global http.lowSpeedLimit 32768 || true
+          git config --global http.lowSpeedTime 120 || true
+          git clone --depth 1 --recurse-submodules --shallow-submodules --branch v1.9.1 \
             https://github.com/litespeedtech/openlitespeed.git /tmp/ols-src
-          cd /tmp/ols-src && tar czf /tmp/v1.8.5.tar.gz --exclude=.git --transform="flags=r;s,^\.,openlitespeed-1.8.5," .
+          cd /tmp/ols-src && tar czf /tmp/v1.9.1.tar.gz --exclude=.git --transform="flags=r;s,^\.,openlitespeed-1.9.1," .
 
       - name: Create module source tarball
         run: |
@@ -274,22 +348,33 @@ jobs:
             --exclude=.git --exclude=build --exclude=node_modules \
             -C ${{ github.workspace }} .
 
+      - name: Create pinned source cache
+        run: bash scripts/create-release-source-cache.sh /tmp
+
       - name: Build RPM
         run: |
           mkdir -p output
           docker run --rm \
+            --platform ${{ matrix.platform }} \
             -v ${{ github.workspace }}:/src:ro \
-            -v /tmp/v1.8.5.tar.gz:/tmp/v1.8.5.tar.gz:ro \
+            -v /tmp/v1.9.1.tar.gz:/tmp/v1.9.1.tar.gz:ro \
             -v /tmp/litehttpd-module-src.tar.gz:/tmp/litehttpd-module-src.tar.gz:ro \
+            -v /tmp/third-party-src.tar.gz:/tmp/third-party-src.tar.gz:ro \
+            -v /tmp/third-party-deps-src.tar.gz:/tmp/third-party-deps-src.tar.gz:ro \
+            -v /tmp/php-7.4.33.tar.gz:/tmp/php-7.4.33.tar.gz:ro \
+            -v /tmp/php-litespeed-8.1.tgz:/tmp/php-litespeed-8.1.tgz:ro \
             -v ${{ github.workspace }}/output:/output \
             ${{ matrix.container }} \
             bash -c '
               set -e
               PKG=${{ matrix.pkg_cmd }}
+              ASSET_ARCH=${{ matrix.asset_arch }}
 
-              # ── Install build tools only (no -devel libs) ──
-              # All third-party libraries are built from source via
-              # litespeedtech/third-party, matching official LiteSpeed approach.
+              # ── Install build tools ──
+              # OLS third-party libraries are built from litespeedtech/third-party,
+              # matching official LiteSpeed. libcap/libaio/expat devel headers
+              # satisfy upstream build-time checks; libxml2/zlib devel headers are
+              # used to rebuild WebAdmin admin_php locally for EL8/aarch64 ABI.
               if command -v dnf &>/dev/null; then
                 dnf -y install dnf-plugins-core
                 # Lock glibc to keep minimum version requirement low.
@@ -298,17 +383,19 @@ jobs:
                 if ! dnf versionlock add glibc glibc-devel glibc-headers glibc-common 2>/dev/null; then
                   echo "WARNING: glibc versionlock failed — binary may require newer glibc"
                 fi
-                dnf -y install rpm-build gcc gcc-c++ cmake make autoconf automake libtool \
-                  systemd-rpm-macros which git wget clang patch perl golang 2>&1 | tail -2
+                dnf -y install rpm-build gcc gcc-c++ cmake make bison autoconf automake libtool \
+                  systemd-rpm-macros which git wget clang patch perl golang binutils \
+                  libcap-devel libaio-devel expat-devel libxml2-devel zlib-devel 2>&1 | tail -2
               else
-                yum -y install rpm-build gcc gcc-c++ cmake3 make autoconf automake libtool \
-                  systemd-rpm-macros which git wget clang patch perl 2>&1 | tail -2
+                yum -y install rpm-build gcc gcc-c++ cmake3 make bison autoconf automake libtool \
+                  systemd-rpm-macros which git wget clang patch perl binutils \
+                  libcap-devel libaio-devel expat-devel libxml2-devel zlib-devel 2>&1 | tail -2
                 yum -y install golang 2>&1 | tail -1 || true
                 command -v cmake || ln -s /usr/bin/cmake3 /usr/bin/cmake 2>/dev/null || true
               fi
 
               mkdir -p /root/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-              cp /tmp/v1.8.5.tar.gz /root/rpmbuild/SOURCES/
+              cp /tmp/v1.9.1.tar.gz /root/rpmbuild/SOURCES/
               cp /src/patches/0001-lsiapi-phpconfig.patch /root/rpmbuild/SOURCES/
               cp /src/patches/0002-lsiapi-rewrite.patch /root/rpmbuild/SOURCES/
               cp /src/patches/0003-readapacheconf.patch /root/rpmbuild/SOURCES/
@@ -318,34 +405,55 @@ jobs:
               cp /src/tools/ols_config_writer.c /root/rpmbuild/SOURCES/
               cp /src/tools/ols_config_writer.h /root/rpmbuild/SOURCES/
               cp /tmp/litehttpd-module-src.tar.gz /root/rpmbuild/SOURCES/
+              cp /tmp/third-party-src.tar.gz /root/rpmbuild/SOURCES/
+              cp /tmp/third-party-deps-src.tar.gz /root/rpmbuild/SOURCES/
+              cp /tmp/php-7.4.33.tar.gz /root/rpmbuild/SOURCES/
+              cp /tmp/php-litespeed-8.1.tgz /root/rpmbuild/SOURCES/
               # --noclean keeps BUILDROOT after packaging so the el8 leg can
               # assemble the binary tarballs from the install tree below.
-              rpmbuild -bb --noclean --define "_topdir /root/rpmbuild" \
+              rpmbuild -bb --noclean --with source_cache --define "_topdir /root/rpmbuild" \
                 --define "dist .${{ matrix.dist_tag }}" \
                 /src/packaging/openlitespeed-litehttpd.spec
               find /root/rpmbuild/RPMS -name "openlitespeed-litehttpd-*.rpm" ! -name "*debug*" \
                 -exec cp {} /output/ \;
               ls -lh /output/
 
-              # Verify all 4 patches are in the installed binary
-              BIN=/root/rpmbuild/BUILDROOT/*/usr/local/lsws/bin/openlitespeed
-              if ls $BIN 1>/dev/null 2>&1; then
-                P1=$(strings $BIN | grep -c "set_php_config_value")
-                P2=$(strings $BIN | grep -c "parse_rewrite_rules")
-                P3=$(strings $BIN | grep -c "readApacheConf")
-                P4=$(strings $BIN | grep -c "indexes_disabled")
-                echo "Patch verification: P1=$P1 P2=$P2 P3=$P3 P4=$P4"
-                [ "$P1" -ge 1 ] && [ "$P2" -ge 1 ] && [ "$P3" -ge 1 ] || \
-                  { echo "FATAL: Patches missing from RPM binary!"; exit 1; }
+              # Verify all patches and WebAdmin PHP in the installed tree.
+              LSWS="$(find /root/rpmbuild/BUILDROOT -path "*/usr/local/lsws" -type d -print -quit)"
+              [ -n "$LSWS" ] || { echo "FATAL: installed LSWS tree not found"; exit 1; }
+              BIN="$LSWS/bin/openlitespeed"
+              ADMINPHP="$LSWS/admin/fcgi-bin/admin_php"
+              LSPHP5="$LSWS/fcgi-bin/lsphp5"
+              [ -x "$BIN" ] || { echo "FATAL: openlitespeed binary missing from BUILDROOT"; exit 1; }
+              P1=$(strings "$BIN" | grep -c "set_php_config_value")
+              P2=$(strings "$BIN" | grep -c "parse_rewrite_rules")
+              P3=$(strings "$BIN" | grep -c "readApacheConf")
+              P4=$(strings "$BIN" | grep -c "indexes_disabled")
+              echo "Patch verification: P1=$P1 P2=$P2 P3=$P3 P4=$P4"
+              [ "$P1" -ge 1 ] && [ "$P2" -ge 1 ] && [ "$P3" -ge 1 ] && [ "$P4" -ge 1 ] || \
+                { echo "FATAL: Patches missing from RPM binary!"; exit 1; }
+              [ -x "$ADMINPHP" ] || { echo "FATAL: admin_php missing"; exit 1; }
+              [ -x "$LSPHP5" ] || { echo "FATAL: lsphp5 missing"; exit 1; }
+              "$ADMINPHP" -v 2>&1 | grep -q "PHP 7.4.33 (litespeed)" || \
+                { echo "FATAL: admin_php is not the locally built litespeed PHP"; exit 1; }
+              "$LSPHP5" -v >/dev/null 2>&1 || \
+                { echo "FATAL: bundled lsphp5 cannot run"; exit 1; }
+              if readelf -V "$ADMINPHP" 2>/dev/null | grep -Eq "GLIBC_2\\.(29|[3-9][0-9])"; then
+                echo "FATAL: admin_php requires GLIBC newer than EL8 provides"
+                readelf -V "$ADMINPHP" | grep -o "GLIBC_[0-9]\\+\\.[0-9]\\+" | sort -uV
+                exit 1
               fi
+              [ ! -e "$LSWS/adminpasswd" ] || \
+                { echo "FATAL: build-time WebAdmin password is included in BUILDROOT"; exit 1; }
+              [ ! -e "$LSWS/phpbuild" ] || \
+                { echo "FATAL: phpbuild source/build artifacts are included in BUILDROOT"; exit 1; }
 
               # ── (el8 leg only) Assemble binary tarballs from the install tree ──
               # The patched binary/module are identical across el8/el9/el10 legs
-              # (all built on almalinux:8), so build the dist-agnostic tarballs once.
+              # for a given CPU architecture, so build the dist-agnostic tarballs once.
               if [ "${{ matrix.dist_tag }}" = "el8" ]; then
                 OLSVER=$(grep "%global ols_version" /src/packaging/openlitespeed-litehttpd.spec | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
                 MODVER=$(grep "^Version:" /src/packaging/litehttpd.spec | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1)
-                LSWS=$(echo /root/rpmbuild/BUILDROOT/*/usr/local/lsws)
                 [ -d "$LSWS" ] || { echo "FATAL: install tree not found at $LSWS (BUILDROOT cleaned?)"; exit 1; }
                 PB="$LSWS/bin/openlitespeed"
                 MOD="$LSWS/modules/litehttpd_htaccess.so"
@@ -358,7 +466,9 @@ jobs:
                 cp -a "$LSWS/." "$ST/$FULL/lsws/"
                 echo TGZ > "$ST/$FULL/lsws/PLAT"
                 install -m 755 /src/packaging/tarball/install-full.sh "$ST/$FULL/install.sh"
-                tar czf /output/${FULL}-x86_64-linux.tgz -C $ST "$FULL"
+                tar czf /output/${FULL}-${ASSET_ARCH}-linux.tgz -C $ST "$FULL"
+                ! tar tzf /output/${FULL}-${ASSET_ARCH}-linux.tgz | grep -Eq "(^|/)adminpasswd$|(^|/)phpbuild(/|$)" || \
+                  { echo "FATAL: full tgz includes build-time password or PHP build artifacts"; exit 1; }
 
                 # 2) Overlay B: patched binary + module + installer (version-locked)
                 PATCH="litehttpd-ols-patch-${OLSVER}"
@@ -367,14 +477,14 @@ jobs:
                 install -m 755 "$MOD" "$ST/$PATCH/litehttpd_htaccess.so"
                 echo "$OLSVER" > "$ST/$PATCH/VERSION"
                 install -m 755 /src/packaging/tarball/install-patch.sh "$ST/$PATCH/install.sh"
-                tar czf /output/${PATCH}-x86_64-linux.tgz -C $ST "$PATCH"
+                tar czf /output/${PATCH}-${ASSET_ARCH}-linux.tgz -C $ST "$PATCH"
 
                 # 3) Overlay A: module only + installer (version-independent)
                 MODP="litehttpd-module-${MODVER}"
                 mkdir -p "$ST/$MODP"
                 install -m 755 "$MOD" "$ST/$MODP/litehttpd_htaccess.so"
                 install -m 755 /src/packaging/tarball/install-module.sh "$ST/$MODP/install.sh"
-                tar czf /output/${MODP}-x86_64-linux.tgz -C $ST "$MODP"
+                tar czf /output/${MODP}-${ASSET_ARCH}-linux.tgz -C $ST "$MODP"
 
                 echo "=== Tarballs built ==="; ls -lh /output/*.tgz
               fi
@@ -382,18 +492,28 @@ jobs:
 
       - name: Attach RPM to release
         run: |
+          uploaded=0
           for i in 1 2 3; do
-            gh release upload "$GITHUB_REF_NAME" output/openlitespeed-litehttpd-*.rpm --clobber && break
+            if gh release upload "$GITHUB_REF_NAME" output/openlitespeed-litehttpd-*.rpm --clobber; then
+              uploaded=1
+              break
+            fi
             echo "upload retry $i"; sleep $((i*5))
           done
+          [ "$uploaded" -eq 1 ]
 
       - name: Attach binary tarballs to release
         if: matrix.dist_tag == 'el8'
         run: |
+          uploaded=0
           for i in 1 2 3; do
-            gh release upload "$GITHUB_REF_NAME" output/*.tgz --clobber && break
+            if gh release upload "$GITHUB_REF_NAME" output/*.tgz --clobber; then
+              uploaded=1
+              break
+            fi
             echo "upload retry $i"; sleep $((i*5))
           done
+          [ "$uploaded" -eq 1 ]
 
   # ── Run tests ──────────────────────────────────────────────────────
   test:
@@ -407,8 +527,9 @@ jobs:
       - name: Build and test
         run: |
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
-          cmake --build build --parallel $(nproc)
-          ctest --test-dir build --output-on-failure --parallel $(nproc)
+          jobs="$(nproc)"
+          cmake --build build --parallel "$jobs"
+          ctest --test-dir build --output-on-failure --parallel "$jobs"
 
   # ── Publish RPM Repository to Cloudflare R2 ─────────────────────────
   # Pulls the (unsigned) RPMs straight from the release assets, signs them,
@@ -434,10 +555,14 @@ jobs:
           sudo apt-get update && sudo apt-get install -y createrepo-c rpm gnupg2
           pip install awscli
 
+      - name: Validate RPM repository inputs
+        run: REPO_REQUIRE_FULL_MATRIX=1 bash scripts/check-rpm-repo-dry-run.sh artifacts
+
       - name: Import GPG key and configure signing
         run: |
           # Import key into isolated GNUPGHOME
-          export GNUPGHOME=$(mktemp -d)
+          GNUPGHOME="$(mktemp -d)"
+          export GNUPGHOME
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
 
           # Configure gpg-agent for passphrase (avoids command-line exposure)
@@ -445,7 +570,7 @@ jobs:
           gpg-connect-agent reloadagent /bye 2>/dev/null || true
 
           # Save GNUPGHOME for subsequent steps
-          echo "GNUPGHOME=$GNUPGHOME" >> $GITHUB_ENV
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
 
           # Write passphrase to a temp file for gpg (avoids command-line exposure)
           echo "${{ secrets.GPG_PASSPHRASE }}" > "$GNUPGHOME/passphrase"
@@ -459,6 +584,8 @@ jobs:
 
       - name: Build repository structure
         run: |
+          set -euo pipefail
+
           # Feed passphrase to gpg-agent (once, not per-file)
           echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --pinentry-mode loopback --passphrase-fd 0 --sign --detach-sign /dev/null 2>/dev/null || true
 
@@ -470,37 +597,42 @@ jobs:
           # Sign all RPMs
           echo "=== Signing RPMs ==="
           for rpm_file in repo-staging/*.rpm; do
-            echo "Signing: $(basename $rpm_file)"
-            rpmsign --addsign "$rpm_file" 2>&1 | tail -1
+            echo "Signing: $(basename "$rpm_file")"
+            rpmsign --addsign "$rpm_file"
           done
 
-          # Create per-EL-version directories
+          # Create per-EL-version and per-architecture directories.
           for dist in el8 el9 el10; do
-            mkdir -p "repo/$dist/x86_64/RPMS"
-            cp repo-staging/*.$dist.*.rpm "repo/$dist/x86_64/RPMS/" 2>/dev/null || true
-            # Module RPM goes to el9 only (built on el9)
-            if [ "$dist" = "el9" ]; then
-              cp repo-staging/litehttpd-*.el9.*.rpm "repo/$dist/x86_64/RPMS/" 2>/dev/null || true
-            fi
-            # Generate repodata
-            createrepo_c "repo/$dist/x86_64/"
+            for arch in x86_64 aarch64; do
+              mkdir -p "repo/$dist/$arch/RPMS"
+              cp repo-staging/openlitespeed-litehttpd-*.$dist.$arch.rpm \
+                "repo/$dist/$arch/RPMS/" 2>/dev/null || true
+              # Module RPM is built for el9 only.
+              if [ "$dist" = "el9" ]; then
+                cp repo-staging/litehttpd-*.el9.$arch.rpm \
+                  "repo/$dist/$arch/RPMS/" 2>/dev/null || true
+              fi
+              # Generate repodata
+              createrepo_c "repo/$dist/$arch/"
 
-            # Sign repomd.xml (enables repo_gpgcheck=1 on client)
-            gpg --batch --yes --pinentry-mode loopback \
-              --passphrase-file "$GNUPGHOME/passphrase" \
-              --detach-sign --armor \
-              "repo/$dist/x86_64/repodata/repomd.xml"
+              # Sign repomd.xml (enables repo_gpgcheck=1 on client)
+              gpg --batch --yes --pinentry-mode loopback \
+                --passphrase-file "$GNUPGHOME/passphrase" \
+                --detach-sign --armor \
+                "repo/$dist/$arch/repodata/repomd.xml"
 
-            echo "Created repo: $dist/x86_64/ ($(ls repo/$dist/x86_64/RPMS/*.rpm 2>/dev/null | wc -l) RPMs)"
+              rpm_count="$(find "repo/$dist/$arch/RPMS" -maxdepth 1 -name '*.rpm' -type f | wc -l)"
+              echo "Created repo: $dist/$arch ($rpm_count RPMs)"
+            done
           done
 
           # Copy GPG public key and setup script to root
           cp packaging/RPM-GPG-KEY-litehttpd repo/
           cp packaging/setup-repo.sh repo/setup.sh
 
-          # Publish the binary tarballs at the repo root so they get a stable
-          # URL (https://rpms.litehttpd.com/<name>-x86_64-linux.tgz).
-          cp artifacts/*.tgz repo/ 2>/dev/null || true
+          # Publish the binary tarballs at the repo root so they get stable
+          # URLs (https://rpms.litehttpd.com/<name>-<arch>-linux.tgz).
+          find artifacts -maxdepth 1 -name '*.tgz' -type f -exec cp {} repo/ \;
 
           # Generate static index.html directory listings
           bash packaging/generate-index.sh repo
@@ -526,29 +658,46 @@ jobs:
 
   # ── Attach patches + checksums, then publish the release ───────────
   finalize-release:
-    needs: [build-module, build-rpm-module, build-rpm-ols, test]
+    needs: [build-module, build-rpm-module, build-rpm-ols, publish-rpm-repo, test]
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
 
+      - name: Install validation tools
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Attach patches, generate SHA256SUMS, publish
         run: |
           # Attach the OLS patches (from the repo, not a build artifact)
+          uploaded=0
           for i in 1 2 3; do
-            gh release upload "$GITHUB_REF_NAME" \
+            if gh release upload "$GITHUB_REF_NAME" \
               patches/0001-lsiapi-phpconfig.patch \
               patches/0002-lsiapi-rewrite.patch \
               patches/0003-readapacheconf.patch \
-              patches/0004-autoindex-403.patch --clobber && break
+              patches/0004-autoindex-403.patch --clobber; then
+              uploaded=1
+              break
+            fi
             echo "upload retry $i"; sleep $((i*5))
           done
+          [ "$uploaded" -eq 1 ]
 
           # Pull every asset back down and compute checksums over the full set
           mkdir -p rel
           gh release download "$GITHUB_REF_NAME" --dir rel
-          ( cd rel && rm -f SHA256SUMS && sha256sum * > SHA256SUMS )
+          RELEASE_REQUIRE_FULL_ARTIFACTS=1 bash scripts/check-release-artifacts.sh rel
+          (
+            cd rel
+            rm -f SHA256SUMS
+            tmp_sum="$(mktemp)"
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' |
+              sort -z |
+              xargs -0 sha256sum > "$tmp_sum"
+            mv "$tmp_sum" SHA256SUMS
+          )
           gh release upload "$GITHUB_REF_NAME" rel/SHA256SUMS --clobber
 
           # Publish (remove draft flag)

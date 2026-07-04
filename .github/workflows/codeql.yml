@@ -1,0 +1,48 @@
+name: CodeQL
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze C/C++
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y cmake g++ ninja-build
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: c-cpp
+          queries: +security-and-quality
+
+      - name: Build module and converter
+        run: |
+          cmake -B build-codeql -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=OFF
+          jobs="$(nproc)"
+          cmake --build build-codeql --parallel "$jobs" --target litehttpd_htaccess litehttpd-confconv
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:c-cpp'

@@ -9,6 +9,8 @@ lib/
 !integration-tests/lib/
 !integration-tests/lib/**
 !tests/e2e/lib/
+!tests/e2e/apps-matrix/lib/
+!tests/e2e/apps-matrix/lib/**
 *.o
 *.so
 *.a

@@ -33,6 +33,8 @@ foreach(_flag
     endif()
 endforeach()
 add_compile_options(${HARDENING_C_FLAGS})
+# Expose GNU libc extensions used by the module (for example strcasestr).
+add_compile_definitions(_GNU_SOURCE)
 # _FORTIFY_SOURCE requires optimization; only meaningful in non-Debug builds.
 add_compile_definitions($<$<NOT:$<CONFIG:Debug>>:_FORTIFY_SOURCE=2>)
 # Full RELRO + immediate binding and non-executable stack for all links.
@@ -40,6 +42,60 @@ add_link_options(-Wl,-z,relro,-z,now -Wl,-z,noexecstack)
 
 # Include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)
+
+# FilesMatch uses Apache-compatible PCRE syntax. Prefer a release-build static
+# PCRE2 root when provided by the RPM spec; otherwise use the host package.
+set(PCRE2_ROOT "" CACHE PATH "Prefix containing PCRE2 include/ and lib/")
+set(LITEHTTPD_PCRE2_INCLUDE_DIRS)
+set(LITEHTTPD_PCRE2_LIBRARIES)
+set(LITEHTTPD_PCRE2_LIBRARY_DIRS)
+set(LITEHTTPD_PCRE2_STATIC OFF)
+
+if(PCRE2_ROOT)
+    find_path(LITEHTTPD_PCRE2_INCLUDE_DIR
+        NAMES pcre2.h
+        PATHS "${PCRE2_ROOT}/include"
+        NO_DEFAULT_PATH)
+    find_library(LITEHTTPD_PCRE2_LIBRARY
+        NAMES pcre2-8 libpcre2-8.a
+        PATHS "${PCRE2_ROOT}/lib" "${PCRE2_ROOT}/lib64"
+        NO_DEFAULT_PATH)
+    if(NOT LITEHTTPD_PCRE2_INCLUDE_DIR OR NOT LITEHTTPD_PCRE2_LIBRARY)
+        message(FATAL_ERROR "PCRE2_ROOT=${PCRE2_ROOT} does not contain pcre2.h and libpcre2-8")
+    endif()
+    set(LITEHTTPD_PCRE2_INCLUDE_DIRS "${LITEHTTPD_PCRE2_INCLUDE_DIR}")
+    set(LITEHTTPD_PCRE2_LIBRARIES "${LITEHTTPD_PCRE2_LIBRARY}")
+    set(LITEHTTPD_PCRE2_STATIC ON)
+else()
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(PCRE2 QUIET libpcre2-8)
+    endif()
+    if(PCRE2_FOUND)
+        set(LITEHTTPD_PCRE2_INCLUDE_DIRS ${PCRE2_INCLUDE_DIRS})
+        set(LITEHTTPD_PCRE2_LIBRARIES ${PCRE2_LIBRARIES})
+        set(LITEHTTPD_PCRE2_LIBRARY_DIRS ${PCRE2_LIBRARY_DIRS})
+    else()
+        find_path(LITEHTTPD_PCRE2_INCLUDE_DIR NAMES pcre2.h)
+        find_library(LITEHTTPD_PCRE2_LIBRARY NAMES pcre2-8)
+        if(NOT LITEHTTPD_PCRE2_INCLUDE_DIR OR NOT LITEHTTPD_PCRE2_LIBRARY)
+            message(FATAL_ERROR "PCRE2 development files are required (libpcre2-8)")
+        endif()
+        set(LITEHTTPD_PCRE2_INCLUDE_DIRS "${LITEHTTPD_PCRE2_INCLUDE_DIR}")
+        set(LITEHTTPD_PCRE2_LIBRARIES "${LITEHTTPD_PCRE2_LIBRARY}")
+    endif()
+endif()
+
+function(litehttpd_link_pcre2 target_name)
+    target_include_directories(${target_name} PRIVATE ${LITEHTTPD_PCRE2_INCLUDE_DIRS})
+    if(LITEHTTPD_PCRE2_LIBRARY_DIRS)
+        target_link_directories(${target_name} PRIVATE ${LITEHTTPD_PCRE2_LIBRARY_DIRS})
+    endif()
+    target_link_libraries(${target_name} ${LITEHTTPD_PCRE2_LIBRARIES})
+    if(LITEHTTPD_PCRE2_STATIC)
+        target_compile_definitions(${target_name} PRIVATE PCRE2_STATIC)
+    endif()
+endfunction()
 
 # Explicitly list all C source files (preferred over GLOB for reliable builds)
 set(MODULE_SOURCES
@@ -80,6 +136,7 @@ if(MODULE_SOURCES)
     add_library(litehttpd_htaccess SHARED ${MODULE_SOURCES})
     target_include_directories(litehttpd_htaccess PUBLIC ${CMAKE_SOURCE_DIR}/include)
     target_compile_definitions(litehttpd_htaccess PRIVATE MNAME=litehttpd_htaccess)
+    litehttpd_link_pcre2(litehttpd_htaccess)
     target_link_libraries(litehttpd_htaccess crypt dl)
     set_target_properties(litehttpd_htaccess PROPERTIES
         OUTPUT_NAME "litehttpd_htaccess"
