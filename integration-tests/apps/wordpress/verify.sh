@@ -116,8 +116,9 @@ test_homepage() {
     case "$_LAST_STATUS_CODE" in
         200) ;;
         301|302)
-            grep -qi "^x-redirect-by: WordPress" <<< "$_LAST_RESPONSE_HEADERS"
-            return
+            local headers_lower="${_LAST_RESPONSE_HEADERS,,}"
+            [[ "$headers_lower" == *"x-redirect-by: wordpress"* ]]
+            return $?
             ;;
         *)
             assert_http_status "${APP_PATH}/index.php" 200 || return 1
