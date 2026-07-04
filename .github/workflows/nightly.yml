@@ -261,9 +261,6 @@ jobs:
           restore-keys: |
             apps-matrix-composer-${{ runner.os }}-
 
-      - name: Build apps-matrix fixture image
-        run: docker build -t apps-matrix-fixture -f tests/e2e/apps-matrix/Dockerfile.fixture .
-
       - name: Run apps-matrix full matrix
         env:
           MATRIX_OUT_DIR: ${{ runner.temp }}/apps-matrix-full/${{ matrix.scenario }}
