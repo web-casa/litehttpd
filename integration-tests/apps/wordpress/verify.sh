@@ -113,7 +113,10 @@ HTEOF
 
 test_homepage() {
     _fetch GET "${APP_CANONICAL_PATH}"
-    case "$_LAST_STATUS_CODE" in
+    local status="${_LAST_STATUS_CODE//$'\r'/}"
+    status="${status//$'\n'/}"
+    status="${status//[[:space:]]/}"
+    case "$status" in
         200) ;;
         301|302)
             # OLS can surface WordPress' canonical redirect for the app root;
