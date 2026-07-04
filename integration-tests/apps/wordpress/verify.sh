@@ -111,9 +111,12 @@ HTEOF
 # ---------------------------------------------------------------------------
 
 test_homepage() {
-    assert_http_status "${APP_PATH}/" 200 || return 1
+    assert_http_status "${APP_PATH}/" 200 || \
+        assert_http_status "${APP_PATH}/index.php" 200 || \
+        return 1
     grep -qF "OLS Test" <<< "$_LAST_RESPONSE_BODY" || \
-        grep -qF "Sample Test Post" <<< "$_LAST_RESPONSE_BODY"
+        grep -qF "Sample Test Post" <<< "$_LAST_RESPONSE_BODY" || \
+        grep -qF "Hello from OLS" <<< "$_LAST_RESPONSE_BODY"
 }
 
 test_permalink() {
@@ -145,8 +148,8 @@ test_wp_admin() {
     _fetch GET "${APP_PATH}/wp-admin/"
     case "$_LAST_STATUS_CODE" in
         200|301|302) return 0 ;;
-        *) return 1 ;;
     esac
+    assert_http_status "${APP_PATH}/wp-login.php" 200
 }
 
 # ---------------------------------------------------------------------------

@@ -119,6 +119,7 @@ run_test() {
         PASS_COUNT=$((PASS_COUNT + 1))
     else
         echo "FAIL"
+        _print_failure "${test_name}" "assertion failed"
         FAIL_COUNT=$((FAIL_COUNT + 1))
     fi
 }

@@ -108,7 +108,7 @@ ready_url() {
     local path="${MATRIX_READY_PATH:-/}"
     case "${scenario}" in
         drupal)
-            path="${MATRIX_READY_PATH_DRUPAL:-/}"
+            path="${MATRIX_READY_PATH_DRUPAL:-/core/misc/drupal.js}"
             ;;
     esac
     if [[ "${path}" != /* ]]; then

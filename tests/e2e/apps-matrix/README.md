@@ -108,8 +108,9 @@ Useful knobs:
   `/_probe/server.php`. Set this to `/` only when you intentionally want
   readiness to depend on the app homepage instead of the harness PHP probe.
 - `MATRIX_READY_PATH_DRUPAL`: Drupal-specific readiness probe path, default
-  `/`, because stock Drupal `.htaccess` denies non-whitelisted PHP files such
-  as `/_probe/server.php`.
+  `/core/misc/drupal.js`, because stock Drupal `.htaccess` denies
+  non-whitelisted PHP files such as `/_probe/server.php`, while the homepage can
+  depend on full Drupal PHP bootstrap.
 - `MATRIX_PER_ENGINE_BUDGET_MS`: optional per-request budget recorded in
   `performance.csv`
 - `MATRIX_ENFORCE_PERF_BUDGET=1`: fail cases that exceed
