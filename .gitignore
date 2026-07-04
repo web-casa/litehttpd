@@ -6,6 +6,8 @@ out/
 output/
 bin/
 lib/
+!integration-tests/lib/
+!integration-tests/lib/**
 !tests/e2e/lib/
 *.o
 *.so
