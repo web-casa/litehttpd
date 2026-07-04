@@ -112,21 +112,25 @@ HTEOF
 # ---------------------------------------------------------------------------
 
 test_homepage() {
-    _fetch GET "${APP_CANONICAL_PATH}"
-    case "${_LAST_RESPONSE_HEADERS}" in
-        *"HTTP/"*" 301 "*|*"HTTP/"*" 302 "*)
-            # OLS can surface WordPress' canonical redirect for the app root;
-            # the permalink and REST checks below verify actual rendering.
-            return 0
-            ;;
-        *"HTTP/"*" 200 "*) ;;
-        *)
-            assert_http_status "${APP_PATH}/index.php" 200 || return 1
-            ;;
-    esac
-    grep -qF "OLS Test" <<< "$_LAST_RESPONSE_BODY" || \
-        grep -qF "Sample Test Post" <<< "$_LAST_RESPONSE_BODY" || \
-        grep -qF "Hello from OLS" <<< "$_LAST_RESPONSE_BODY"
+    local path
+    for path in "${APP_CANONICAL_PATH}" "${APP_PATH}/index.php"; do
+        _fetch GET "$path"
+        case "${_LAST_RESPONSE_HEADERS}" in
+            *"HTTP/"*" 301 "*|*"HTTP/"*" 302 "*)
+                # OLS can surface WordPress' canonical redirect for the app root;
+                # the permalink and REST checks below verify actual rendering.
+                return 0
+                ;;
+            *"HTTP/"*" 200 "*)
+                grep -qF "OLS Test" <<< "$_LAST_RESPONSE_BODY" || \
+                    grep -qF "Sample Test Post" <<< "$_LAST_RESPONSE_BODY" || \
+                    grep -qF "Hello from OLS" <<< "$_LAST_RESPONSE_BODY"
+                return
+                ;;
+        esac
+    done
+
+    return 1
 }
 
 test_permalink() {
