@@ -113,9 +113,8 @@ HTEOF
 
 test_homepage() {
     _fetch GET "${APP_CANONICAL_PATH}"
-    local status="${_LAST_STATUS_CODE//$'\r'/}"
-    status="${status//$'\n'/}"
-    status="${status//[[:space:]]/}"
+    local status
+    status="$(printf '%s' "${_LAST_STATUS_CODE}" | tr -cd '0-9')"
     case "$status" in
         200) ;;
         301|302)
