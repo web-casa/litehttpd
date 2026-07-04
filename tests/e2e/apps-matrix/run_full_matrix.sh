@@ -373,6 +373,13 @@ run_scenario() {
         export MATRIX_APACHE_CONTAINER_DOCROOT="/var/www/html/public"
         export MATRIX_OLS_MODULE_CONTAINER_DOCROOT="/var/www/vhosts/localhost/html/public"
         export MATRIX_OLS_NATIVE_CONTAINER_DOCROOT="/var/www/vhosts/localhost/html/public"
+    elif [[ "${scenario}" == "drupal" ]]; then
+        export MATRIX_APACHE_DOCROOT="${MATRIX_APACHE_VOLUME_ROOT}/web"
+        export MATRIX_OLS_MODULE_DOCROOT="${MATRIX_OLS_MODULE_VOLUME_ROOT}/web"
+        export MATRIX_OLS_NATIVE_DOCROOT="${MATRIX_OLS_NATIVE_VOLUME_ROOT}/web"
+        export MATRIX_APACHE_CONTAINER_DOCROOT="/var/www/html/web"
+        export MATRIX_OLS_MODULE_CONTAINER_DOCROOT="/var/www/vhosts/localhost/html/web"
+        export MATRIX_OLS_NATIVE_CONTAINER_DOCROOT="/var/www/vhosts/localhost/html/web"
     fi
 
     matrix_banner "Apps Matrix Full Matrix: ${scenario}"

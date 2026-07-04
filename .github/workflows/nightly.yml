@@ -270,7 +270,7 @@ jobs:
           MATRIX_SCENARIO: ${{ matrix.scenario }}
           MATRIX_TIER: nightly
           MATRIX_FIXTURE_MODE: real
-          MATRIX_REAL_ALLOW_NETWORK: 1
+          MATRIX_REAL_ALLOW_NETWORK: 0
           MATRIX_REAL_DOWNLOAD_DIR: ${{ runner.temp }}/apps-matrix-cache/downloads
           MATRIX_REAL_RUN_APP_INSTALL: 0
           MATRIX_REAL_DEEP_CONFIG: 1

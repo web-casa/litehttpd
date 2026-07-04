@@ -38,11 +38,13 @@ matrix_real_docroot() {
     local fixture_root="${MATRIX_FIXTURE_ROOT:-${MATRIX_OUT_DIR}/fixtures/docroots}"
     if [[ -n "${!env_name:-}" ]]; then
         printf '%s\n' "${!env_name}"
-    elif [[ "${scenario}" == "laravel" ]]; then
-        printf '%s/%s/%s/public\n' "${fixture_root}" "${engine}" "${scenario}"
-    else
-        printf '%s/%s/%s\n' "${fixture_root}" "${engine}" "${scenario}"
+        return
     fi
+    case "${scenario}" in
+        laravel) printf '%s/%s/%s/public\n' "${fixture_root}" "${engine}" "${scenario}" ;;
+        drupal) printf '%s/%s/%s/web\n' "${fixture_root}" "${engine}" "${scenario}" ;;
+        *) printf '%s/%s/%s\n' "${fixture_root}" "${engine}" "${scenario}" ;;
+    esac
 }
 
 matrix_real_volume_root() {
@@ -55,11 +57,15 @@ matrix_real_volume_root() {
         return
     fi
     docroot="$(matrix_real_docroot "${engine}" "${scenario}")"
-    if [[ "${scenario}" == "laravel" && "${docroot}" == */public ]]; then
-        dirname "${docroot}"
-    else
-        printf '%s\n' "${docroot}"
-    fi
+    case "${scenario}" in
+        laravel|drupal)
+            case "${docroot}" in
+                */public|*/web) dirname "${docroot}" ;;
+                *) printf '%s\n' "${docroot}" ;;
+            esac
+            ;;
+        *) printf '%s\n' "${docroot}" ;;
+    esac
 }
 
 matrix_real_require_tool() {
@@ -1275,7 +1281,7 @@ matrix_real_source_docroot() {
     local scenario="$1"
     local source_dir="$2"
     case "${scenario}" in
-        laravel) printf '%s\n' "${source_dir}" ;;
+        laravel) printf '%s/public\n' "${source_dir}" ;;
         drupal) printf '%s/web\n' "${source_dir}" ;;
         *) printf '%s\n' "${source_dir}" ;;
     esac
@@ -1283,7 +1289,8 @@ matrix_real_source_docroot() {
 
 matrix_real_copy_to_engine_docroots() {
     local scenario="$1"
-    local source_docroot="$2"
+    local source_root="$2"
+    local source_docroot="$3"
     local engine docroot volume_root
     matrix_real_prepare_runtime_permissions "${scenario}" "${source_docroot}"
     while IFS= read -r engine; do
@@ -1291,7 +1298,7 @@ matrix_real_copy_to_engine_docroots() {
         volume_root="$(matrix_real_volume_root "${engine}" "${scenario}")"
         matrix_real_safe_clean_dir "${volume_root}"
         mkdir -p "${volume_root}"
-        cp -a "${source_docroot}/." "${volume_root}/"
+        cp -a "${source_root}/." "${volume_root}/"
         mkdir -p "${docroot}"
         matrix_real_normalize_engine_htaccess "${engine}" "${docroot}"
         matrix_real_prepare_engine_runtime_ownership "${scenario}" "${engine}" "${docroot}" "${volume_root}"
@@ -1644,7 +1651,7 @@ matrix_real_install_fixture() {
     matrix_real_install_source "${scenario}" "${source_dir}"
     source_docroot="$(matrix_real_source_docroot "${scenario}" "${source_dir}")"
     matrix_real_seed_common_php "${source_docroot}"
-    matrix_real_copy_to_engine_docroots "${scenario}" "${source_docroot}"
+    matrix_real_copy_to_engine_docroots "${scenario}" "${source_dir}" "${source_docroot}"
     matrix_real_write_app_config_manifests "${scenario}"
 
     python3 "${MATRIX_DIR}/lib/provision_fixture.py" \

@@ -37,6 +37,8 @@ def docroot_for(engine: str, scenario: str, fixture_root: Path) -> tuple[Path, b
         return Path(os.environ[env_name]).resolve(), True
     if scenario == "laravel":
         return (fixture_root / engine / scenario / "public").resolve(), False
+    if scenario == "drupal":
+        return (fixture_root / engine / scenario / "web").resolve(), False
     return (fixture_root / engine / scenario).resolve(), False
 
 
