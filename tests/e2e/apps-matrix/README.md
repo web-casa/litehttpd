@@ -299,6 +299,13 @@ packages by default (`litespeedtech/openlitespeed:1.9.1-lsphp82` with
 PHP from source. Full RPM/source compilation remains available for packaging
 validation, not for every app scenario.
 
+When the patched OLS image must be built locally, `tests/e2e/Dockerfile.custom-ols`
+defaults to `OLS_RPM_BUILD_MODE=build`. That mode stops after the RPM `%build`
+stage and copies the patched `openlitespeed` binary plus `litehttpd_htaccess.so`
+from `litehttpd-artifacts`, avoiding the WebAdmin `admin_php` compile that the
+runtime image does not copy. Use `--build-arg OLS_RPM_BUILD_MODE=package` only
+when intentionally exercising the full RPM `%install` path.
+
 Nightly consumes those images with `MATRIX_COMPOSE_BUILD=0`, so the 12 scenario
 jobs pull the same runtime images instead of rebuilding Apache and patched OLS
 independently. Manual Nightly dispatches expose `runtime_images_reuse_existing`;
@@ -386,6 +393,10 @@ Recent DO reality runs measured the patched OLS/RPM image build at roughly
 20 minutes by itself, including ModSecurity, third-party static libraries, and
 admin PHP. Treat that local-build path as a fallback or packaging validation
 path, not the default app-matrix verification path.
+Newer local patched-OLS runtime builds use the build-only RPM stage by default;
+that still compiles OLS and static third-party libraries, but skips WebAdmin PHP.
+The full package install path remains available with `OLS_RPM_BUILD_MODE=package`
+for release packaging validation.
 
 Prepared DigitalOcean snapshots can remove the VPS cold-start install cost:
 

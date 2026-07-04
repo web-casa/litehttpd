@@ -693,7 +693,10 @@ if [ -z "${LITEHTTPD_TP_DEPS_CACHE:-}" ]; then
         git submodule update --init --recursive --jobs 1
 fi
 CPPFLAGS="-fPIC ${CPPFLAGS:-}" ./configure --with-yajl=$PREFIX --with-maxmind=$PREFIX --disable-shared --enable-static --with-pcre2=$PREFIX --with-curl=$PREFIX --with-libxml=$PREFIX --with-lmdb=$PREFIX --with-lua=$PREFIX --disable-examples
-make -j"${LITEHTTPD_BUILD_JOBS:-$(nproc)}"
+# OLS only needs ModSecurity headers and the static library. Building the
+# top-level default target also compiles rules-check, benchmark, unit, and
+# regression binaries that are never packaged or used by the runtime image.
+make -C src -j"${LITEHTTPD_BUILD_JOBS:-$(nproc)}"
 
 cp -r headers/modsecurity ../../include/
 cp src/.libs/libmodsecurity.a ../../lib/

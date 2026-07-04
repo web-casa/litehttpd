@@ -4,8 +4,10 @@
 # 1. Create pinned Source10/13/11/12 caches for third-party deps, PHP, and LSAPI
 # 2. Create the OLS source tarball expected by packaging/openlitespeed-litehttpd.spec
 # 3. Create Source9 (litehttpd-module-src.tar.gz) from this checkout
-# 4. Run rpmbuild --noclean --with source_cache
-# 5. Copy the patched OLS binary and module from RPM BUILDROOT into the runtime image
+# 4. Run rpmbuild --noclean --with source_cache. By default the E2E runtime
+#    image stops after %build and copies the patched OLS binary/module from
+#    litehttpd-artifacts; set OLS_RPM_BUILD_MODE=package to exercise %install.
+# 5. Copy the patched OLS binary and module into the runtime image.
 #
 # Usage:
 #   docker build -f tests/e2e/Dockerfile.custom-ols -t ols-custom .
@@ -18,6 +20,7 @@ FROM ${RPM_BASE_IMAGE} AS ols-builder
 ARG OLS_VERSION=1.9.1
 ARG RPM_DIST=.el8
 ARG OLS_BUILD_JOBS=2
+ARG OLS_RPM_BUILD_MODE=build
 ARG ALMA_REPO_MIRROR=""
 
 WORKDIR /src/litehttpd
@@ -111,20 +114,32 @@ RUN set -eux; \
     cp /tmp/php-7.4.33.tar.gz /root/rpmbuild/SOURCES/; \
     cp /tmp/php-litespeed-8.1.tgz /root/rpmbuild/SOURCES/; \
     export LITEHTTPD_BUILD_JOBS="${OLS_BUILD_JOBS}"; \
-    bash -o pipefail -c 'rpmbuild -bb --noclean \
+    case "${OLS_RPM_BUILD_MODE}" in \
+      build) rpm_build_action="-bc" ;; \
+      package) rpm_build_action="-bb" ;; \
+      *) echo "FATAL: OLS_RPM_BUILD_MODE must be build or package" >&2; exit 1 ;; \
+    esac; \
+    bash -o pipefail -c 'rpmbuild "$1" --noclean \
       --with source_cache \
       --define "_topdir /root/rpmbuild" \
       --define "dist ${RPM_DIST}" \
       /src/litehttpd/packaging/openlitespeed-litehttpd.spec 2>&1 \
       | sed -u -E \
           -e "s/(Your webAdmin password is )[^,]+/\\1<redacted>/" \
-          -e "s/(Admin:[^[:space:]]+[[:space:]]+Password:)[^[:space:]]+/\\1<redacted>/"'; \
-    LSWS="$(find /root/rpmbuild/BUILDROOT -path '*/usr/local/lsws' -type d -print -quit)"; \
-    test -n "$LSWS"; \
-    test ! -e "$LSWS/adminpasswd"; \
-    test ! -e "$LSWS/phpbuild"; \
-    PB="$LSWS/bin/openlitespeed"; \
-    MOD="$LSWS/modules/litehttpd_htaccess.so"; \
+          -e "s/(Admin:[^[:space:]]+[[:space:]]+Password:)[^[:space:]]+/\\1<redacted>/"' \
+      -- "$rpm_build_action"; \
+    ART_DIR="/root/rpmbuild/BUILD/litehttpd-artifacts"; \
+    if [ "${OLS_RPM_BUILD_MODE}" = package ]; then \
+      LSWS="$(find /root/rpmbuild/BUILDROOT -path '*/usr/local/lsws' -type d -print -quit)"; \
+      test -n "$LSWS"; \
+      test ! -e "$LSWS/adminpasswd"; \
+      test ! -e "$LSWS/phpbuild"; \
+      PB="$LSWS/bin/openlitespeed"; \
+      MOD="$LSWS/modules/litehttpd_htaccess.so"; \
+    else \
+      PB="$ART_DIR/openlitespeed-patched"; \
+      MOD="$ART_DIR/litehttpd_htaccess.so"; \
+    fi; \
     test -x "$PB"; \
     test -f "$MOD"; \
     strings "$PB" | grep -q 'litehttpd_lsiapi_extensions_v1'; \
@@ -132,13 +147,15 @@ RUN set -eux; \
     strings "$PB" | grep -q 'parse_rewrite_rules'; \
     strings "$PB" | grep -q 'readApacheConf'; \
     strings "$PB" | grep -q 'indexes_disabled'; \
-    ADMINPHP="$LSWS/admin/fcgi-bin/admin_php"; \
-    LSPHP5="$LSWS/fcgi-bin/lsphp5"; \
-    test -x "$ADMINPHP"; \
-    test -x "$LSPHP5"; \
-    "$ADMINPHP" -v 2>&1 | grep -q 'PHP 7.4.33 (litespeed)'; \
-    "$LSPHP5" -v >/dev/null 2>&1; \
-    ! readelf -V "$ADMINPHP" 2>/dev/null | grep -Eq 'GLIBC_2\.(29|[3-9][0-9])'; \
+    if [ "${OLS_RPM_BUILD_MODE}" = package ]; then \
+      ADMINPHP="$LSWS/admin/fcgi-bin/admin_php"; \
+      LSPHP5="$LSWS/fcgi-bin/lsphp5"; \
+      test -x "$ADMINPHP"; \
+      test -x "$LSPHP5"; \
+      "$ADMINPHP" -v 2>&1 | grep -q 'PHP 7.4.33 (litespeed)'; \
+      "$LSPHP5" -v >/dev/null 2>&1; \
+      ! readelf -V "$ADMINPHP" 2>/dev/null | grep -Eq 'GLIBC_2\.(29|[3-9][0-9])'; \
+    fi; \
     mkdir -p /opt/ols-install/usr/local/lsws/bin \
              /opt/ols-install/usr/local/lsws/modules; \
     install -m 755 "$PB" /opt/ols-install/usr/local/lsws/bin/openlitespeed; \

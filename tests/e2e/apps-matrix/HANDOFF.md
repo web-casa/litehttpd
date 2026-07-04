@@ -98,6 +98,13 @@ also includes module compatibility fixes that were exposed by real CMS runs.
   because real Drupal consumes clean URLs through its own router.
 - module parsing/execution now covers Drupal-style `FallbackResource /index.php`
   and Apache `Header onsuccess ...` syntax observed in stock CMS `.htaccess`
+- patched OLS runtime Docker builds default to `OLS_RPM_BUILD_MODE=build`, which
+  stops after `%build` and copies the patched OLS binary/module from
+  `litehttpd-artifacts`; use `OLS_RPM_BUILD_MODE=package` only for full RPM
+  `%install` validation
+- ModSecurity source builds now target only the `src` static library needed by
+  OLS packaging/runtime images, instead of compiling unused rules-check,
+  benchmark, unit, and regression binaries
 
 ## Release-Gate Operating Plan
 
@@ -119,6 +126,9 @@ also includes module compatibility fixes that were exposed by real CMS runs.
      `0` only when a tag must be deliberately refreshed
    - run heavy workflow or DO with `MATRIX_COMPOSE_BUILD=0` and
      `MATRIX_APACHE_IMAGE=<image>` plus `MATRIX_OLS_MODULE_IMAGE=<image>`
+   - if local patched-OLS image builds are unavoidable, keep the default
+     `OLS_RPM_BUILD_MODE=build`; reserve `OLS_RPM_BUILD_MODE=package` for
+     release packaging checks that need WebAdmin `admin_php`
    - use prepared DO snapshots with `APPS_MATRIX_DO_SKIP_DEP_INSTALL=1` for
      release-gate reality checks that do not need cold-start package install
    - keep DO VPS tests focused on release-gate reality checks
