@@ -59,17 +59,6 @@ install_laravel() {
         php artisan migrate --force 2>/dev/null || true
     "
 
-    # Deploy .htaccess to laravel root (rewrite to public/)
-    # NOTE: RewriteEngine/Rule/Cond handled by OLS native rewrite, not litehttpd
-    deploy_htaccess "$(cat <<'HTEOF'
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteRule ^public(/.*)?$ - [L]
-    RewriteRule ^(.*)$ public/$1 [L]
-</IfModule>
-HTEOF
-)" "laravel"
-
     # Deploy .htaccess to laravel/public/
     deploy_htaccess "$(cat <<'HTEOF'
 <IfModule mod_rewrite.c>
