@@ -65,15 +65,21 @@ also includes module compatibility fixes that were exposed by real CMS runs.
   `MATRIX_APACHE_IMAGE`, and `MATRIX_OLS_MODULE_IMAGE`
 - heavy workflow one-shot GHCR runtime image builds with BuildKit cache, so
   scenario jobs can pull the same Apache and patched `ols_module` images instead
-  of compiling them independently
+  of compiling them independently; repeated runs can skip existing one-shot tags
+  through `runtime_images_reuse_existing=1`
 - reusable runtime-image workflow in
   `.github/workflows/apps-matrix-runtime-images.yml` for per-SHA Apache and
   patched `ols_module` GHCR images
+- runtime-image workflow builds Apache and patched OLS images in parallel and
+  skips rebuilding already-published GHCR tags by default through
+  `reuse_existing=1`
 - nightly apps-matrix jobs consume shared runtime images with
-  `MATRIX_COMPOSE_BUILD=0`
+  `MATRIX_COMPOSE_BUILD=0` and expose `runtime_images_reuse_existing` for
+  deliberate manual tag refreshes
 - DO release-gate workflow in `.github/workflows/apps-matrix-do-release-gate.yml`
   runs disposable VPS validation with prebuilt runtime images instead of remote
-  Docker builds
+  Docker builds, and exposes the same runtime-image reuse switch for direct
+  dispatches
 - DO VPS runner registry login and pre-pull support for private prebuilt
   Apache and `ols_module` images
 - DO VPS runner can skip remote dependency installation when using a prepared
@@ -109,6 +115,8 @@ also includes module compatibility fixes that were exposed by real CMS runs.
 3. Keep runtime realistic without rebuilding the world
    - publish or let the reusable runtime-image workflow prebuild Apache and
      patched OLS runtime images
+   - rely on `reuse_existing=1` for reruns of the same SHA/tag, and set it to
+     `0` only when a tag must be deliberately refreshed
    - run heavy workflow or DO with `MATRIX_COMPOSE_BUILD=0` and
      `MATRIX_APACHE_IMAGE=<image>` plus `MATRIX_OLS_MODULE_IMAGE=<image>`
    - use prepared DO snapshots with `APPS_MATRIX_DO_SKIP_DEP_INSTALL=1` for

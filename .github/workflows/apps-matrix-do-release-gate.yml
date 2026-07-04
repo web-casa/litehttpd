@@ -59,6 +59,11 @@ on:
         required: false
         type: string
         default: ""
+      runtime_images_reuse_existing:
+        description: "Set to 0 to force-refresh apps-matrix runtime images"
+        required: false
+        type: string
+        default: "1"
       apache_image:
         description: "Optional prebuilt Apache runtime image. When set with ols_module_image, skips the runtime image build job."
         required: false
@@ -112,6 +117,10 @@ on:
         description: "Runtime image tag. Defaults to the commit SHA"
         required: false
         default: ""
+      runtime_images_reuse_existing:
+        description: "Set to 0 to force-refresh apps-matrix runtime images"
+        required: false
+        default: "1"
       apache_image:
         description: "Optional prebuilt Apache runtime image. When set with ols_module_image, skips the runtime image build job."
         required: false
@@ -137,6 +146,7 @@ jobs:
       image_tag: ${{ inputs.image_tag || github.sha }}
       extra_tag: release-gate
       push_images: "1"
+      reuse_existing: ${{ inputs.runtime_images_reuse_existing }}
 
   do-release-gate:
     needs: apps-matrix-runtime-images

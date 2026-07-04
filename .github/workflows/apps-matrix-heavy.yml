@@ -70,6 +70,10 @@ on:
         description: "Set to 1 to build and reuse one GHCR ols_module image for this run"
         required: false
         default: "1"
+      runtime_images_reuse_existing:
+        description: "Set to 0 to force-refresh one-shot prebuilt runtime images"
+        required: false
+        default: "1"
 
 jobs:
   validate-inputs:
@@ -94,6 +98,7 @@ jobs:
           OLS_MODULE_IMAGE: ${{ inputs.ols_module_image }}
           PREBUILD_APACHE_IMAGE: ${{ inputs.prebuild_apache_image }}
           PREBUILD_OLS_MODULE_IMAGE: ${{ inputs.prebuild_ols_module_image }}
+          RUNTIME_IMAGES_REUSE_EXISTING: ${{ inputs.runtime_images_reuse_existing }}
         run: |
           case "${REQUESTED_PHASE}" in
             all|split|install) ;;
@@ -146,6 +151,10 @@ jobs:
           case "${PREBUILD_OLS_MODULE_IMAGE}" in
             0|1) ;;
             *) echo "Unsupported prebuild_ols_module_image: ${PREBUILD_OLS_MODULE_IMAGE}" >&2; exit 1 ;;
+          esac
+          case "${RUNTIME_IMAGES_REUSE_EXISTING}" in
+            0|1) ;;
+            *) echo "Unsupported runtime_images_reuse_existing: ${RUNTIME_IMAGES_REUSE_EXISTING}" >&2; exit 1 ;;
           esac
           if [ -n "${APACHE_IMAGE}" ] && ! printf '%s' "${APACHE_IMAGE}" | grep -Eq '^[A-Za-z0-9._:@/-]+$'; then
             echo "Unsupported apache_image characters" >&2
@@ -219,9 +228,6 @@ jobs:
             echo "should_build_ols_module=${should_build_ols_module}"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v5
-        if: steps.resolve.outputs.should_build_apache == '1' || steps.resolve.outputs.should_build_ols_module == '1'
-
       - uses: docker/setup-buildx-action@v4
         if: steps.resolve.outputs.should_build_apache == '1' || steps.resolve.outputs.should_build_ols_module == '1'
 
@@ -232,9 +238,41 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check existing runtime image tags
+        id: existing
+        if: steps.resolve.outputs.should_build_apache == '1' || steps.resolve.outputs.should_build_ols_module == '1'
+        env:
+          REUSE_EXISTING: ${{ inputs.runtime_images_reuse_existing }}
+          SHOULD_BUILD_APACHE: ${{ steps.resolve.outputs.should_build_apache }}
+          SHOULD_BUILD_OLS_MODULE: ${{ steps.resolve.outputs.should_build_ols_module }}
+          APACHE_IMAGE: ${{ steps.resolve.outputs.apache_image }}
+          OLS_MODULE_IMAGE: ${{ steps.resolve.outputs.ols_module_image }}
+        run: |
+          apache_exists=0
+          ols_module_exists=0
+          if [ "${REUSE_EXISTING}" = "1" ]; then
+            if [ "${SHOULD_BUILD_APACHE}" = "1" ] && docker buildx imagetools inspect "${APACHE_IMAGE}" >/dev/null 2>&1; then
+              apache_exists=1
+            fi
+            if [ "${SHOULD_BUILD_OLS_MODULE}" = "1" ] && docker buildx imagetools inspect "${OLS_MODULE_IMAGE}" >/dev/null 2>&1; then
+              ols_module_exists=1
+            fi
+          fi
+          echo "apache_exists=${apache_exists}" >> "$GITHUB_OUTPUT"
+          echo "ols_module_exists=${ols_module_exists}" >> "$GITHUB_OUTPUT"
+          if [ "${SHOULD_BUILD_APACHE}" = "1" ] && [ "${apache_exists}" = "1" ]; then
+            echo "Reusing existing one-shot Apache runtime image."
+          fi
+          if [ "${SHOULD_BUILD_OLS_MODULE}" = "1" ] && [ "${ols_module_exists}" = "1" ]; then
+            echo "Reusing existing one-shot OLS module runtime image."
+          fi
+
+      - uses: actions/checkout@v5
+        if: (steps.resolve.outputs.should_build_apache == '1' && steps.existing.outputs.apache_exists != '1') || (steps.resolve.outputs.should_build_ols_module == '1' && steps.existing.outputs.ols_module_exists != '1')
+
       - name: Build Apache runtime image
         uses: docker/build-push-action@v7
-        if: steps.resolve.outputs.should_build_apache == '1'
+        if: steps.resolve.outputs.should_build_apache == '1' && steps.existing.outputs.apache_exists != '1'
         with:
           context: .
           file: tests/e2e/apps-matrix/Dockerfile.apache-runtime
@@ -248,7 +286,7 @@ jobs:
 
       - name: Build OLS module runtime image
         uses: docker/build-push-action@v7
-        if: steps.resolve.outputs.should_build_ols_module == '1'
+        if: steps.resolve.outputs.should_build_ols_module == '1' && steps.existing.outputs.ols_module_exists != '1'
         with:
           context: .
           file: tests/e2e/Dockerfile.custom-ols

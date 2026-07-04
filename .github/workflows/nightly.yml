@@ -31,6 +31,10 @@ on:
         description: "Set to 1 to keep running remaining scenarios after a failure"
         required: false
         default: "0"
+      runtime_images_reuse_existing:
+        description: "Set to 0 to force-refresh apps-matrix runtime images"
+        required: false
+        default: "1"
 
 jobs:
   apps-matrix-runtime-images:
@@ -43,6 +47,7 @@ jobs:
       image_tag: ${{ github.sha }}
       extra_tag: nightly
       push_images: "1"
+      reuse_existing: ${{ inputs.runtime_images_reuse_existing || '1' }}
 
   # ── Sanitizer + Fuzz ──────────────────────────────────────────────
   fuzz:
@@ -335,6 +340,7 @@ jobs:
       artifact_mode: summary
       enforce_budgets: "0"
       image_tag: ${{ github.sha }}
+      runtime_images_reuse_existing: ${{ inputs.runtime_images_reuse_existing || '1' }}
       apache_image: ${{ needs.apps-matrix-runtime-images.outputs.apache_image }}
       ols_module_image: ${{ needs.apps-matrix-runtime-images.outputs.ols_module_image }}
 

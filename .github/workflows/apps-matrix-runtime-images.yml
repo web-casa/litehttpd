@@ -35,13 +35,18 @@ on:
         required: false
         type: string
         default: "litespeedtech/openlitespeed:1.9.1-lsphp82"
+      reuse_existing:
+        description: "Set to 1 to skip building when all requested GHCR tags already exist."
+        required: false
+        type: string
+        default: "1"
     outputs:
       apache_image:
         description: "Primary Apache runtime image reference."
-        value: ${{ jobs.build.outputs.apache_image }}
+        value: ${{ jobs.refs.outputs.apache_image }}
       ols_module_image:
         description: "Primary patched OLS runtime image reference."
-        value: ${{ jobs.build.outputs.ols_module_image }}
+        value: ${{ jobs.refs.outputs.ols_module_image }}
 
   workflow_dispatch:
     inputs:
@@ -65,18 +70,28 @@ on:
         description: "Base OpenLiteSpeed runtime image that already contains LiteSpeed repos."
         required: false
         default: "litespeedtech/openlitespeed:1.9.1-lsphp82"
+      reuse_existing:
+        description: "Set to 1 to skip building when all requested GHCR tags already exist."
+        required: false
+        default: "1"
 
 jobs:
-  build:
+  refs:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 10
     outputs:
       apache_image: ${{ steps.refs.outputs.apache_image }}
       ols_module_image: ${{ steps.refs.outputs.ols_module_image }}
+      apache_extra_image: ${{ steps.refs.outputs.apache_extra_image }}
+      ols_module_extra_image: ${{ steps.refs.outputs.ols_module_extra_image }}
+      apache_tags: ${{ steps.refs.outputs.apache_tags }}
+      ols_module_tags: ${{ steps.refs.outputs.ols_module_tags }}
+      push: ${{ steps.refs.outputs.push }}
+      reuse_existing: ${{ steps.refs.outputs.reuse_existing }}
+      lsphp_version: ${{ steps.refs.outputs.lsphp_version }}
+      ols_runtime_image: ${{ steps.refs.outputs.ols_runtime_image }}
 
     steps:
-      - uses: actions/checkout@v5
-
       - name: Resolve image references
         id: refs
         env:
@@ -87,10 +102,15 @@ jobs:
           PUSH_IMAGES: ${{ inputs.push_images }}
           LSPHP_VERSION: ${{ inputs.lsphp_version }}
           OLS_RUNTIME_IMAGE: ${{ inputs.ols_runtime_image }}
+          REUSE_EXISTING: ${{ inputs.reuse_existing }}
         run: |
           case "${PUSH_IMAGES}" in
             0|1) ;;
             *) echo "Unsupported push_images: ${PUSH_IMAGES}" >&2; exit 1 ;;
+          esac
+          case "${REUSE_EXISTING}" in
+            0|1) ;;
+            *) echo "Unsupported reuse_existing: ${REUSE_EXISTING}" >&2; exit 1 ;;
           esac
           case "${LSPHP_VERSION}" in
             auto|[0-9][0-9]) ;;
@@ -116,63 +136,159 @@ jobs:
           repo="$(printf '%s' "${REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           apache_primary="ghcr.io/${repo}/apps-matrix-apache-runtime:${tag}"
           ols_primary="ghcr.io/${repo}/apps-matrix-ols-module:${tag}"
+          apache_extra=""
+          ols_extra=""
+          if [ -n "${extra_tag}" ]; then
+            apache_extra="ghcr.io/${repo}/apps-matrix-apache-runtime:${extra_tag}"
+            ols_extra="ghcr.io/${repo}/apps-matrix-ols-module:${extra_tag}"
+          fi
 
           {
             echo "push=${PUSH_IMAGES}"
+            echo "reuse_existing=${REUSE_EXISTING}"
             echo "lsphp_version=${LSPHP_VERSION}"
             echo "ols_runtime_image=${OLS_RUNTIME_IMAGE}"
             echo "apache_image=${apache_primary}"
             echo "ols_module_image=${ols_primary}"
+            echo "apache_extra_image=${apache_extra}"
+            echo "ols_module_extra_image=${ols_extra}"
             echo "apache_tags<<EOF"
             echo "${apache_primary}"
-            if [ -n "${extra_tag}" ]; then
-              echo "ghcr.io/${repo}/apps-matrix-apache-runtime:${extra_tag}"
+            if [ -n "${apache_extra}" ]; then
+              echo "${apache_extra}"
             fi
             echo "EOF"
             echo "ols_module_tags<<EOF"
             echo "${ols_primary}"
-            if [ -n "${extra_tag}" ]; then
-              echo "ghcr.io/${repo}/apps-matrix-ols-module:${extra_tag}"
+            if [ -n "${ols_extra}" ]; then
+              echo "${ols_extra}"
             fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+  apache:
+    needs: refs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
       - uses: docker/setup-buildx-action@v4
 
       - uses: docker/login-action@v4
-        if: steps.refs.outputs.push == '1'
+        if: needs.refs.outputs.push == '1'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Check existing Apache runtime image
+        id: existing
+        env:
+          PUSH_IMAGES: ${{ needs.refs.outputs.push }}
+          REUSE_EXISTING: ${{ needs.refs.outputs.reuse_existing }}
+          PRIMARY_IMAGE: ${{ needs.refs.outputs.apache_image }}
+          EXTRA_IMAGE: ${{ needs.refs.outputs.apache_extra_image }}
+        run: |
+          exists=0
+          if [ "${PUSH_IMAGES}" = "1" ] && [ "${REUSE_EXISTING}" = "1" ]; then
+            exists=1
+            for image in "${PRIMARY_IMAGE}" "${EXTRA_IMAGE}"; do
+              [ -n "${image}" ] || continue
+              if ! docker buildx imagetools inspect "${image}" >/dev/null 2>&1; then
+                exists=0
+                break
+              fi
+            done
+          fi
+          echo "exists=${exists}" >> "$GITHUB_OUTPUT"
+          if [ "${exists}" = "1" ]; then
+            echo "Reusing existing Apache runtime image tags."
+          else
+            echo "Apache runtime image build is required."
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.existing.outputs.exists != '1'
+
       - name: Build Apache runtime image
         uses: docker/build-push-action@v7
+        if: steps.existing.outputs.exists != '1'
         with:
           context: .
           file: tests/e2e/apps-matrix/Dockerfile.apache-runtime
-          push: ${{ steps.refs.outputs.push == '1' }}
-          load: ${{ steps.refs.outputs.push != '1' }}
-          tags: ${{ steps.refs.outputs.apache_tags }}
+          push: ${{ needs.refs.outputs.push == '1' }}
+          load: ${{ needs.refs.outputs.push != '1' }}
+          tags: ${{ needs.refs.outputs.apache_tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=apps-matrix-apache-runtime
           cache-to: type=gha,mode=max,scope=apps-matrix-apache-runtime
 
+  ols-module:
+    needs: refs
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        if: needs.refs.outputs.push == '1'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check existing patched OLS runtime image
+        id: existing
+        env:
+          PUSH_IMAGES: ${{ needs.refs.outputs.push }}
+          REUSE_EXISTING: ${{ needs.refs.outputs.reuse_existing }}
+          PRIMARY_IMAGE: ${{ needs.refs.outputs.ols_module_image }}
+          EXTRA_IMAGE: ${{ needs.refs.outputs.ols_module_extra_image }}
+        run: |
+          exists=0
+          if [ "${PUSH_IMAGES}" = "1" ] && [ "${REUSE_EXISTING}" = "1" ]; then
+            exists=1
+            for image in "${PRIMARY_IMAGE}" "${EXTRA_IMAGE}"; do
+              [ -n "${image}" ] || continue
+              if ! docker buildx imagetools inspect "${image}" >/dev/null 2>&1; then
+                exists=0
+                break
+              fi
+            done
+          fi
+          echo "exists=${exists}" >> "$GITHUB_OUTPUT"
+          if [ "${exists}" = "1" ]; then
+            echo "Reusing existing patched OLS runtime image tags."
+          else
+            echo "Patched OLS runtime image build is required."
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.existing.outputs.exists != '1'
+
       - name: Build patched OLS runtime image
         uses: docker/build-push-action@v7
+        if: steps.existing.outputs.exists != '1'
         with:
           context: .
           file: tests/e2e/Dockerfile.custom-ols
-          push: ${{ steps.refs.outputs.push == '1' }}
-          load: ${{ steps.refs.outputs.push != '1' }}
-          tags: ${{ steps.refs.outputs.ols_module_tags }}
+          push: ${{ needs.refs.outputs.push == '1' }}
+          load: ${{ needs.refs.outputs.push != '1' }}
+          tags: ${{ needs.refs.outputs.ols_module_tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
-            APPS_MATRIX_LSPHP_VERSION=${{ steps.refs.outputs.lsphp_version }}
-            OLS_RUNTIME_IMAGE=${{ steps.refs.outputs.ols_runtime_image }}
+            APPS_MATRIX_LSPHP_VERSION=${{ needs.refs.outputs.lsphp_version }}
+            OLS_RUNTIME_IMAGE=${{ needs.refs.outputs.ols_runtime_image }}
           cache-from: type=gha,scope=apps-matrix-ols-module
           cache-to: type=gha,mode=max,scope=apps-matrix-ols-module
