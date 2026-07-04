@@ -340,22 +340,29 @@ jobs:
 
   # ── Integration Tests: 4 PHP Apps (moved from ci.yml) ─────────────
   integration-tests:
+    needs: apps-matrix-runtime-images
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: read
+    env:
+      OLS_INTEGRATION_IMAGE: ${{ needs.apps-matrix-runtime-images.outputs.ols_module_image }}
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install build deps
-        run: sudo apt-get update && sudo apt-get install -y cmake g++ libpcre2-dev ninja-build pkg-config
-
-      - name: Build module
-        run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-          cmake --build build --parallel "$(nproc)" --target litehttpd_htaccess
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start integration test stack
-        run: docker compose -f integration-tests/docker-compose.yml up -d --build
+        run: |
+          test -n "${OLS_INTEGRATION_IMAGE}"
+          docker pull "${OLS_INTEGRATION_IMAGE}"
+          docker compose -f integration-tests/docker-compose.prebuilt.yml up -d --no-build
 
       - name: Wait for services
         run: |
@@ -396,8 +403,8 @@ jobs:
         if: failure()
         run: |
           docker exec ols-integ cat /usr/local/lsws/logs/error.log 2>/dev/null | tail -100 || true
-          docker compose -f integration-tests/docker-compose.yml logs --tail=50 || true
+          docker compose -f integration-tests/docker-compose.prebuilt.yml logs --tail=50 || true
 
       - name: Cleanup
         if: always()
-        run: docker compose -f integration-tests/docker-compose.yml down -v
+        run: docker compose -f integration-tests/docker-compose.prebuilt.yml down -v
