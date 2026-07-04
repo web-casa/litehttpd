@@ -178,6 +178,37 @@ lsi_session_t *MockSession::handle() {
 
 extern "C" {
 
+int lsiapi_has_custom_extensions(void) {
+    return 0;
+}
+
+int lsiapi_has_php_config_extensions(void) {
+    return 0;
+}
+
+int lsiapi_has_rewrite_extensions(void) {
+    return 0;
+}
+
+void *lsiapi_parse_rewrite_rules(const char *rules_text, int text_len) {
+    (void)rules_text;
+    (void)text_len;
+    return nullptr;
+}
+
+int lsiapi_exec_rewrite_rules(lsi_session_t *session, void *handle,
+                              const char *base, int base_len) {
+    (void)session;
+    (void)handle;
+    (void)base;
+    (void)base_len;
+    return -1;
+}
+
+void lsiapi_free_rewrite_rules(void *handle) {
+    (void)handle;
+}
+
 /* ---- Request headers ---- */
 
 const char *lsi_session_get_req_header_by_name(lsi_session_t *session,

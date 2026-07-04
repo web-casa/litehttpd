@@ -571,8 +571,7 @@ static int mod_htaccess_init(lsi_module_t *module)
      * not via lsi_register_hook() calls.  OLS reads the array at load time. */
 
     /* Detect RewriteRule support (requires custom OLS with rewrite patch) */
-    if (g_api && g_api->parse_rewrite_rules && g_api->exec_rewrite_rules &&
-        g_api->free_rewrite_rules) {
+    if (lsiapi_has_rewrite_extensions()) {
         lsi_log(NULL, LSI_LOG_INFO,
                 "mod_htaccess: RewriteRule support enabled (custom OLS detected)");
     } else {
@@ -582,7 +581,7 @@ static int mod_htaccess_init(lsi_module_t *module)
     }
 
     /* Detect PHPConfig support */
-    if (g_api && g_api->set_php_config_value) {
+    if (lsiapi_has_php_config_extensions()) {
         lsi_log(NULL, LSI_LOG_INFO,
                 "mod_htaccess: PHPConfig native API enabled (custom OLS detected)");
     } else {

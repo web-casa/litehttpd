@@ -25,7 +25,7 @@
      int appendUnparsedRule(AutoStr2 &sDirective, char *pBegin,
 --- a/src/lsiapi/lsiapilib.cpp
 +++ b/src/lsiapi/lsiapilib.cpp
-@@ -38,6 +38,8 @@
+@@ -43,6 +43,8 @@
  #include <http/reqparser.h>
  #include <http/clientinfo.h>
  #include <http/ntwkiolink.h>

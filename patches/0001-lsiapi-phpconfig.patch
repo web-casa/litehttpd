@@ -23,6 +23,12 @@
  /**
 --- a/src/lsiapi/lsiapilib.cpp
 +++ b/src/lsiapi/lsiapilib.cpp
+@@ -0,0 +1,5 @@
++extern "C" __attribute__((visibility("default")))
++int litehttpd_lsiapi_extensions_v1()
++{
++    return 1;
++}
 @@ -3792,6 +3792,43 @@
      pApi->schedule_remove_session_cbs_event = schedule_remove_session_cbs_event;
      pApi->register_thread_cleanup = register_thread_cleanup_ts;

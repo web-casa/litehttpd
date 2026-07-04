@@ -14,6 +14,7 @@
  */
 
 #include "ls.h"
+#include <dlfcn.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +22,8 @@
 
 /* g_api is provided by OLS at runtime via dlopen */
 extern __thread const lsi_api_t *g_api;
+
+#define LITEHTTPD_LSIAPI_EXT_SYMBOL "litehttpd_lsiapi_extensions_v1"
 
 /* Defensive NULL guard — all shim functions must check g_api before use.
  * In production OLS always sets g_api before hooks fire, but guard anyway. */
@@ -70,6 +73,52 @@ static unsigned int response_header_id_for_name(const char *name, int len)
     if (len == 12 && strncasecmp(name, "Content-Type", 12) == 0)
         return LSI_RSPHDR_CONTENT_TYPE;
     return LSI_RSPHDR_UNKNOWN;
+}
+
+int lsiapi_has_custom_extensions(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        void *marker = dlsym(RTLD_DEFAULT, LITEHTTPD_LSIAPI_EXT_SYMBOL);
+        cached = marker ? 1 : 0;
+    }
+    return cached;
+}
+
+int lsiapi_has_php_config_extensions(void)
+{
+    return g_api && lsiapi_has_custom_extensions() &&
+           g_api->set_php_config_value && g_api->set_php_config_flag;
+}
+
+int lsiapi_has_rewrite_extensions(void)
+{
+    return g_api && lsiapi_has_custom_extensions() &&
+           g_api->parse_rewrite_rules &&
+           g_api->exec_rewrite_rules &&
+           g_api->free_rewrite_rules;
+}
+
+void *lsiapi_parse_rewrite_rules(const char *rules_text, int text_len)
+{
+    if (!lsiapi_has_rewrite_extensions())
+        return NULL;
+    return g_api->parse_rewrite_rules(rules_text, text_len);
+}
+
+int lsiapi_exec_rewrite_rules(lsi_session_t *session, void *handle,
+                              const char *base, int base_len)
+{
+    if (!lsiapi_has_rewrite_extensions())
+        return -1;
+    return g_api->exec_rewrite_rules((const lsi_session_t *)session, handle, base, base_len);
+}
+
+void lsiapi_free_rewrite_rules(void *handle)
+{
+    if (!handle || !lsiapi_has_rewrite_extensions())
+        return;
+    g_api->free_rewrite_rules(handle);
 }
 
 /* ------------------------------------------------------------------ */
@@ -401,7 +450,7 @@ int lsi_session_set_php_ini(lsi_session_t *session, const char *name, const char
     int is_admin = (type >= PHP_INI_TYPE_ADMIN_VALUE);
 
     /* --- Native API path (patched OLS / CyberPanel custom OLS) --- */
-    if (g_api->set_php_config_value) {
+    if (lsiapi_has_php_config_extensions()) {
         if (type == PHP_INI_TYPE_FLAG || type == PHP_INI_TYPE_ADMIN_FLAG) {
             /* Flags: convert to int for native API */
             int flag_val = 0;
@@ -536,7 +585,7 @@ int lsi_session_set_dir_option(lsi_session_t *session, const char *option, int e
     GUARD_API_INT();
     /* Try native context option setter first (requires patched OLS).
      * set_req_header is repurposed as context option setter in patch. */
-    if (g_api->set_req_header) {
+    if (lsiapi_has_custom_extensions() && g_api->set_req_header) {
         const char *val = enabled ? "1" : "0";
         if (strcasecmp(option, "Indexes") == 0) {
             if (!enabled) {

@@ -111,6 +111,7 @@ RUN set -eux; \
     MOD="$LSWS/modules/litehttpd_htaccess.so"; \
     test -x "$PB"; \
     test -f "$MOD"; \
+    strings "$PB" | grep -q 'litehttpd_lsiapi_extensions_v1'; \
     strings "$PB" | grep -q 'set_php_config_value'; \
     strings "$PB" | grep -q 'parse_rewrite_rules'; \
     strings "$PB" | grep -q 'readApacheConf'; \
