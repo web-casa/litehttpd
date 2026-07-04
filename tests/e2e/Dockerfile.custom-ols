@@ -35,7 +35,7 @@ RUN set -eux; \
         rpm-build gcc gcc-c++ cmake make bison autoconf automake libtool \
         systemd-rpm-macros which git wget ca-certificates clang patch perl \
         golang tar gzip findutils binutils libcap-devel libaio-devel \
-        expat-devel libxml2-devel zlib-devel libstdc++-devel; \
+        expat-devel libxml2-devel zlib-devel libstdc++-devel libxcrypt-devel; \
       extra_repos=""; \
       for repo in powertools crb; do \
         if dnf repolist all | awk '{print $1}' | grep -qx "$repo"; then \
@@ -49,7 +49,7 @@ RUN set -eux; \
         rpm-build gcc gcc-c++ cmake3 make bison autoconf automake libtool \
         systemd-rpm-macros which git wget ca-certificates clang patch perl \
         tar gzip findutils binutils libcap-devel libaio-devel expat-devel \
-        libxml2-devel zlib-devel libstdc++-devel; \
+        libxml2-devel zlib-devel libstdc++-devel libxcrypt-devel; \
       extra_repos=""; \
       for repo in powertools crb; do \
         if yum repolist all | awk '{print $1}' | grep -qx "$repo"; then \

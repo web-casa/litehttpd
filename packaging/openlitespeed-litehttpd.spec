@@ -81,6 +81,7 @@ BuildRequires:  expat-devel
 BuildRequires:  libxml2-devel
 BuildRequires:  zlib-devel
 BuildRequires:  libstdc++-devel
+BuildRequires:  libxcrypt-devel
 BuildRequires:  systemd-rpm-macros
 
 Provides:       openlitespeed = %{ols_version}
@@ -907,10 +908,16 @@ cd litehttpd-module
 # already applies stack protector / FORTIFY / RELRO; passing %optflags here adds
 # the distro's hardening on top (this spec disables brp-* post-processing, so
 # nothing reintroduces these flags otherwise).
+MODULE_CONFIG_LOG=%{_builddir}/litehttpd-module-configure.log
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
       -DPCRE2_ROOT="%{_builddir}/third-party" \
-      -DCMAKE_C_FLAGS="%{optflags} -DNDEBUG" 2>&1 | tail -3
-cmake --build build --target litehttpd_htaccess -j"${LITEHTTPD_BUILD_JOBS:-$(nproc)}" 2>&1 | tail -3
+      -DCMAKE_C_FLAGS="%{optflags} -DNDEBUG" > "$MODULE_CONFIG_LOG" 2>&1 || \
+    { echo "FATAL: Module configure failed"; tail -120 "$MODULE_CONFIG_LOG"; exit 1; }
+tail -3 "$MODULE_CONFIG_LOG"
+MODULE_BUILD_LOG=%{_builddir}/litehttpd-module-build.log
+cmake --build build --target litehttpd_htaccess -j"${LITEHTTPD_BUILD_JOBS:-$(nproc)}" > "$MODULE_BUILD_LOG" 2>&1 || \
+    { echo "FATAL: Module build failed"; tail -120 "$MODULE_BUILD_LOG"; exit 1; }
+tail -3 "$MODULE_BUILD_LOG"
 [ -f build/litehttpd_htaccess.so ] || { echo "FATAL: Module build failed!"; exit 1; }
 strip build/litehttpd_htaccess.so
 cp build/litehttpd_htaccess.so $SAVE_DIR/litehttpd_htaccess.so
