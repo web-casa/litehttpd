@@ -153,7 +153,9 @@ ARG APPS_MATRIX_LSPHP_VERSION=82
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl libpcre2-8-0; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl libpcre2-8-0 \
+      bzip2 unzip wget mariadb-client binutils; \
     required_suffixes="-curl -intl -mysql"; \
     optional_suffixes="-common -opcache"; \
     has_candidate() { \
