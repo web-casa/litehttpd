@@ -1,5 +1,5 @@
 %global ols_version  1.9.1
-%global litehttpd_version 2.1.4
+%global litehttpd_version 2.1.5
 %global install_dir  /usr/local/lsws
 %global third_party_commit 7297c534b844d808fce7ec42798ef2b1f3aa5259
 %global php_version 7.4.33

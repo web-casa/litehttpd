@@ -84,6 +84,7 @@ is_release_scope() {
         scripts/apps-matrix-ratchet-budgets.sh | \
         scripts/apps-matrix-do-prepare-base-image.sh | \
         scripts/apps-matrix-do-vps-test.sh | \
+        scripts/bump-release-version.sh | \
         scripts/build-release-module-artifacts.sh | \
         scripts/build-release-ols-artifacts.sh | \
         scripts/check-apps-matrix-budget-policy.sh | \

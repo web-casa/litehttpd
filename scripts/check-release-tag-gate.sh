@@ -198,7 +198,9 @@ remote_tag_sha() {
 
     object_sha="$(gh api "repos/$REPO/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null || true)"
     object_type="$(gh api "repos/$REPO/git/ref/tags/$tag" --jq '.object.type' 2>/dev/null || true)"
-    [ -n "$object_sha" ] || return 0
+    if ! printf '%s' "$object_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+        return 0
+    fi
 
     if [ "$object_type" = "tag" ]; then
         peeled_sha="$(
@@ -219,6 +221,34 @@ local_tag_sha() {
     git rev-parse -q --verify "refs/tags/$tag^{commit}" 2>/dev/null || true
 }
 
+next_patch_tag() {
+    local tag="$1"
+    local version major minor patch
+
+    version="${tag#v}"
+    if ! printf '%s' "$version" | grep -Eq '^[0-9]+[.][0-9]+[.][0-9]+$'; then
+        return 0
+    fi
+    IFS=. read -r major minor patch <<< "$version"
+    printf 'v%s.%s.%s\n' "$major" "$minor" "$((10#$patch + 1))"
+}
+
+print_tag_conflict_hint() {
+    local tag="$1"
+    local next_tag next_version
+
+    next_tag="$(next_patch_tag "$tag")"
+    [ -n "$next_tag" ] || return 0
+    next_version="${next_tag#v}"
+    {
+        printf 'HINT: %s is already occupied; prepare a new release version with:\n' "$tag"
+        printf '  bash scripts/bump-release-version.sh --version %s --write --repo %s\n' \
+            "$next_version" "$REPO"
+        printf 'HINT: Commit/push the metadata bump, then rerun the release tag gate for %s.\n' \
+            "$next_tag"
+    } >&2
+}
+
 check_tag_available() {
     local tag="$1"
     local sha="$2"
@@ -229,6 +259,7 @@ check_tag_available() {
         if [ "$ALLOW_EXISTING_TAG" = "1" ] && [ "$existing_remote" = "$sha" ]; then
             printf 'OK: remote tag %s already points at %s.\n' "$tag" "$sha"
         else
+            print_tag_conflict_hint "$tag"
             fail "remote tag $tag already exists at $existing_remote"
         fi
     fi
@@ -238,6 +269,7 @@ check_tag_available() {
         if [ "$ALLOW_EXISTING_TAG" = "1" ] && [ "$existing_local" = "$sha" ]; then
             printf 'OK: local tag %s already points at %s.\n' "$tag" "$sha"
         else
+            print_tag_conflict_hint "$tag"
             fail "local tag $tag already exists at $existing_local"
         fi
     fi

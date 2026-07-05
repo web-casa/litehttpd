@@ -47,6 +47,8 @@ Commands:
                  Check Dependabot, formal GitHub CI, and billing blockers.
   release-tag-gate
                  Validate clean source, metadata, CI gates, and tag availability.
+  release-version-bump
+                 Dry-run or apply a release metadata version bump.
   release-scope  Report dirty files inside/outside the release scope.
   release-matrix Validate release.yml matrix and release safety checks.
   release-artifacts
@@ -480,6 +482,9 @@ case "$command" in
         ;;
     release-tag-gate)
         bash scripts/check-release-tag-gate.sh "$@"
+        ;;
+    release-version-bump)
+        bash scripts/bump-release-version.sh "$@"
         ;;
     release-scope)
         bash scripts/check-release-scope.sh
