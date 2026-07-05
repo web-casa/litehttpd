@@ -15,6 +15,8 @@ CHECK_SOURCE_ISOLATION="${RELEASE_READINESS_CHECK_SOURCE_ISOLATION:-0}"
 CHECK_GITHUB_GATES="${RELEASE_READINESS_CHECK_GITHUB_GATES:-0}"
 RERUN_GITHUB_GATES="${RELEASE_READINESS_RERUN_GITHUB_GATES:-0}"
 WATCH_GITHUB_GATES="${RELEASE_READINESS_WATCH_GITHUB_GATES:-0}"
+CHECK_TAG_GATE="${RELEASE_READINESS_CHECK_TAG_GATE:-0}"
+REQUIRE_TAG_DO_GATE="${RELEASE_READINESS_REQUIRE_TAG_DO_GATE:-0}"
 RELEASE_REF="${RELEASE_READINESS_REF:-HEAD}"
 MANIFEST_DIR="${RELEASE_READINESS_MANIFEST_DIR:-out/release-readiness}"
 ARTIFACT_DIRS=()
@@ -38,6 +40,10 @@ Options:
                              checking them. Implies --check-github-gates.
   --watch-github-gates       Wait for formal GitHub workflow gates to complete.
                              Implies --check-github-gates.
+  --check-tag-gate           Validate the final release tag gate without
+                             creating or pushing a tag.
+  --require-tag-do-gate      Require the DO release-gate artifact in tag gate.
+                             Implies --check-tag-gate.
   --manifest-dir DIR         Write release scope manifests here.
   --check-source-isolation   Require this checkout to be clean release source.
   --release-ref REF          Ref used by source/public-sync checks. Default: HEAD.
@@ -96,6 +102,13 @@ while [ "$#" -gt 0 ]; do
             CHECK_GITHUB_GATES=1
             WATCH_GITHUB_GATES=1
             ;;
+        --check-tag-gate)
+            CHECK_TAG_GATE=1
+            ;;
+        --require-tag-do-gate)
+            CHECK_TAG_GATE=1
+            REQUIRE_TAG_DO_GATE=1
+            ;;
         --manifest-dir)
             [ "$#" -ge 2 ] || fail "--manifest-dir requires a value"
             MANIFEST_DIR="$2"
@@ -133,6 +146,8 @@ validate_bool RELEASE_READINESS_CHECK_SOURCE_ISOLATION "$CHECK_SOURCE_ISOLATION"
 validate_bool RELEASE_READINESS_CHECK_GITHUB_GATES "$CHECK_GITHUB_GATES"
 validate_bool RELEASE_READINESS_RERUN_GITHUB_GATES "$RERUN_GITHUB_GATES"
 validate_bool RELEASE_READINESS_WATCH_GITHUB_GATES "$WATCH_GITHUB_GATES"
+validate_bool RELEASE_READINESS_CHECK_TAG_GATE "$CHECK_TAG_GATE"
+validate_bool RELEASE_READINESS_REQUIRE_TAG_DO_GATE "$REQUIRE_TAG_DO_GATE"
 
 scope_args=(--manifest-dir "$MANIFEST_DIR/scope")
 if [ "$STRICT_SCOPE" = "1" ]; then
@@ -197,4 +212,14 @@ if [ "$RUN_DO_GATE" = "1" ]; then
     run_step env "${do_gate_env[@]}" bash scripts/apps-matrix-final-do-gate.sh
 else
     printf '\nSKIP: DO release gate dispatch disabled. Use --run-do-gate for the final cloud gate.\n'
+fi
+
+if [ "$CHECK_TAG_GATE" = "1" ]; then
+    tag_gate_args=(--ref "$RELEASE_REF" --manifest-dir "$MANIFEST_DIR/tag-gate")
+    if [ "$REQUIRE_TAG_DO_GATE" = "1" ]; then
+        tag_gate_args+=(--require-do-gate)
+    fi
+    run_step bash scripts/check-release-tag-gate.sh "${tag_gate_args[@]}"
+else
+    printf '\nSKIP: release tag gate disabled. Use --check-tag-gate before cutting the tag.\n'
 fi

@@ -45,6 +45,8 @@ Commands:
                  Report public mirror sync delta without mutating public-repo.
   release-github-gates
                  Check Dependabot, formal GitHub CI, and billing blockers.
+  release-tag-gate
+                 Validate clean source, metadata, CI gates, and tag availability.
   release-scope  Report dirty files inside/outside the release scope.
   release-matrix Validate release.yml matrix and release safety checks.
   release-artifacts
@@ -475,6 +477,9 @@ case "$command" in
         ;;
     release-github-gates)
         bash scripts/check-github-release-gates.sh "$@"
+        ;;
+    release-tag-gate)
+        bash scripts/check-release-tag-gate.sh "$@"
         ;;
     release-scope)
         bash scripts/check-release-scope.sh

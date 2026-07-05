@@ -93,6 +93,7 @@ is_release_scope() {
         scripts/check-release-artifacts.sh | \
         scripts/check-release-metadata.sh | \
         scripts/check-release-source-isolated.sh | \
+        scripts/check-release-tag-gate.sh | \
         scripts/check-release-scope.sh | \
         scripts/check-public-release-sync.sh | \
         scripts/check-rpm-repo-dry-run.sh | \
