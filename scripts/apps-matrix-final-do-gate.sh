@@ -17,6 +17,7 @@ SKIP_DEP_INSTALL="${APPS_MATRIX_FINAL_DO_SKIP_DEP_INSTALL:-${APPS_MATRIX_DO_SKIP
 CONTINUE_ON_FAILURE="${APPS_MATRIX_FINAL_DO_CONTINUE_ON_FAILURE:-0}"
 WATCH="${APPS_MATRIX_FINAL_DO_WATCH:-1}"
 CHECK_DO_CLEANUP="${APPS_MATRIX_FINAL_DO_CHECK_CLEANUP:-1}"
+GH_REPO_ARGS=()
 
 usage() {
     cat <<'USAGE'
@@ -29,7 +30,8 @@ those exact image refs so the VPS does not rebuild runtimes.
 Options:
   --repo OWNER/REPO          GitHub repository. Default: private remote when
                             present, otherwise gh infers it.
-  --ref REF                 Branch, tag, or SHA. Default: current branch.
+  --ref REF                 Branch, tag, or SHA. Default: main unless the
+                            current branch is main/master.
   --workflow FILE           Workflow file. Default: nightly.yml.
   --scenarios LIST          heavy, wordpress, cms, framework, all, or scenario.
                             Default: heavy.
@@ -104,6 +106,64 @@ validate_scenarios() {
     done <<< "$scenarios"
 }
 
+default_ref() {
+    local branch
+
+    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    case "$branch" in
+        main|master)
+            printf '%s\n' "$branch"
+            ;;
+        *)
+            printf '%s\n' main
+            ;;
+    esac
+}
+
+normalize_ref() {
+    local ref="$1"
+
+    if [ -z "$ref" ] || [ "$ref" = "HEAD" ]; then
+        default_ref
+        return 0
+    fi
+    case "$ref" in
+        private/*|origin/*)
+            printf '%s\n' "${ref#*/}"
+            ;;
+        *)
+            printf '%s\n' "$ref"
+            ;;
+    esac
+}
+
+resolve_ref_sha() {
+    local ref="$1"
+    local candidate remote_sha
+
+    if printf '%s' "$ref" | grep -Eq '^[0-9a-f]{40}$'; then
+        printf '%s\n' "$ref"
+        return 0
+    fi
+
+    if [ -n "$REPO" ]; then
+        remote_sha="$(gh api "repos/$REPO/commits/$ref" --jq '.sha' 2>/dev/null || true)"
+        if printf '%s' "$remote_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            printf '%s\n' "$remote_sha"
+            return 0
+        fi
+    fi
+
+    for candidate in "private/$ref" "origin/$ref" "$ref"; do
+        if git rev-parse --verify "${candidate}^{commit}" >/dev/null 2>&1; then
+            git rev-parse --verify "${candidate}^{commit}"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 parse_run_id() {
     local output="$1"
     local run_id
@@ -122,26 +182,21 @@ wait_for_dispatched_run_id() {
     local workflow="$2"
     local created_after="$3"
     local head_sha="$4"
-    local repo_arg=()
     local run_id
     local head_filter='true'
 
-    if [ -n "$REPO" ]; then
-        repo_arg=(--repo "$REPO")
-    fi
     if [ -n "$head_sha" ]; then
         head_filter=".headSha == \"$head_sha\""
     fi
 
     for _ in $(seq 1 24); do
         run_id="$(
-            gh run list "${repo_arg[@]}" \
+            gh run list "${GH_REPO_ARGS[@]}" \
                 --workflow "$workflow" \
                 --branch "$branch" \
                 --limit 10 \
                 --json databaseId,event,status,createdAt,headSha \
-                --jq ".[] | select(.event == \"workflow_dispatch\" and .createdAt >= \"$created_after\" and $head_filter and (.status == \"queued\" or .status == \"in_progress\" or .status == \"completed\")) | .databaseId" |
-                head -1
+                --jq "([.[] | select(.event == \"workflow_dispatch\" and .createdAt >= \"$created_after\" and $head_filter and (.status == \"queued\" or .status == \"in_progress\" or .status == \"completed\")) | .databaseId] | first // empty)"
         )"
         if [ -n "$run_id" ]; then
             printf '%s\n' "$run_id"
@@ -151,6 +206,39 @@ wait_for_dispatched_run_id() {
     done
 
     return 1
+}
+
+run_has_billing_blocker() {
+    local run_id="$1"
+    local job_ids job_id message
+
+    job_ids="$(gh run view "$run_id" "${GH_REPO_ARGS[@]}" --json jobs --jq '.jobs[].databaseId')"
+    while IFS= read -r job_id; do
+        [ -n "$job_id" ] || continue
+        message="$(
+            gh api "repos/$REPO/check-runs/$job_id/annotations" --paginate \
+                --jq '.[].message' 2>/dev/null || true
+        )"
+        if printf '%s\n' "$message" |
+            grep -Eiq 'spending limit|payments have failed|Billing & plans'; then
+            return 0
+        fi
+    done <<< "$job_ids"
+
+    return 1
+}
+
+describe_run_failure() {
+    local run_id="$1"
+
+    if [ -n "$REPO" ] && run_has_billing_blocker "$run_id"; then
+        printf 'ERROR: GitHub Actions billing/payment/spending-limit prevented DO release gate jobs from starting.\n' >&2
+        return 0
+    fi
+
+    printf 'ERROR: GitHub DO release gate run failed: %s\n' "$run_id" >&2
+    gh run view "$run_id" "${GH_REPO_ARGS[@]}" --json url,status,conclusion,jobs \
+        --jq '.url, (.jobs[] | "  \(.name): status=\(.status) conclusion=\(.conclusion // "none")")' >&2 || true
 }
 
 check_do_cleanup() {
@@ -240,28 +328,27 @@ fi
 if [ -n "$REPO" ] && ! printf '%s' "$REPO" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'; then
     fail "GitHub repo must be OWNER/REPO, got: $REPO"
 fi
-
-if [ -z "$REF" ]; then
-    REF="$(git rev-parse --abbrev-ref HEAD)"
+if [ -n "$REPO" ]; then
+    GH_REPO_ARGS=(--repo "$REPO")
 fi
+
+REF="$(normalize_ref "$REF")"
 [ -n "$REF" ] || fail "could not resolve current git ref"
+if ! printf '%s' "$REF" | grep -Eq '^[A-Za-z0-9._/@:-]+$'; then
+    fail "ref contains unsupported characters: $REF"
+fi
 
 if [ -n "$DROPLET_IMAGE" ] && ! printf '%s' "$DROPLET_IMAGE" | grep -Eq '^[A-Za-z0-9._:-]+$'; then
     fail "droplet image contains unsupported characters: $DROPLET_IMAGE"
 fi
 
-repo_arg=()
-if [ -n "$REPO" ]; then
-    repo_arg=(--repo "$REPO")
-fi
-
 dispatch_started="$(date -u -d '2 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')"
-head_sha="$(git rev-parse "$REF^{commit}" 2>/dev/null || true)"
+head_sha="$(resolve_ref_sha "$REF" 2>/dev/null || true)"
 
 printf 'Dispatching %s on %s with DO scenarios=%s repo=%s\n' \
     "$WORKFLOW" "$REF" "$SCENARIOS" "${REPO:-gh-default}"
 dispatch_output="$(
-    gh workflow run "$WORKFLOW" "${repo_arg[@]}" \
+    gh workflow run "$WORKFLOW" "${GH_REPO_ARGS[@]}" \
         --ref "$REF" \
         -f run_do_release_gate=1 \
         -f do_release_gate_scenarios="$SCENARIOS" \
@@ -283,9 +370,18 @@ fi
 printf 'GitHub run id: %s\n' "$run_id"
 
 if [ "$WATCH" = "1" ]; then
-    gh run watch "$run_id" "${repo_arg[@]}" --exit-status
+    watch_rc=0
+    gh run watch "$run_id" "${GH_REPO_ARGS[@]}" --exit-status || watch_rc=$?
+    cleanup_rc=0
     if [ "$CHECK_DO_CLEANUP" = "1" ]; then
-        check_do_cleanup
+        ( check_do_cleanup ) || cleanup_rc=$?
+    fi
+    if [ "$watch_rc" -ne 0 ]; then
+        describe_run_failure "$run_id"
+        exit "$watch_rc"
+    fi
+    if [ "$cleanup_rc" -ne 0 ]; then
+        exit "$cleanup_rc"
     fi
 else
     printf 'Watch disabled. Inspect with: gh run view %s --web\n' "$run_id"

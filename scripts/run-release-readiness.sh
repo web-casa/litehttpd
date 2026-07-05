@@ -190,7 +190,11 @@ else
 fi
 
 if [ "$RUN_DO_GATE" = "1" ]; then
-    run_step bash scripts/apps-matrix-final-do-gate.sh
+    do_gate_env=()
+    if [ -z "${APPS_MATRIX_FINAL_DO_REF:-}" ]; then
+        do_gate_env+=(APPS_MATRIX_FINAL_DO_REF="$RELEASE_REF")
+    fi
+    run_step env "${do_gate_env[@]}" bash scripts/apps-matrix-final-do-gate.sh
 else
     printf '\nSKIP: DO release gate dispatch disabled. Use --run-do-gate for the final cloud gate.\n'
 fi
