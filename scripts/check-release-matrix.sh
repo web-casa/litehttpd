@@ -89,6 +89,8 @@ require_literal "bash scripts/check-release-metadata.sh" "release workflow check
 require_literal "bash scripts/check-apps-matrix-budget-policy.sh" "release workflow checks budget policy"
 require_literal "bash scripts/check-public-release-sync.sh" "release workflow reports public sync delta"
 require_literal "-DBUILD_TESTING=OFF" "module .so release build skips test dependency fetch"
+require_count_at_least "pcre2-devel" 7 "EL release module builds install PCRE2 development files"
+require_count_at_least "libpcre2-dev" 2 "Ubuntu release module builds install PCRE2 development files"
 require_literal "bash scripts/create-release-source-cache.sh /tmp" "release workflow creates source cache"
 require_literal "--with source_cache" "OLS rpmbuild uses source cache"
 require_literal "/tmp/third-party-src.tar.gz:/tmp/third-party-src.tar.gz:ro" "third-party source cache is mounted"

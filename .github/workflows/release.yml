@@ -154,39 +154,39 @@ jobs:
           - container: almalinux:8
             suffix: el8-x86_64
             platform: linux/amd64
-            pkg_cmd: "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel && (command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake)"
+            pkg_cmd: "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel pcre2-devel && (command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake)"
           - container: almalinux:9
             suffix: el9-x86_64
             platform: linux/amd64
-            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel"
           - container: almalinux:10
             suffix: el10-x86_64
             platform: linux/amd64
-            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel"
           - container: ubuntu:22.04
             suffix: ubuntu22-x86_64
             platform: linux/amd64
-            pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev"
+            pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev libpcre2-dev"
           - container: almalinux:8
             suffix: el8-aarch64
             platform: linux/arm64
             qemu: true
-            pkg_cmd: "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel && (command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake)"
+            pkg_cmd: "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel pcre2-devel && (command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake)"
           - container: almalinux:9
             suffix: el9-aarch64
             platform: linux/arm64
             qemu: true
-            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel"
           - container: almalinux:10
             suffix: el10-aarch64
             platform: linux/arm64
             qemu: true
-            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel"
+            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel"
           - container: ubuntu:22.04
             suffix: ubuntu22-aarch64
             platform: linux/arm64
             qemu: true
-            pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev"
+            pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev libpcre2-dev"
 
     runs-on: ubuntu-22.04
     env:
@@ -280,7 +280,7 @@ jobs:
             ${{ matrix.container }} \
             bash -c '
               set -e
-              dnf -y install rpm-build cmake gcc gcc-c++ git-core libxcrypt-devel 2>&1 | tail -2
+              dnf -y install rpm-build cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel 2>&1 | tail -2
               mkdir -p /root/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
               cp /tmp/litehttpd-${VERSION}.tar.gz /root/rpmbuild/SOURCES/
               rpmbuild -bb --define "_topdir /root/rpmbuild" /src/packaging/litehttpd.spec
