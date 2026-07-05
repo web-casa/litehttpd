@@ -88,6 +88,7 @@ is_release_scope() {
         scripts/build-release-ols-artifacts.sh | \
         scripts/check-apps-matrix-budget-policy.sh | \
         scripts/check-apps-matrix-budget-ratchet.sh | \
+        scripts/check-github-release-gates.sh | \
         scripts/check-release-matrix.sh | \
         scripts/check-release-artifacts.sh | \
         scripts/check-release-metadata.sh | \

@@ -43,6 +43,8 @@ Commands:
                  Validate tag, changelog, spec versions, and release-note metadata.
   release-public-sync
                  Report public mirror sync delta without mutating public-repo.
+  release-github-gates
+                 Check Dependabot, formal GitHub CI, and billing blockers.
   release-scope  Report dirty files inside/outside the release scope.
   release-matrix Validate release.yml matrix and release safety checks.
   release-artifacts
@@ -90,6 +92,7 @@ Environment:
   APPS_MATRIX_BUDGET_ENFORCE_REQUESTED=0|1
                              Used by apps-matrix-budget-policy before enabling budgets.
   RELEASE_READINESS_*        Controls scripts/run-release-readiness.sh.
+  RELEASE_GITHUB_*           Controls scripts/check-github-release-gates.sh.
 USAGE
 }
 
@@ -469,6 +472,9 @@ case "$command" in
         ;;
     release-public-sync)
         bash scripts/check-public-release-sync.sh "$@"
+        ;;
+    release-github-gates)
+        bash scripts/check-github-release-gates.sh "$@"
         ;;
     release-scope)
         bash scripts/check-release-scope.sh
