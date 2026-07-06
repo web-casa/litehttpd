@@ -22,16 +22,18 @@ extern "C" {
 #include "htaccess_printer.h"
 }
 
-static htaccess_directive_t *parse(const char *input) {
+static htaccess_directive_t *parse(const char *input)
+{
     return htaccess_parse(input, strlen(input), "test");
 }
 
 /* Base64 encode helper for "user:pass" */
-static std::string base64_encode(const std::string &input) {
-    static const char table[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static std::string base64_encode(const std::string &input)
+{
+    static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
-    int val = 0, valb = -6;
+    unsigned int val = 0;
+    int valb = -6;
     for (unsigned char c : input) {
         val = (val << 8) + c;
         valb += 8;
@@ -40,14 +42,17 @@ static std::string base64_encode(const std::string &input) {
             valb -= 6;
         }
     }
-    if (valb > -6) out.push_back(table[((val << 8) >> (valb + 8)) & 0x3F]);
-    while (out.size() % 4) out.push_back('=');
+    if (valb > -6)
+        out.push_back(table[((val << 8) >> (valb + 8)) & 0x3F]);
+    while (out.size() % 4)
+        out.push_back('=');
     return out;
 }
 
 class AuthBasicTest : public ::testing::Test {
-public:
-    void SetUp() override {
+  public:
+    void SetUp() override
+    {
         mock_lsiapi::reset_global_state();
         session_.reset();
         /* Create a temp document root and place the htpasswd inside it.
@@ -68,11 +73,15 @@ public:
             }
         }
     }
-    void TearDown() override {
-        if (!tmpfile_.empty()) remove(tmpfile_.c_str());
-        if (!docroot_.empty()) rmdir(docroot_.c_str());
+    void TearDown() override
+    {
+        if (!tmpfile_.empty())
+            remove(tmpfile_.c_str());
+        if (!docroot_.empty())
+            rmdir(docroot_.c_str());
     }
-protected:
+
+  protected:
     MockSession session_;
     std::string tmpfile_;
     std::string docroot_;
@@ -81,11 +90,12 @@ protected:
 /* No credentials → 401 */
 TEST_F(AuthBasicTest, NoCredentials401)
 {
-    std::string input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile " + tmpfile_ + "\n"
-        "Require valid-user\n";
+    std::string input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile " +
+                        tmpfile_ +
+                        "\n"
+                        "Require valid-user\n";
     auto *dirs = parse(input.c_str());
     ASSERT_NE(dirs, nullptr);
 
@@ -101,11 +111,12 @@ TEST_F(AuthBasicTest, NoCredentials401)
 /* Wrong credentials → 401 */
 TEST_F(AuthBasicTest, WrongCredentials401)
 {
-    std::string input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile " + tmpfile_ + "\n"
-        "Require valid-user\n";
+    std::string input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile " +
+                        tmpfile_ +
+                        "\n"
+                        "Require valid-user\n";
     auto *dirs = parse(input.c_str());
     ASSERT_NE(dirs, nullptr);
 
@@ -122,11 +133,12 @@ TEST_F(AuthBasicTest, WrongCredentials401)
 /* Correct credentials → pass */
 TEST_F(AuthBasicTest, CorrectCredentialsPass)
 {
-    std::string input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile " + tmpfile_ + "\n"
-        "Require valid-user\n";
+    std::string input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile " +
+                        tmpfile_ +
+                        "\n"
+                        "Require valid-user\n";
     auto *dirs = parse(input.c_str());
     ASSERT_NE(dirs, nullptr);
 
@@ -142,11 +154,12 @@ TEST_F(AuthBasicTest, CorrectCredentialsPass)
 /* Require user with matching username + correct password → pass */
 TEST_F(AuthBasicTest, RequireUserMatchPasses)
 {
-    std::string input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile " + tmpfile_ + "\n"
-        "Require user testuser alice\n";
+    std::string input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile " +
+                        tmpfile_ +
+                        "\n"
+                        "Require user testuser alice\n";
     auto *dirs = parse(input.c_str());
     ASSERT_NE(dirs, nullptr);
 
@@ -163,11 +176,12 @@ TEST_F(AuthBasicTest, RequireUserMatchPasses)
  * (valid credentials, but not an allowed user). */
 TEST_F(AuthBasicTest, RequireUserMismatch403)
 {
-    std::string input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile " + tmpfile_ + "\n"
-        "Require user alice bob\n";
+    std::string input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile " +
+                        tmpfile_ +
+                        "\n"
+                        "Require user alice bob\n";
     auto *dirs = parse(input.c_str());
     ASSERT_NE(dirs, nullptr);
 
@@ -184,11 +198,12 @@ TEST_F(AuthBasicTest, RequireUserMismatch403)
 /* Require user without credentials → 401 (must NOT fail open). */
 TEST_F(AuthBasicTest, RequireUserNoCredentials401)
 {
-    std::string input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile " + tmpfile_ + "\n"
-        "Require user testuser\n";
+    std::string input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile " +
+                        tmpfile_ +
+                        "\n"
+                        "Require user testuser\n";
     auto *dirs = parse(input.c_str());
     ASSERT_NE(dirs, nullptr);
 
@@ -223,14 +238,15 @@ TEST_F(AuthBasicTest, RequireGroupParsesToFailClosed)
  * not "alice", so access must be denied (403). */
 TEST_F(AuthBasicTest, RequireUserInRequireAllEnforced)
 {
-    std::string input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile " + tmpfile_ + "\n"
-        "<RequireAll>\n"
-        "Require valid-user\n"
-        "Require user alice\n"
-        "</RequireAll>\n";
+    std::string input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile " +
+                        tmpfile_ +
+                        "\n"
+                        "<RequireAll>\n"
+                        "Require valid-user\n"
+                        "Require user alice\n"
+                        "</RequireAll>\n";
     auto *dirs = parse(input.c_str());
     ASSERT_NE(dirs, nullptr);
 
@@ -250,14 +266,15 @@ TEST_F(AuthBasicTest, RequireUserInRequireAllEnforced)
  * testuser through (fail-open). */
 TEST_F(AuthBasicTest, RequireAllMultipleUserListsAreAnded)
 {
-    std::string input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile " + tmpfile_ + "\n"
-        "<RequireAll>\n"
-        "Require user testuser\n"
-        "Require user alice\n"
-        "</RequireAll>\n";
+    std::string input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile " +
+                        tmpfile_ +
+                        "\n"
+                        "<RequireAll>\n"
+                        "Require user testuser\n"
+                        "Require user alice\n"
+                        "</RequireAll>\n";
     auto *dirs = parse(input.c_str());
     ASSERT_NE(dirs, nullptr);
 
@@ -274,14 +291,15 @@ TEST_F(AuthBasicTest, RequireAllMultipleUserListsAreAnded)
 /* Same container, but the listed user (testuser) authenticates → pass. */
 TEST_F(AuthBasicTest, RequireUserInRequireAllMatchPasses)
 {
-    std::string input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile " + tmpfile_ + "\n"
-        "<RequireAll>\n"
-        "Require valid-user\n"
-        "Require user testuser\n"
-        "</RequireAll>\n";
+    std::string input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile " +
+                        tmpfile_ +
+                        "\n"
+                        "<RequireAll>\n"
+                        "Require valid-user\n"
+                        "Require user testuser\n"
+                        "</RequireAll>\n";
     auto *dirs = parse(input.c_str());
     ASSERT_NE(dirs, nullptr);
 
@@ -297,11 +315,10 @@ TEST_F(AuthBasicTest, RequireUserInRequireAllMatchPasses)
 /* Missing AuthUserFile → 500 */
 TEST_F(AuthBasicTest, MissingAuthUserFile500)
 {
-    const char *input =
-        "AuthType Basic\n"
-        "AuthName \"Restricted\"\n"
-        "AuthUserFile /nonexistent/path/htpasswd\n"
-        "Require valid-user\n";
+    const char *input = "AuthType Basic\n"
+                        "AuthName \"Restricted\"\n"
+                        "AuthUserFile /nonexistent/path/htpasswd\n"
+                        "Require valid-user\n";
     auto *dirs = parse(input);
     ASSERT_NE(dirs, nullptr);
 
@@ -342,11 +359,10 @@ TEST_F(AuthBasicTest, HtpasswdCheckCrypt)
 /* Parsing round-trip for auth directives */
 TEST_F(AuthBasicTest, ParseRoundTrip)
 {
-    const char *input =
-        "AuthType Basic\n"
-        "AuthName \"My Realm\"\n"
-        "AuthUserFile /etc/htpasswd\n"
-        "Require valid-user\n";
+    const char *input = "AuthType Basic\n"
+                        "AuthName \"My Realm\"\n"
+                        "AuthUserFile /etc/htpasswd\n"
+                        "Require valid-user\n";
     auto *dirs = parse(input);
     ASSERT_NE(dirs, nullptr);
 

@@ -152,7 +152,8 @@ RC_GTEST_PROP(GenHtaccess, TaggedContentTypesMatchLineCount, ())
     /* Count newlines in content should equal number of types */
     int newlines = 0;
     for (char c : tc.first)
-        if (c == '\n') newlines++;
+        if (c == '\n')
+            newlines++;
     RC_ASSERT((int)tc.second.size() == newlines);
 }
 
@@ -268,6 +269,16 @@ RC_GTEST_PROP(GenDirectiveV2, V2DirectiveIsNotNull, ())
     htaccess_directives_free(d);
 }
 
+RC_GTEST_PROP(GenDirectiveV6, SafetyDirectiveIsNotNull, ())
+{
+    auto type = *gen::directiveTypeV6();
+    auto *d = *gen::directiveOfType(type);
+    RC_ASSERT(d != nullptr);
+    RC_ASSERT(d->type == type);
+    RC_ASSERT(d->value != nullptr);
+    htaccess_directives_free(d);
+}
+
 /* gen_htaccess.h v2 content */
 RC_GTEST_PROP(GenHtaccessV2, V2ContentEndsWithNewline, ())
 {
@@ -283,6 +294,7 @@ RC_GTEST_PROP(GenHtaccessV2, V2TaggedContentTypesMatchLineCount, ())
     RC_ASSERT(!tc.second.empty());
     int newlines = 0;
     for (char c : tc.first)
-        if (c == '\n') newlines++;
+        if (c == '\n')
+            newlines++;
     RC_ASSERT((int)tc.second.size() == newlines);
 }

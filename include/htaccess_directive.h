@@ -140,6 +140,9 @@ typedef enum {
 
     /* Phase 10: trusted-proxy gate for brute-force X-Forwarded-For parsing */
     DIR_BRUTE_FORCE_TRUSTED_PROXY,     /* 82 — BruteForceTrustedProxy <cidr-list> */
+
+    /* Real-app front-controller fallback */
+    DIR_FALLBACK_RESOURCE,             /* 83 — FallbackResource /index.php|disabled */
 } directive_type_t;
 
 /**

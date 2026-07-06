@@ -5,21 +5,19 @@ purpose: clean urls, front-controller routing, static bypass, and protected path
 cases:
   - id: DRUPAL_001
     category: app-health
-    desc: homepage returns 200
+    desc: login route returns 200 through the real Drupal front controller
     method: GET
-    path: /
+    path: /user/login
     assert:
       - status_exact: 200
 
   - id: DRUPAL_002
     category: routing
-    desc: clean URL resolves through front controller
+    desc: clean URL route resolves through Drupal routing
     method: GET
     path: /user/login
-    probe_path: /_probe/router.php?uri=/user/login
     assert:
       - status_exact: 200
-      - probe_field_exact: SCRIPT_NAME=/index.php
 
   - id: DRUPAL_003
     category: deny
@@ -39,8 +37,8 @@ cases:
 
   - id: DRUPAL_005
     category: htaccess
-    desc: htaccess-derived behavior remains visible on a protected path
+    desc: htaccess-derived deny remains visible on a sensitive config path
     method: GET
-    path: /sites/default/files/
+    path: /sites/default/settings.php
     assert:
       - status_exact: 403

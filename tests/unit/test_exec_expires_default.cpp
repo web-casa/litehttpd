@@ -62,12 +62,14 @@ static void free_dir_list(htaccess_directive_t *head)
 /* ---- Test fixture ---- */
 
 class ExpiresDefaultExecTest : public ::testing::Test {
-public:
-    void SetUp() override {
+  public:
+    void SetUp() override
+    {
         mock_lsiapi::reset_global_state();
         session_.reset();
     }
-protected:
+
+  protected:
     MockSession session_;
 };
 
@@ -102,6 +104,24 @@ TEST_F(ExpiresDefaultExecTest, ByTypeTakesPrecedence)
     EXPECT_EQ(rc, LSI_OK);
     EXPECT_TRUE(session_.has_response_header("Cache-Control"));
     EXPECT_EQ(session_.get_response_header("Cache-Control"), "max-age=3600");
+
+    free_dir_list(active);
+}
+
+TEST_F(ExpiresDefaultExecTest, ReplacesExistingCacheHeaders)
+{
+    auto *active = make_expires_active(1);
+    auto *bytype = make_expires_by_type("image/jpeg", 31536000);
+    active->next = bytype;
+
+    session_.add_response_header("Cache-Control", "public, max-age=604800");
+    session_.add_response_header("Expires", "Wed, 08 Jul 2026 00:00:00 GMT");
+
+    int rc = exec_expires(session_.handle(), active, "image/jpeg");
+    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_EQ(session_.count_response_headers("Cache-Control"), 1);
+    EXPECT_EQ(session_.get_response_header("Cache-Control"), "max-age=31536000");
+    EXPECT_EQ(session_.count_response_headers("Expires"), 1);
 
     free_dir_list(active);
 }

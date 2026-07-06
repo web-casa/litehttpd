@@ -72,6 +72,15 @@ TEST_F(ParserTest, HeaderUnset) {
     htaccess_directives_free(d);
 }
 
+TEST_F(ParserTest, HeaderOnSuccessUnset) {
+    auto *d = parse("Header onsuccess unset X-Content-Type-Options\n");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->type, DIR_HEADER_UNSET);
+    EXPECT_STREQ(d->name, "X-Content-Type-Options");
+    EXPECT_EQ(d->value, nullptr);
+    htaccess_directives_free(d);
+}
+
 TEST_F(ParserTest, HeaderAppend) {
     auto *d = parse("Header append Cache-Control no-transform\n");
     ASSERT_NE(d, nullptr);
@@ -339,6 +348,22 @@ TEST_F(ParserTest, ErrorDocumentQuotedMessage) {
        can detect text message mode via value[0] == '"' */
     EXPECT_EQ(d->value[0], '"');
     EXPECT_TRUE(strstr(d->value, "Service Temporarily Unavailable") != nullptr);
+    htaccess_directives_free(d);
+}
+
+TEST_F(ParserTest, FallbackResourceLocalPath) {
+    auto *d = parse("FallbackResource /index.php\n");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->type, DIR_FALLBACK_RESOURCE);
+    EXPECT_STREQ(d->value, "/index.php");
+    htaccess_directives_free(d);
+}
+
+TEST_F(ParserTest, FallbackResourceDisabled) {
+    auto *d = parse("FallbackResource disabled\n");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->type, DIR_FALLBACK_RESOURCE);
+    EXPECT_STREQ(d->value, "disabled");
     htaccess_directives_free(d);
 }
 

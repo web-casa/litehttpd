@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cat <<'EOF'
-[nextcloud] install contract
-- provision fixed Nextcloud version
-- perform deterministic install with fixed admin credentials
-- keep shipped .htaccess semantics intact
-- place shared _probe/*.php only where safe and non-conflicting
-- capture final effective .htaccess to artifacts
-EOF
+SCENARIO="${1:-nextcloud}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# shellcheck source=tests/e2e/apps-matrix/lib/matrix_common.sh
+source "${ROOT_DIR}/lib/matrix_common.sh"
+# shellcheck source=tests/e2e/apps-matrix/lib/fixture_common.sh
+source "${ROOT_DIR}/lib/fixture_common.sh"
+
+matrix_install_fixture "${SCENARIO}" "${SCRIPT_DIR}/cases.yaml"

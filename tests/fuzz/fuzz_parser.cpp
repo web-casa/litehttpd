@@ -23,6 +23,10 @@ extern "C" {
 #include "htaccess_directive.h"
 }
 
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     /* Null-terminate the input */
     char *buf = (char *)malloc(size + 1);

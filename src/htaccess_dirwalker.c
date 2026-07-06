@@ -31,89 +31,6 @@
 static __thread int htaccess_size_limit = MAX_HTACCESS_FILE_SIZE_INIT;
 
 /* ------------------------------------------------------------------ */
-/* Negative stat cache: avoid repeated stat() on dirs without .htaccess */
-/* ------------------------------------------------------------------ */
-#define NEG_STAT_SLOTS 16
-#define NEG_STAT_TTL   256  /* flush every N dirwalk calls */
-
-static __thread struct {
-    unsigned long hash;
-    char         *path;   /* owned copy for collision check */
-    int           valid;
-} neg_stat_cache[NEG_STAT_SLOTS];
-
-static __thread unsigned int neg_stat_generation = 0;
-
-static unsigned long neg_djb2(const char *str)
-{
-    unsigned long h = 5381;
-    while (*str)
-        h = ((h << 5) + h) + (unsigned char)*str++;
-    return h;
-}
-
-static void neg_stat_flush(void)
-{
-    for (int i = 0; i < NEG_STAT_SLOTS; i++) {
-        if (neg_stat_cache[i].valid) {
-            free(neg_stat_cache[i].path);
-            neg_stat_cache[i].path = NULL;
-            neg_stat_cache[i].valid = 0;
-        }
-    }
-}
-
-static int neg_stat_check(const char *path)
-{
-    unsigned long h = neg_djb2(path);
-    for (int i = 0; i < NEG_STAT_SLOTS; i++) {
-        if (neg_stat_cache[i].valid && neg_stat_cache[i].hash == h
-            && strcmp(neg_stat_cache[i].path, path) == 0)
-            return 1;
-    }
-    return 0;
-}
-
-static void neg_stat_add(const char *path)
-{
-    unsigned long h = neg_djb2(path);
-    /* Find empty slot */
-    for (int i = 0; i < NEG_STAT_SLOTS; i++) {
-        if (!neg_stat_cache[i].valid) {
-            neg_stat_cache[i].hash = h;
-            neg_stat_cache[i].path = strdup(path);
-            if (!neg_stat_cache[i].path) return;
-            neg_stat_cache[i].valid = 1;
-            return;
-        }
-    }
-    /* Full — evict slot 0, shift down */
-    free(neg_stat_cache[0].path);
-    for (int i = 0; i < NEG_STAT_SLOTS - 1; i++)
-        neg_stat_cache[i] = neg_stat_cache[i + 1];
-    neg_stat_cache[NEG_STAT_SLOTS - 1].hash = h;
-    neg_stat_cache[NEG_STAT_SLOTS - 1].path = strdup(path);
-    if (!neg_stat_cache[NEG_STAT_SLOTS - 1].path) {
-        neg_stat_cache[NEG_STAT_SLOTS - 1].valid = 0;
-        return;
-    }
-    neg_stat_cache[NEG_STAT_SLOTS - 1].valid = 1;
-}
-
-static void neg_stat_remove(const char *path)
-{
-    unsigned long h = neg_djb2(path);
-    for (int i = 0; i < NEG_STAT_SLOTS; i++) {
-        if (neg_stat_cache[i].valid && neg_stat_cache[i].hash == h
-            && strcmp(neg_stat_cache[i].path, path) == 0) {
-            free(neg_stat_cache[i].path);
-            neg_stat_cache[i].path = NULL;
-            neg_stat_cache[i].valid = 0;
-        }
-    }
-}
-
-/* ------------------------------------------------------------------ */
 /* Internal: deep-copy a children linked list (used by copy_directive) */
 /* ------------------------------------------------------------------ */
 static htaccess_directive_t *copy_directive(const htaccess_directive_t *src);
@@ -155,16 +72,19 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
 
     if (src->name) {
         d->name = strdup(src->name);
-        if (!d->name) goto fail;
+        if (!d->name)
+            goto fail;
     }
     if (src->value) {
         d->value = strdup(src->value);
-        if (!d->value) goto fail;
+        if (!d->value)
+            goto fail;
     }
     /* env_condition is a top-level heap field (Header ... env=VAR) */
     if (src->env_condition) {
         d->env_condition = strdup(src->env_condition);
-        if (!d->env_condition) goto fail;
+        if (!d->env_condition)
+            goto fail;
     }
 
     /* Shallow copy the union first, then deep-copy heap fields */
@@ -176,7 +96,8 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
     case DIR_REDIRECT_MATCH:
         if (src->data.redirect.pattern) {
             d->data.redirect.pattern = strdup(src->data.redirect.pattern);
-            if (!d->data.redirect.pattern) goto fail;
+            if (!d->data.redirect.pattern)
+                goto fail;
         }
         break;
     case DIR_FILES_MATCH:
@@ -184,30 +105,36 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
         d->data.files_match.children = NULL;
         if (src->data.files_match.pattern) {
             d->data.files_match.pattern = strdup(src->data.files_match.pattern);
-            if (!d->data.files_match.pattern) goto fail;
+            if (!d->data.files_match.pattern)
+                goto fail;
         }
         if (src->data.files_match.children) {
             d->data.files_match.children = copy_children(src->data.files_match.children);
-            if (!d->data.files_match.children) goto fail;
+            if (!d->data.files_match.children)
+                goto fail;
         }
         break;
     case DIR_FILES:
         if (src->data.files.children) {
             d->data.files.children = copy_children(src->data.files.children);
-            if (!d->data.files.children) goto fail;
+            if (!d->data.files.children)
+                goto fail;
         }
         break;
     case DIR_IFMODULE:
         if (src->data.ifmodule.children) {
             d->data.ifmodule.children = copy_children(src->data.ifmodule.children);
-            if (!d->data.ifmodule.children) goto fail;
+            if (!d->data.ifmodule.children)
+                goto fail;
         }
         break;
     case DIR_REQUIRE_ANY_OPEN:
     case DIR_REQUIRE_ALL_OPEN:
         if (src->data.require_container.children) {
-            d->data.require_container.children = copy_children(src->data.require_container.children);
-            if (!d->data.require_container.children) goto fail;
+            d->data.require_container.children =
+                copy_children(src->data.require_container.children);
+            if (!d->data.require_container.children)
+                goto fail;
         }
         break;
     case DIR_LIMIT:
@@ -216,11 +143,13 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
         d->data.limit.children = NULL;
         if (src->data.limit.methods) {
             d->data.limit.methods = strdup(src->data.limit.methods);
-            if (!d->data.limit.methods) goto fail;
+            if (!d->data.limit.methods)
+                goto fail;
         }
         if (src->data.limit.children) {
             d->data.limit.children = copy_children(src->data.limit.children);
-            if (!d->data.limit.children) goto fail;
+            if (!d->data.limit.children)
+                goto fail;
         }
         break;
     case DIR_SETENVIF:
@@ -230,11 +159,13 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
         d->data.envif.pattern = NULL;
         if (src->data.envif.attribute) {
             d->data.envif.attribute = strdup(src->data.envif.attribute);
-            if (!d->data.envif.attribute) goto fail;
+            if (!d->data.envif.attribute)
+                goto fail;
         }
         if (src->data.envif.pattern) {
             d->data.envif.pattern = strdup(src->data.envif.pattern);
-            if (!d->data.envif.pattern) goto fail;
+            if (!d->data.envif.pattern)
+                goto fail;
         }
         break;
     case DIR_HEADER_EDIT:
@@ -243,7 +174,8 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
     case DIR_HEADER_ALWAYS_EDIT_STAR:
         if (src->data.header_ext.edit_pattern) {
             d->data.header_ext.edit_pattern = strdup(src->data.header_ext.edit_pattern);
-            if (!d->data.header_ext.edit_pattern) goto fail;
+            if (!d->data.header_ext.edit_pattern)
+                goto fail;
         }
         break;
     case DIR_REWRITE_COND:
@@ -253,11 +185,13 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
         d->data.rewrite_cond.flags_raw = NULL;
         if (src->data.rewrite_cond.cond_pattern) {
             d->data.rewrite_cond.cond_pattern = strdup(src->data.rewrite_cond.cond_pattern);
-            if (!d->data.rewrite_cond.cond_pattern) goto fail;
+            if (!d->data.rewrite_cond.cond_pattern)
+                goto fail;
         }
         if (src->data.rewrite_cond.flags_raw) {
             d->data.rewrite_cond.flags_raw = strdup(src->data.rewrite_cond.flags_raw);
-            if (!d->data.rewrite_cond.flags_raw) goto fail;
+            if (!d->data.rewrite_cond.flags_raw)
+                goto fail;
         }
         break;
     case DIR_REWRITE_RULE:
@@ -266,15 +200,19 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
         d->data.rewrite_rule.conditions = NULL;
         if (src->data.rewrite_rule.pattern) {
             d->data.rewrite_rule.pattern = strdup(src->data.rewrite_rule.pattern);
-            if (!d->data.rewrite_rule.pattern) goto fail;
+            if (!d->data.rewrite_rule.pattern)
+                goto fail;
         }
         if (src->data.rewrite_rule.flags_raw) {
             d->data.rewrite_rule.flags_raw = strdup(src->data.rewrite_rule.flags_raw);
-            if (!d->data.rewrite_rule.flags_raw) goto fail;
+            if (!d->data.rewrite_rule.flags_raw)
+                goto fail;
         }
         if (src->data.rewrite_rule.conditions) {
-            d->data.rewrite_rule.conditions = copy_directive_list(src->data.rewrite_rule.conditions);
-            if (!d->data.rewrite_rule.conditions) goto fail;
+            d->data.rewrite_rule.conditions =
+                copy_directive_list(src->data.rewrite_rule.conditions);
+            if (!d->data.rewrite_rule.conditions)
+                goto fail;
         }
         break;
     case DIR_REWRITE_MAP:
@@ -283,15 +221,18 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
         d->data.rewrite_map.map_source = NULL;
         if (src->data.rewrite_map.map_name) {
             d->data.rewrite_map.map_name = strdup(src->data.rewrite_map.map_name);
-            if (!d->data.rewrite_map.map_name) goto fail;
+            if (!d->data.rewrite_map.map_name)
+                goto fail;
         }
         if (src->data.rewrite_map.map_type) {
             d->data.rewrite_map.map_type = strdup(src->data.rewrite_map.map_type);
-            if (!d->data.rewrite_map.map_type) goto fail;
+            if (!d->data.rewrite_map.map_type)
+                goto fail;
         }
         if (src->data.rewrite_map.map_source) {
             d->data.rewrite_map.map_source = strdup(src->data.rewrite_map.map_source);
-            if (!d->data.rewrite_map.map_source) goto fail;
+            if (!d->data.rewrite_map.map_source)
+                goto fail;
         }
         break;
     case DIR_IF:
@@ -299,12 +240,15 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
         d->data.if_block.condition = NULL;
         d->data.if_block.children = NULL;
         if (src->data.if_block.condition) {
-            d->data.if_block.condition = expr_clone((const expr_node_t *)src->data.if_block.condition);
-            if (!d->data.if_block.condition) goto fail;
+            d->data.if_block.condition =
+                expr_clone((const expr_node_t *)src->data.if_block.condition);
+            if (!d->data.if_block.condition)
+                goto fail;
         }
         if (src->data.if_block.children) {
             d->data.if_block.children = copy_directive_list(src->data.if_block.children);
-            if (!d->data.if_block.children) goto fail;
+            if (!d->data.if_block.children)
+                goto fail;
         }
         break;
     case DIR_ELSE:
@@ -312,7 +256,8 @@ static htaccess_directive_t *copy_directive(const htaccess_directive_t *src)
         d->data.if_block.children = NULL;
         if (src->data.if_block.children) {
             d->data.if_block.children = copy_directive_list(src->data.if_block.children);
-            if (!d->data.if_block.children) goto fail;
+            if (!d->data.if_block.children)
+                goto fail;
         }
         break;
     default:
@@ -430,8 +375,7 @@ static int directives_match_for_override(const htaccess_directive_t *a,
     /* RedirectMatch: match by pattern */
     case DIR_REDIRECT_MATCH:
         if (a->data.redirect.pattern && b->data.redirect.pattern)
-            return strcmp(a->data.redirect.pattern,
-                          b->data.redirect.pattern) == 0;
+            return strcmp(a->data.redirect.pattern, b->data.redirect.pattern) == 0;
         return 0;
 
     /* FilesMatch: accumulate (parent + child rules both apply) */
@@ -442,8 +386,7 @@ static int directives_match_for_override(const htaccess_directive_t *a,
     case DIR_SETENVIF:
     case DIR_SETENVIF_NOCASE:
     case DIR_BROWSER_MATCH:
-        if (a->name && b->name &&
-            a->data.envif.attribute && b->data.envif.attribute &&
+        if (a->name && b->name && a->data.envif.attribute && b->data.envif.attribute &&
             a->data.envif.pattern && b->data.envif.pattern)
             return strcmp(a->name, b->name) == 0 &&
                    strcmp(a->data.envif.attribute, b->data.envif.attribute) == 0 &&
@@ -456,6 +399,7 @@ static int directives_match_for_override(const htaccess_directive_t *a,
     case DIR_ADD_DEFAULT_CHARSET:
     case DIR_DEFAULT_TYPE:
     case DIR_SATISFY:
+    case DIR_FALLBACK_RESOURCE:
         return 1;
 
     /* RewriteRule / RewriteCond: accumulate (never override) */
@@ -496,7 +440,8 @@ static htaccess_directive_t *merge_directives(htaccess_directive_t *parent,
             if (directives_match_for_override(p, c)) {
                 /* Replace parent directive in-place with child copy */
                 htaccess_directive_t *replacement = copy_directive(c);
-                if (!replacement) break;
+                if (!replacement)
+                    break;
                 replacement->next = p->next;
                 if (prev)
                     prev->next = replacement;
@@ -517,7 +462,8 @@ static htaccess_directive_t *merge_directives(htaccess_directive_t *parent,
         if (!replaced) {
             /* Append child directive to end of parent list */
             htaccess_directive_t *copy = copy_directive(c);
-            if (!copy) continue;
+            if (!copy)
+                continue;
             merge_tail->next = copy;
             merge_tail = copy;
         }
@@ -553,8 +499,7 @@ static htaccess_directive_t *read_and_cache(const char *htaccess_path)
     }
 
     if (fsize > htaccess_size_limit) {
-        lsi_log(NULL, LSI_LOG_WARN,
-                "[htaccess] %s: file too large (%ld bytes, limit %d), skipping",
+        lsi_log(NULL, LSI_LOG_WARN, "[htaccess] %s: file too large (%ld bytes, limit %d), skipping",
                 htaccess_path, fsize, htaccess_size_limit);
         fclose(fp);
         return NULL;
@@ -571,8 +516,7 @@ static htaccess_directive_t *read_and_cache(const char *htaccess_path)
     fclose(fp);
 
     if (nread != (size_t)fsize || read_err) {
-        lsi_log(NULL, LSI_LOG_WARN,
-                "[htaccess] short read or I/O error on %s (got %zu of %ld)",
+        lsi_log(NULL, LSI_LOG_WARN, "[htaccess] short read or I/O error on %s (got %zu of %ld)",
                 htaccess_path, nread, (long)fsize);
         free(content);
         return NULL;
@@ -586,8 +530,8 @@ static htaccess_directive_t *read_and_cache(const char *htaccess_path)
     clock_gettime(CLOCK_MONOTONIC, &t_end);
     free(content);
 
-    long elapsed_ms = (t_end.tv_sec - t_start.tv_sec) * 1000 +
-                      (t_end.tv_nsec - t_start.tv_nsec) / 1000000;
+    long elapsed_ms =
+        (t_end.tv_sec - t_start.tv_sec) * 1000 + (t_end.tv_nsec - t_start.tv_nsec) / 1000000;
     if (elapsed_ms > 2500 && fsize > MAX_HTACCESS_FILE_SIZE_FLOOR) {
         int new_limit = (int)(fsize / 2);
         if (new_limit < MAX_HTACCESS_FILE_SIZE_FLOOR)
@@ -595,16 +539,15 @@ static htaccess_directive_t *read_and_cache(const char *htaccess_path)
         if (new_limit < htaccess_size_limit) {
             htaccess_size_limit = new_limit;
             lsi_log(NULL, LSI_LOG_WARN,
-                    "[htaccess] %s: parse took %ldms, reducing size limit to %d",
-                    htaccess_path, elapsed_ms, htaccess_size_limit);
+                    "[htaccess] %s: parse took %ldms, reducing size limit to %d", htaccess_path,
+                    elapsed_ms, htaccess_size_limit);
         }
     }
 
     /* Try to cache the result (cache takes ownership of dirs on success).
      * Use st_ino ^ st_blocks as cache key (must match dirwalk lookup). */
     ino_t cache_ino = st.st_ino ^ (ino_t)st.st_blocks;
-    int put_rc = htaccess_cache_put(htaccess_path, st.st_mtime,
-                                    st.st_size, cache_ino, dirs);
+    int put_rc = htaccess_cache_put(htaccess_path, st.st_mtime, st.st_size, cache_ino, dirs);
     if (put_rc != 0) {
         /* Cache full or error — caller still owns dirs, return directly */
         return dirs;
@@ -627,8 +570,8 @@ static htaccess_directive_t *read_and_cache(const char *htaccess_path)
  * Returns the filtered list (may be NULL if all removed).
  * Frees removed nodes.
  */
-static htaccess_directive_t *filter_by_allow_override(
-    htaccess_directive_t *head, int allow_override, const char *path)
+static htaccess_directive_t *filter_by_allow_override(htaccess_directive_t *head,
+                                                      int allow_override, const char *path)
 {
     htaccess_directive_t *result = NULL;
     htaccess_directive_t *tail = NULL;
@@ -641,24 +584,23 @@ static htaccess_directive_t *filter_by_allow_override(
         int cat = directive_category(cur->type);
         if (cat != ALLOW_OVERRIDE_ALL && (allow_override & cat) != cat) {
             /* Directive not permitted — log and free */
-            lsi_log(NULL, LSI_LOG_WARN,
-                    "[htaccess] %s:%d: directive blocked by AllowOverride",
+            lsi_log(NULL, LSI_LOG_WARN, "[htaccess] %s:%d: directive blocked by AllowOverride",
                     path ? path : "<unknown>", cur->line_number);
             htaccess_directives_free(cur);
         } else {
             /* Recursively filter container children */
             switch (cur->type) {
             case DIR_FILES_MATCH:
-                cur->data.files_match.children = filter_by_allow_override(
-                    cur->data.files_match.children, allow_override, path);
+                cur->data.files_match.children =
+                    filter_by_allow_override(cur->data.files_match.children, allow_override, path);
                 break;
             case DIR_FILES:
-                cur->data.files.children = filter_by_allow_override(
-                    cur->data.files.children, allow_override, path);
+                cur->data.files.children =
+                    filter_by_allow_override(cur->data.files.children, allow_override, path);
                 break;
             case DIR_IFMODULE:
-                cur->data.ifmodule.children = filter_by_allow_override(
-                    cur->data.ifmodule.children, allow_override, path);
+                cur->data.ifmodule.children =
+                    filter_by_allow_override(cur->data.ifmodule.children, allow_override, path);
                 break;
             case DIR_REQUIRE_ANY_OPEN:
             case DIR_REQUIRE_ALL_OPEN:
@@ -672,8 +614,8 @@ static htaccess_directive_t *filter_by_allow_override(
                 break;
             case DIR_LIMIT:
             case DIR_LIMIT_EXCEPT:
-                cur->data.limit.children = filter_by_allow_override(
-                    cur->data.limit.children, allow_override, path);
+                cur->data.limit.children =
+                    filter_by_allow_override(cur->data.limit.children, allow_override, path);
                 break;
             case DIR_REWRITE_RULE:
                 /* Conditions are owned by the rule, filter them too */
@@ -683,8 +625,8 @@ static htaccess_directive_t *filter_by_allow_override(
             case DIR_IF:
             case DIR_ELSEIF:
             case DIR_ELSE:
-                cur->data.if_block.children = filter_by_allow_override(
-                    cur->data.if_block.children, allow_override, path);
+                cur->data.if_block.children =
+                    filter_by_allow_override(cur->data.if_block.children, allow_override, path);
                 break;
             default:
                 break;
@@ -698,7 +640,7 @@ static htaccess_directive_t *filter_by_allow_override(
             tail = cur;
         }
 
-next_directive:
+    next_directive:
         cur = next;
     }
 
@@ -726,9 +668,12 @@ static htaccess_directive_t *flatten_ifmodule(htaccess_directive_t *head)
             /* Splice children (recursively flatten them too) */
             htaccess_directive_t *ic = flatten_ifmodule(cur->data.ifmodule.children);
             if (ic) {
-                if (!flat_head) flat_head = ic;
-                else flat_tail->next = ic;
-                while (ic->next) ic = ic->next;
+                if (!flat_head)
+                    flat_head = ic;
+                else
+                    flat_tail->next = ic;
+                while (ic->next)
+                    ic = ic->next;
                 flat_tail = ic;
             }
             cur->data.ifmodule.children = NULL;
@@ -736,22 +681,36 @@ static htaccess_directive_t *flatten_ifmodule(htaccess_directive_t *head)
             htaccess_directives_free(cur);
         } else {
             cur->next = NULL;
-            if (!flat_head) flat_head = cur;
-            else flat_tail->next = cur;
+            if (!flat_head)
+                flat_head = cur;
+            else
+                flat_tail->next = cur;
             flat_tail = cur;
 
             /* Recurse into container children */
             htaccess_directive_t **cp = NULL;
             switch (cur->type) {
-            case DIR_FILES:       cp = &cur->data.files.children; break;
-            case DIR_FILES_MATCH: cp = &cur->data.files_match.children; break;
-            case DIR_IF: case DIR_ELSEIF: case DIR_ELSE:
-                                  cp = &cur->data.if_block.children; break;
-            case DIR_LIMIT: case DIR_LIMIT_EXCEPT:
-                                  cp = &cur->data.limit.children; break;
-            case DIR_REQUIRE_ANY_OPEN: case DIR_REQUIRE_ALL_OPEN:
-                                  cp = &cur->data.require_container.children; break;
-            default: break;
+            case DIR_FILES:
+                cp = &cur->data.files.children;
+                break;
+            case DIR_FILES_MATCH:
+                cp = &cur->data.files_match.children;
+                break;
+            case DIR_IF:
+            case DIR_ELSEIF:
+            case DIR_ELSE:
+                cp = &cur->data.if_block.children;
+                break;
+            case DIR_LIMIT:
+            case DIR_LIMIT_EXCEPT:
+                cp = &cur->data.limit.children;
+                break;
+            case DIR_REQUIRE_ANY_OPEN:
+            case DIR_REQUIRE_ALL_OPEN:
+                cp = &cur->data.require_container.children;
+                break;
+            default:
+                break;
             }
             if (cp && *cp)
                 *cp = flatten_ifmodule(*cp);
@@ -761,8 +720,7 @@ static htaccess_directive_t *flatten_ifmodule(htaccess_directive_t *head)
     return flat_head;
 }
 
-htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
-                                       const char *doc_root,
+htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session, const char *doc_root,
                                        const char *target_dir)
 {
     /* Configurable AccessFileName via env var (default: .htaccess).
@@ -772,8 +730,7 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
     const char *access_filename = ".htaccess";
     {
         const char *env = getenv("HTACCESS_ACCESS_FILENAME");
-        if (env && env[0] && !strchr(env, '/') && !strchr(env, '\\') &&
-            !strstr(env, ".."))
+        if (env && env[0] && !strchr(env, '/') && !strchr(env, '\\') && !strstr(env, ".."))
             access_filename = env;
     }
 
@@ -789,13 +746,6 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
         }
     }
 
-    /* Periodically flush negative stat cache so newly created
-     * .htaccess files are discovered within ~256 requests */
-    if (++neg_stat_generation >= NEG_STAT_TTL) {
-        neg_stat_flush();
-        neg_stat_generation = 0;
-    }
-
     if (!doc_root || !target_dir)
         return NULL;
 
@@ -808,8 +758,7 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
             vh_len--;
         size_t dr_len = strlen(doc_root);
         /* vhroot must be a proper prefix of doc_root at a path boundary */
-        if (vh_len <= dr_len &&
-            strncmp(vhroot, doc_root, vh_len) == 0 &&
+        if (vh_len <= dr_len && strncmp(vhroot, doc_root, vh_len) == 0 &&
             (doc_root[vh_len] == '/' || doc_root[vh_len] == '\0')) {
             walk_root = vhroot;
         }
@@ -835,7 +784,7 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
     /* Small stack array for typical path depth; heap fallback for deep trees */
 #define STACK_DIR_DEPTH 6
     char stack_paths[STACK_DIR_DEPTH][MAX_PATH_LEN];
-    char (*paths)[MAX_PATH_LEN] = stack_paths;
+    char(*paths)[MAX_PATH_LEN] = stack_paths;
     int paths_cap = STACK_DIR_DEPTH;
     int heap_paths = 0;
 
@@ -866,7 +815,8 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
 
         /* Reject ".." path components — defense-in-depth against traversal */
         if (comp_len == 2 && rest[0] == '.' && rest[1] == '.') {
-            if (heap_paths) free(paths);
+            if (heap_paths)
+                free(paths);
             return NULL;
         }
 
@@ -881,9 +831,9 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
         /* Grow to heap if stack array is full */
         if (num_paths >= paths_cap && !heap_paths) {
             paths = malloc((size_t)MAX_DIR_DEPTH * MAX_PATH_LEN);
-            if (!paths) return NULL;
-            memcpy(paths, stack_paths,
-                   (size_t)STACK_DIR_DEPTH * MAX_PATH_LEN);
+            if (!paths)
+                return NULL;
+            memcpy(paths, stack_paths, (size_t)STACK_DIR_DEPTH * MAX_PATH_LEN);
             paths_cap = MAX_DIR_DEPTH;
             heap_paths = 1;
         }
@@ -902,8 +852,7 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
     int allow_override = ALLOW_OVERRIDE_ALL;
     if (session) {
         int val_len = 0;
-        const char *ao_val = lsi_session_get_env(session,
-            "HTACCESS_ALLOW_OVERRIDE", 23, &val_len);
+        const char *ao_val = lsi_session_get_env(session, "HTACCESS_ALLOW_OVERRIDE", 23, &val_len);
         if (ao_val && val_len > 0) {
             int v = atoi(ao_val);
             if (v >= 0 && v <= 255)
@@ -914,8 +863,7 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
     for (int i = 0; i < num_paths; i++) {
         /* Construct .htaccess path for this directory */
         char htaccess_path[MAX_PATH_LEN];
-        int written = snprintf(htaccess_path, MAX_PATH_LEN,
-                               "%s/%s", paths[i], access_filename);
+        int written = snprintf(htaccess_path, MAX_PATH_LEN, "%s/%s", paths[i], access_filename);
         if (written < 0 || written >= MAX_PATH_LEN)
             continue;
 
@@ -924,18 +872,13 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
         struct stat st;
         int have_stat;
 
-        /* Skip stat if negative cache says this path has no .htaccess */
-        if (neg_stat_check(htaccess_path)) {
-            have_stat = 0;
-        } else {
-            have_stat = (stat(htaccess_path, &st) == 0);
-            if (!have_stat)
-                neg_stat_add(htaccess_path);
-        }
+        /* Always stat the access file. Caching a prior miss creates a
+         * security window where newly added .htaccess rules are ignored. */
+        have_stat = (stat(htaccess_path, &st) == 0);
 
         time_t mtime = have_stat ? st.st_mtime : 0;
-        off_t  fsize = have_stat ? st.st_size  : 0;
-        ino_t  inode = have_stat ? st.st_ino   : 0;
+        off_t fsize = have_stat ? st.st_size : 0;
+        ino_t inode = have_stat ? st.st_ino : 0;
         /* Use st_blocks as additional change indicator (improves change detection accuracy).
          * More reliable than mtime alone on NFS/containers. Encode into
          * the inode field to avoid changing cache API: inode XOR blocks. */
@@ -943,14 +886,11 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session,
             inode ^= (ino_t)st.st_blocks;
 
         /* Try cache first */
-        int cache_hit = htaccess_cache_get(htaccess_path, mtime, fsize,
-                                           inode, &level_dirs);
+        int cache_hit = htaccess_cache_get(htaccess_path, mtime, fsize, inode, &level_dirs);
 
         if (cache_hit != 0 && have_stat) {
             /* Cache miss but file exists — read and parse */
             level_dirs = read_and_cache(htaccess_path);
-            if (level_dirs)
-                neg_stat_remove(htaccess_path);
         }
 
         if (level_dirs) {

@@ -17,7 +17,6 @@ Access control directives restrict who can access your site or specific director
 | `Require ip` | `Require ip ip\|cidr [...]` | Allow access from specified IPs or CIDR ranges |
 | `Require not ip` | `Require not ip ip\|cidr [...]` | Deny access from specified IPs or CIDR ranges |
 | `Require env` | `Require env VAR` | Allow access when the named environment variable is set |
-| `Satisfy` | `Satisfy Any\|All` | Combine host-based access checks with authentication requirements |
 
 ## Examples
 
@@ -68,17 +67,6 @@ Require ip 2001:db8::/32
 SetEnvIf X-Forwarded-For "^10\." is_internal
 Require env is_internal
 ```
-
-### Combine IP Rules and Authentication
-
-```apache
-Order Deny,Allow
-Deny from all
-Allow from 10.0.0.0/8
-Satisfy Any
-```
-
-With `Satisfy Any`, either an allowed IP rule or a successful authentication check can grant access. With `Satisfy All`, both must pass.
 
 :::note
 Both IPv4 and IPv6 addresses are supported in all IP-based directives, including CIDR notation (e.g., `192.168.0.0/16`, `2001:db8::/32`).

@@ -9,6 +9,9 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 extern "C" {
 #include "htaccess_cache.h"
@@ -18,23 +21,21 @@ extern "C" {
 
 /* ---- Helpers ---- */
 
-static htaccess_directive_t *make_directive(directive_type_t type,
-                                            const char *name,
-                                            const char *value,
-                                            int line)
+static htaccess_directive_t *make_directive(directive_type_t type, const char *name,
+                                            const char *value, int line)
 {
-    auto *d = static_cast<htaccess_directive_t *>(
-        calloc(1, sizeof(htaccess_directive_t)));
+    auto *d = static_cast<htaccess_directive_t *>(calloc(1, sizeof(htaccess_directive_t)));
     d->type = type;
     d->line_number = line;
-    if (name)  d->name  = strdup(name);
-    if (value) d->value = strdup(value);
+    if (name)
+        d->name = strdup(name);
+    if (value)
+        d->value = strdup(value);
     d->next = nullptr;
     return d;
 }
 
-static void append_directive(htaccess_directive_t **head,
-                             htaccess_directive_t *node)
+static void append_directive(htaccess_directive_t **head, htaccess_directive_t *node)
 {
     if (!*head) {
         *head = node;
@@ -54,10 +55,8 @@ static int count_directives(const htaccess_directive_t *head)
     return n;
 }
 
-static const htaccess_directive_t *find_by_type_and_name(
-    const htaccess_directive_t *head,
-    directive_type_t type,
-    const char *name)
+static const htaccess_directive_t *find_by_type_and_name(const htaccess_directive_t *head,
+                                                         directive_type_t type, const char *name)
 {
     for (const htaccess_directive_t *d = head; d; d = d->next) {
         if (d->type == type) {
@@ -68,14 +67,33 @@ static const htaccess_directive_t *find_by_type_and_name(
     return nullptr;
 }
 
+static std::string make_temp_dir()
+{
+    char templ[] = "/tmp/litehttpd-dirwalk-XXXXXX";
+    char *path = mkdtemp(templ);
+    return path ? std::string(path) : std::string();
+}
+
+static void rm_rf(const std::string &path)
+{
+    if (!path.empty())
+        std::filesystem::remove_all(path);
+}
+
 /* ==================================================================
  *  Test fixture: init/destroy cache around each test
  * ================================================================== */
 
 class DirWalkerTest : public ::testing::Test {
-protected:
-    void SetUp() override    { ASSERT_EQ(htaccess_cache_init(16), 0); }
-    void TearDown() override { htaccess_cache_destroy(); }
+  protected:
+    void SetUp() override
+    {
+        ASSERT_EQ(htaccess_cache_init(16), 0);
+    }
+    void TearDown() override
+    {
+        htaccess_cache_destroy();
+    }
 };
 
 /* ==================================================================
@@ -85,13 +103,11 @@ protected:
 TEST_F(DirWalkerTest, SingleLevel_DocRootOnly)
 {
     /* Place directives at doc_root */
-    htaccess_directive_t *dirs = make_directive(
-        DIR_HEADER_SET, "X-Frame-Options", "DENY", 1);
+    htaccess_directive_t *dirs = make_directive(DIR_HEADER_SET, "X-Frame-Options", "DENY", 1);
 
     htaccess_cache_put("/var/www/html/.htaccess", 0, 0, 0, dirs);
 
-    htaccess_directive_t *merged = htaccess_dirwalk(
-        nullptr, "/var/www/html", "/var/www/html");
+    htaccess_directive_t *merged = htaccess_dirwalk(nullptr, "/var/www/html", "/var/www/html");
 
     ASSERT_NE(merged, nullptr);
     EXPECT_EQ(count_directives(merged), 1);
@@ -108,17 +124,14 @@ TEST_F(DirWalkerTest, SingleLevel_DocRootOnly)
 TEST_F(DirWalkerTest, MultiLevel_NoOverlap)
 {
     /* Root: Header set X-Root root-val */
-    htaccess_directive_t *root_dirs = make_directive(
-        DIR_HEADER_SET, "X-Root", "root-val", 1);
+    htaccess_directive_t *root_dirs = make_directive(DIR_HEADER_SET, "X-Root", "root-val", 1);
     htaccess_cache_put("/var/www/html/.htaccess", 0, 0, 0, root_dirs);
 
     /* Child: SetEnv APP_ENV production */
-    htaccess_directive_t *child_dirs = make_directive(
-        DIR_SETENV, "APP_ENV", "production", 1);
+    htaccess_directive_t *child_dirs = make_directive(DIR_SETENV, "APP_ENV", "production", 1);
     htaccess_cache_put("/var/www/html/app/.htaccess", 0, 0, 0, child_dirs);
 
-    htaccess_directive_t *merged = htaccess_dirwalk(
-        nullptr, "/var/www/html", "/var/www/html/app");
+    htaccess_directive_t *merged = htaccess_dirwalk(nullptr, "/var/www/html", "/var/www/html/app");
 
     ASSERT_NE(merged, nullptr);
     EXPECT_EQ(count_directives(merged), 2);
@@ -141,17 +154,14 @@ TEST_F(DirWalkerTest, MultiLevel_NoOverlap)
 TEST_F(DirWalkerTest, MultiLevel_ChildOverridesParent)
 {
     /* Root: Header set X-Custom parent-val */
-    htaccess_directive_t *root_dirs = make_directive(
-        DIR_HEADER_SET, "X-Custom", "parent-val", 1);
+    htaccess_directive_t *root_dirs = make_directive(DIR_HEADER_SET, "X-Custom", "parent-val", 1);
     htaccess_cache_put("/var/www/html/.htaccess", 0, 0, 0, root_dirs);
 
     /* Child: Header set X-Custom child-val */
-    htaccess_directive_t *child_dirs = make_directive(
-        DIR_HEADER_SET, "X-Custom", "child-val", 1);
+    htaccess_directive_t *child_dirs = make_directive(DIR_HEADER_SET, "X-Custom", "child-val", 1);
     htaccess_cache_put("/var/www/html/sub/.htaccess", 0, 0, 0, child_dirs);
 
-    htaccess_directive_t *merged = htaccess_dirwalk(
-        nullptr, "/var/www/html", "/var/www/html/sub");
+    htaccess_directive_t *merged = htaccess_dirwalk(nullptr, "/var/www/html", "/var/www/html/sub");
 
     ASSERT_NE(merged, nullptr);
     EXPECT_EQ(count_directives(merged), 1);
@@ -170,10 +180,34 @@ TEST_F(DirWalkerTest, MultiLevel_ChildOverridesParent)
 TEST_F(DirWalkerTest, EmptyDirectory_NoHtaccess)
 {
     /* No cache entries — all directories are empty */
-    htaccess_directive_t *merged = htaccess_dirwalk(
-        nullptr, "/var/www/html", "/var/www/html/empty/dir");
+    htaccess_directive_t *merged =
+        htaccess_dirwalk(nullptr, "/var/www/html", "/var/www/html/empty/dir");
 
     EXPECT_EQ(merged, nullptr);
+}
+
+TEST_F(DirWalkerTest, NewlyCreatedHtaccess_IsVisibleImmediately)
+{
+    std::string doc_root = make_temp_dir();
+    ASSERT_FALSE(doc_root.empty());
+
+    htaccess_directive_t *missing = htaccess_dirwalk(nullptr, doc_root.c_str(), doc_root.c_str());
+    EXPECT_EQ(missing, nullptr);
+
+    {
+        std::ofstream htaccess(doc_root + "/.htaccess");
+        htaccess << "Header set X-New-Rule active\n";
+    }
+
+    htaccess_directive_t *merged = htaccess_dirwalk(nullptr, doc_root.c_str(), doc_root.c_str());
+
+    ASSERT_NE(merged, nullptr);
+    auto *header = find_by_type_and_name(merged, DIR_HEADER_SET, "X-New-Rule");
+    ASSERT_NE(header, nullptr);
+    EXPECT_STREQ(header->value, "active");
+
+    htaccess_directives_free(merged);
+    rm_rf(doc_root);
 }
 
 /* ==================================================================
@@ -183,15 +217,14 @@ TEST_F(DirWalkerTest, EmptyDirectory_NoHtaccess)
 TEST_F(DirWalkerTest, MiddleDirWithoutHtaccess_InheritsFromRoot)
 {
     /* Root has directives */
-    htaccess_directive_t *root_dirs = make_directive(
-        DIR_HEADER_SET, "X-Root", "root-val", 1);
+    htaccess_directive_t *root_dirs = make_directive(DIR_HEADER_SET, "X-Root", "root-val", 1);
     htaccess_cache_put("/var/www/html/.htaccess", 0, 0, 0, root_dirs);
 
     /* Middle dir (/var/www/html/mid) has NO .htaccess */
     /* Leaf dir (/var/www/html/mid/leaf) has NO .htaccess */
 
-    htaccess_directive_t *merged = htaccess_dirwalk(
-        nullptr, "/var/www/html", "/var/www/html/mid/leaf");
+    htaccess_directive_t *merged =
+        htaccess_dirwalk(nullptr, "/var/www/html", "/var/www/html/mid/leaf");
 
     ASSERT_NE(merged, nullptr);
     EXPECT_EQ(count_directives(merged), 1);
@@ -208,22 +241,18 @@ TEST_F(DirWalkerTest, MiddleDirWithoutHtaccess_InheritsFromRoot)
 TEST_F(DirWalkerTest, ThreeLevelDeep_OverrideChain)
 {
     /* Root: Header set X-Level root */
-    htaccess_directive_t *root_dirs = make_directive(
-        DIR_HEADER_SET, "X-Level", "root", 1);
+    htaccess_directive_t *root_dirs = make_directive(DIR_HEADER_SET, "X-Level", "root", 1);
     htaccess_cache_put("/var/www/html/.htaccess", 0, 0, 0, root_dirs);
 
     /* Level 1: Header set X-Level level1 */
-    htaccess_directive_t *l1_dirs = make_directive(
-        DIR_HEADER_SET, "X-Level", "level1", 1);
+    htaccess_directive_t *l1_dirs = make_directive(DIR_HEADER_SET, "X-Level", "level1", 1);
     htaccess_cache_put("/var/www/html/a/.htaccess", 0, 0, 0, l1_dirs);
 
     /* Level 2: Header set X-Level level2 */
-    htaccess_directive_t *l2_dirs = make_directive(
-        DIR_HEADER_SET, "X-Level", "level2", 1);
+    htaccess_directive_t *l2_dirs = make_directive(DIR_HEADER_SET, "X-Level", "level2", 1);
     htaccess_cache_put("/var/www/html/a/b/.htaccess", 0, 0, 0, l2_dirs);
 
-    htaccess_directive_t *merged = htaccess_dirwalk(
-        nullptr, "/var/www/html", "/var/www/html/a/b");
+    htaccess_directive_t *merged = htaccess_dirwalk(nullptr, "/var/www/html", "/var/www/html/a/b");
 
     ASSERT_NE(merged, nullptr);
     EXPECT_EQ(count_directives(merged), 1);
@@ -242,23 +271,18 @@ TEST_F(DirWalkerTest, ThreeLevelDeep_OverrideChain)
 TEST_F(DirWalkerTest, MultipleDirectiveTypes_AcrossLevels)
 {
     /* Root: Header set X-A aaa + SetEnv VAR1 val1 */
-    htaccess_directive_t *root_dirs = make_directive(
-        DIR_HEADER_SET, "X-A", "aaa", 1);
-    htaccess_directive_t *root_env = make_directive(
-        DIR_SETENV, "VAR1", "val1", 2);
+    htaccess_directive_t *root_dirs = make_directive(DIR_HEADER_SET, "X-A", "aaa", 1);
+    htaccess_directive_t *root_env = make_directive(DIR_SETENV, "VAR1", "val1", 2);
     append_directive(&root_dirs, root_env);
     htaccess_cache_put("/var/www/html/.htaccess", 0, 0, 0, root_dirs);
 
     /* Child: Header set X-A bbb (overrides) + SetEnv VAR2 val2 (new) */
-    htaccess_directive_t *child_dirs = make_directive(
-        DIR_HEADER_SET, "X-A", "bbb", 1);
-    htaccess_directive_t *child_env = make_directive(
-        DIR_SETENV, "VAR2", "val2", 2);
+    htaccess_directive_t *child_dirs = make_directive(DIR_HEADER_SET, "X-A", "bbb", 1);
+    htaccess_directive_t *child_env = make_directive(DIR_SETENV, "VAR2", "val2", 2);
     append_directive(&child_dirs, child_env);
     htaccess_cache_put("/var/www/html/sub/.htaccess", 0, 0, 0, child_dirs);
 
-    htaccess_directive_t *merged = htaccess_dirwalk(
-        nullptr, "/var/www/html", "/var/www/html/sub");
+    htaccess_directive_t *merged = htaccess_dirwalk(nullptr, "/var/www/html", "/var/www/html/sub");
 
     ASSERT_NE(merged, nullptr);
     /* X-A overridden, VAR1 inherited, VAR2 added = 3 directives */
@@ -299,8 +323,7 @@ TEST_F(DirWalkerTest, NullTargetDir_ReturnsNull)
 
 TEST_F(DirWalkerTest, TargetNotUnderDocRoot_ReturnsNull)
 {
-    EXPECT_EQ(htaccess_dirwalk(nullptr, "/var/www/html", "/other/path"),
-              nullptr);
+    EXPECT_EQ(htaccess_dirwalk(nullptr, "/var/www/html", "/other/path"), nullptr);
 }
 
 /* ==================================================================
@@ -310,19 +333,16 @@ TEST_F(DirWalkerTest, TargetNotUnderDocRoot_ReturnsNull)
 TEST_F(DirWalkerTest, SingletonDirective_ChildOverrides)
 {
     /* Root: ExpiresActive On */
-    htaccess_directive_t *root_dirs = make_directive(
-        DIR_EXPIRES_ACTIVE, nullptr, nullptr, 1);
+    htaccess_directive_t *root_dirs = make_directive(DIR_EXPIRES_ACTIVE, nullptr, nullptr, 1);
     root_dirs->data.expires.active = 1;
     htaccess_cache_put("/var/www/html/.htaccess", 0, 0, 0, root_dirs);
 
     /* Child: ExpiresActive Off */
-    htaccess_directive_t *child_dirs = make_directive(
-        DIR_EXPIRES_ACTIVE, nullptr, nullptr, 1);
+    htaccess_directive_t *child_dirs = make_directive(DIR_EXPIRES_ACTIVE, nullptr, nullptr, 1);
     child_dirs->data.expires.active = 0;
     htaccess_cache_put("/var/www/html/sub/.htaccess", 0, 0, 0, child_dirs);
 
-    htaccess_directive_t *merged = htaccess_dirwalk(
-        nullptr, "/var/www/html", "/var/www/html/sub");
+    htaccess_directive_t *merged = htaccess_dirwalk(nullptr, "/var/www/html", "/var/www/html/sub");
 
     ASSERT_NE(merged, nullptr);
     EXPECT_EQ(count_directives(merged), 1);

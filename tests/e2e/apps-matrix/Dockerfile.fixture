@@ -1,0 +1,36 @@
+FROM php:8.2-cli
+
+ARG COMPOSER_VERSION=2.8.12
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        bzip2 \
+        curl \
+        default-mysql-client \
+        git \
+        libcurl4-openssl-dev \
+        libfreetype6-dev \
+        libicu-dev \
+        libjpeg62-turbo-dev \
+        libonig-dev \
+        libpng-dev \
+        libxml2-dev \
+        libzip-dev \
+        mariadb-client \
+        unzip \
+        zip \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install curl gd intl mbstring mysqli pdo_mysql xml zip \
+    && curl -fsSL "https://getcomposer.org/download/${COMPOSER_VERSION}/composer.phar" -o /usr/local/bin/composer \
+    && chmod +x /usr/local/bin/composer \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+
+ENV COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_CACHE_DIR=/cache/composer \
+    MATRIX_REAL_ALLOW_NETWORK=1 \
+    MATRIX_REAL_DOWNLOAD_DIR=/cache/downloads \
+    MATRIX_REAL_SOURCE_ROOT=/cache/real-sources
+
+CMD ["bash", "tests/e2e/apps-matrix/prewarm_fixture_cache.sh"]

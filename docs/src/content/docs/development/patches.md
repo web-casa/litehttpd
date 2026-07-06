@@ -73,8 +73,7 @@ All 4 patches are pre-applied and verified in the `openlitespeed-litehttpd` RPM 
 cd /path/to/openlitespeed-1.8.5
 patch -p1 < /path/to/litehttpd/patches/0001-lsiapi-phpconfig.patch
 patch -p1 < /path/to/litehttpd/patches/0002-lsiapi-rewrite.patch
-patch -p1 < /path/to/litehttpd/patches/0003-readapacheconf.patch
-patch -p1 < /path/to/litehttpd/patches/0004-autoindex-403.patch
+# Patch 0003 and 0004 require manual application (Python scripts)
 bash build.sh
 ```
 

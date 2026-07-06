@@ -10,7 +10,7 @@ CyberPanel uses OpenLiteSpeed as its web server. Depending on your setup, you ma
 - **Stock OLS** (most users) — CyberPanel installed via the official LiteSpeed repo, no paid .htaccess module
 - **CyberPanel OLS with htaccess module** (paid license) — CyberPanel's `cyberpanel_ols.so` module providing ~29 .htaccess directives
 
-LiteHTTPD works with both scenarios. It provides 83 directive types (vs CyberPanel's 29) and is free (GPLv3).
+LiteHTTPD works with both scenarios. It provides 80 directives (vs CyberPanel's 29) and is free (GPLv3).
 
 ## Before You Start
 
@@ -37,7 +37,7 @@ sed -i '/module cyberpanel_ols/,/}/d' /usr/local/lsws/conf/httpd_config.conf
 
 | Feature | CyberPanel .htaccess | LiteHTTPD |
 |---------|---------------------|-----------|
-| Directive types | ~29 | 83 |
+| Directives | ~29 | 80 |
 | RewriteRule execution | No | Yes (Full mode) |
 | If/ElseIf/Else | No | Yes |
 | ap_expr engine | No | Yes |
@@ -139,7 +139,7 @@ After installing LiteHTTPD, your server behaves slightly differently:
 
 2. **Path traversal returns 403** — Encoded `../` sequences (like `%2e%2e/`) return 403 instead of stock OLS's 400/404. This is a security improvement.
 
-3. **All 83 .htaccess directive types are processed** — If your `.htaccess` files contain directives that stock OLS previously ignored (like `Header set`, `Require`, `FilesMatch`), they now take effect. Review your `.htaccess` files to ensure no unintended rules become active.
+3. **All 80 .htaccess directives are processed** — If your `.htaccess` files contain directives that stock OLS previously ignored (like `Header set`, `Require`, `FilesMatch`), they now take effect. Review your `.htaccess` files to ensure no unintended rules become active.
 
 ## Verification
 

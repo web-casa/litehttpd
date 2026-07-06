@@ -103,7 +103,7 @@ See [Security Headers](/ols/security-headers/) for examples.
 
 ## LiteHTTPD Module Security Features
 
-When the LiteHTTPD module (`litehttpd_htaccess.so`) is installed, you gain `.htaccess`-based security controls that are familiar to Apache administrators:
+When the LiteHTTPD module (`ols_htaccess.so`) is installed, you gain `.htaccess`-based security controls that are familiar to Apache administrators:
 
 ### Authentication and Authorization
 

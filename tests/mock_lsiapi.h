@@ -238,6 +238,13 @@ int         lsi_session_get_dir_option(lsi_session_t *session,
 /* Internal URI redirect (v2: DirectoryIndex) */
 int         lsi_session_set_uri_internal(lsi_session_t *session,
                                          const char *uri, int uri_len);
+int         lsiapi_has_custom_extensions(void);
+int         lsiapi_has_php_config_extensions(void);
+int         lsiapi_has_rewrite_extensions(void);
+void       *lsiapi_parse_rewrite_rules(const char *rules_text, int text_len);
+int         lsiapi_exec_rewrite_rules(lsi_session_t *session, void *handle,
+                                      const char *base, int base_len);
+void        lsiapi_free_rewrite_rules(void *handle);
 
 /* File existence check (v2: DirectoryIndex) */
 int         lsi_session_file_exists(lsi_session_t *session,

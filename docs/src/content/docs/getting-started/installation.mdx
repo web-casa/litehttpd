@@ -12,10 +12,10 @@ LiteHTTPD (Full) is the default and recommended edition. It includes the patched
 ### Prerequisites
 
 - OpenLiteSpeed 1.7.0 or later
-- Linux x86_64 for RPM installs (ARM64 RPMs are not currently published)
+- Linux x86_64 (ARM64 not yet supported)
 
 <Tabs>
-<TabItem label="RPM Repo (EL 8/9/10) -- recommended">
+<TabItem label="RPM Repo (EL 9) -- recommended">
 
 <Steps>
 1. Add the LiteHTTPD RPM repository and install:
@@ -50,6 +50,38 @@ LiteHTTPD (Full) is the default and recommended edition. It includes the patched
 </Steps>
 
 </TabItem>
+<TabItem label="Binary tarball (any distro)">
+
+Distro-independent tarballs (glibc 2.28+, built like the official OLS tarball — extract and run `install.sh`). Download from [rpms.litehttpd.com](https://rpms.litehttpd.com/) or the GitHub release.
+
+<Steps>
+1. **Fresh install** (no OpenLiteSpeed yet) — installs the complete patched OLS + module:
+   ```bash
+   curl -LO https://rpms.litehttpd.com/openlitespeed-litehttpd-1.8.5-x86_64-linux.tgz
+   tar xzf openlitespeed-litehttpd-1.8.5-x86_64-linux.tgz
+   cd openlitespeed-litehttpd-1.8.5 && sudo ./install.sh
+   ```
+
+2. **Already running official OpenLiteSpeed** — pick an overlay:
+
+   - **Full features** (overlay the patched binary — must match your installed OLS version; backs up the original):
+     ```bash
+     tar xzf litehttpd-ols-patch-1.8.5-x86_64-linux.tgz
+     cd litehttpd-ols-patch-1.8.5 && sudo ./install.sh
+     ```
+   - **Module only** (works on *any* OLS version; no binary change — `RewriteRule`/`php_value` are parsed but not executed):
+     ```bash
+     tar xzf litehttpd-module-0.2.2-x86_64-linux.tgz
+     cd litehttpd-module-0.2.2 && sudo ./install.sh
+     ```
+
+3. Restart OLS:
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+   ```
+</Steps>
+
+</TabItem>
 <TabItem label="From Source (Full)">
 
 <Steps>
@@ -68,8 +100,7 @@ LiteHTTPD (Full) is the default and recommended edition. It includes the patched
    cd openlitespeed
    patch -p1 < /path/to/patches/0001-lsiapi-phpconfig.patch
    patch -p1 < /path/to/patches/0002-lsiapi-rewrite.patch
-   patch -p1 < /path/to/patches/0003-readapacheconf.patch
-   patch -p1 < /path/to/patches/0004-autoindex-403.patch
+   # Apply patches 0003, 0004
    bash build.sh
    ```
 

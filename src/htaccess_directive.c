@@ -157,6 +157,7 @@ int directive_category(directive_type_t type)
     case DIR_REDIRECT:
     case DIR_REDIRECT_MATCH:
     case DIR_ERROR_DOCUMENT:
+    case DIR_FALLBACK_RESOURCE:
     case DIR_REWRITE_ENGINE:
     case DIR_REWRITE_BASE:
     case DIR_REWRITE_COND:

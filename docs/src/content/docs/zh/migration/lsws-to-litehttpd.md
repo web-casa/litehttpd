@@ -61,7 +61,7 @@ LiteHTTPD 的 .htaccess 解析开销实际上比 LSWS Enterprise **更低**（-0
    ```
    docRoot /var/www/html
    allowOverride 255
-   autoLoadHtaccess 0
+   autoLoadHtaccess 1
    ```
 
 5. **配置 PHP**

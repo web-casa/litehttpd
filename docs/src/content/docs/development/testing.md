@@ -65,5 +65,5 @@ bash integration-tests/apps/wordpress/verify.sh
 ## CI Pipeline
 
 - **PR gate** (ci.yml): build, unit/property/compat tests, ASan/UBSan, Apache comparison, OLS E2E
-- **Nightly** (nightly.yml): fuzzing, smoke tests, integration tests (4 PHP apps)
+- **Manual release gates**: runtime image builds, heavy apps-matrix, and DO VPS validation are explicit workflows only
 - **Release** (release.yml): x86_64 platform builds, RPM packaging, and release asset uploads

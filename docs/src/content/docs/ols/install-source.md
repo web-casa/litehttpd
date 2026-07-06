@@ -68,7 +68,7 @@ make -j$(nproc)
 
 ## Applying LiteHTTPD Patches
 
-If you are using the LiteHTTPD module (`litehttpd_htaccess.so`) with features that require custom OLS support (PHPConfig passthrough, LSIAPI Rewrite), apply the patches before building:
+If you are using the LiteHTTPD module (`ols_htaccess.so`) with features that require custom OLS support (PHPConfig passthrough, LSIAPI Rewrite), apply the patches before building:
 
 ```bash
 cd openlitespeed
@@ -78,7 +78,7 @@ bash build.sh
 cd dist && bash install.sh
 ```
 
-See the [LiteHTTPD directive reference](/directives/overview/) for which directives require the custom OLS build versus stock OLS.
+See the [LiteHTTPD directive reference](/directives/) for which directives require the custom OLS build versus stock OLS.
 
 ## Post-Installation
 

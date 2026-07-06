@@ -54,10 +54,14 @@ int exec_directory_index(lsi_session_t *session,
                 lsi_session_set_uri_internal(session, redirect_uri,
                     (int)(uri_len + uri_need_slash + tok_len));
                 free(redirect_uri);
+            } else {
+                free(path);
+                free(list);
+                return LSI_ERROR;
             }
             free(path);
             free(list);
-            return LSI_OK;
+            return 1;
         }
         free(path);
         tok = strtok_r(NULL, " \t", &saveptr);
@@ -65,5 +69,5 @@ int exec_directory_index(lsi_session_t *session,
 
     free(list);
     /* No file found — fall back to OLS default */
-    return LSI_OK;
+    return 0;
 }

@@ -23,8 +23,7 @@ extern "C" {
  * Execute rewrite rules from the directive list via OLS rewrite engine.
  *
  * Scans directives for RewriteEngine On, collects RewriteBase/Cond/Rule,
- * rebuilds them as text, and passes to g_api->parse_rewrite_rules() +
- * g_api->exec_rewrite_rules().
+ * rebuilds them as text, and passes to the private rewrite LSIAPI helpers.
  *
  * @param session     LSIAPI session handle
  * @param directives  Full directive list from htaccess_dirwalk()

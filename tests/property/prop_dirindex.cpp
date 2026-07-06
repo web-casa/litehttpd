@@ -72,7 +72,7 @@ RC_GTEST_FIXTURE_PROP(DirIndexPropFixture, SelectsFirstExistingFile, ())
     d->value = strdup(list.c_str());
 
     int rc = exec_directory_index(session_.handle(), d, dir.c_str());
-    RC_ASSERT(rc == LSI_OK);
+    RC_ASSERT(rc == 1);
 
     /* The selected file should be the first existing one — redirect uses URI */
     std::string expected = uri + files[existIdx];
@@ -100,7 +100,7 @@ RC_GTEST_FIXTURE_PROP(DirIndexPropFixture, NoExistingFileFallsBack, ())
     d->value = strdup(list.c_str());
 
     int rc = exec_directory_index(session_.handle(), d, "/var/www");
-    RC_ASSERT(rc == LSI_OK);
+    RC_ASSERT(rc == 0);
     RC_ASSERT(session_.get_internal_uri().empty());
 
     htaccess_directives_free(d);

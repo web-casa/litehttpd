@@ -51,7 +51,7 @@ module calls g_api->set_php_config_value(session, "upload_max_filesize", "128M",
 ## Applying
 
 ```bash
-cd /path/to/openlitespeed-1.8.5
+cd /path/to/openlitespeed-1.9.1
 patch -p1 < /path/to/litehttpd/patches/0001-lsiapi-phpconfig.patch
 ```
 
@@ -67,5 +67,5 @@ make install
 
 - Patch appends to the END of `lsi_api_t` — ABI compatible with all existing modules
 - Stock OLS zero-initializes the struct → new pointers are NULL → old modules unaffected
-- Tested against OLS v1.8.5 source (January 2025)
+- Tested against OLS v1.9.1 source (July 2026)
 - PHPConfig class already exists in OLS source — no new classes needed

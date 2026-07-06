@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+MATRIX_COMPARE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MATRIX_DIR="${MATRIX_DIR:-$(cd "${MATRIX_COMPARE_DIR}/.." && pwd)}"
+MATRIX_OUT_DIR="${MATRIX_OUT_DIR:-${MATRIX_DIR}/out}"
+
 APACHE_URL="${APACHE_URL:-http://localhost:18080}"
 OLS_MODULE_URL="${OLS_MODULE_URL:-http://localhost:38080}"
 OLS_NATIVE_URL="${OLS_NATIVE_URL:-http://localhost:28080}"
@@ -72,4 +76,32 @@ write_case_json_stub() {
   "risk_level": "low"
 }
 EOF
+}
+
+matrix_run_cases() {
+    local scenario="$1"
+    local cases_yaml="$2"
+    local summary_csv="$3"
+    local args=()
+    local case_id
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        matrix_fail "python3 is required for apps-matrix execution"
+        return 1
+    fi
+
+    if [[ -n "${MATRIX_CASE_IDS:-}" ]]; then
+        IFS=',' read -r -a matrix_case_ids <<< "${MATRIX_CASE_IDS}"
+        for case_id in "${matrix_case_ids[@]}"; do
+            [[ -n "${case_id}" ]] || continue
+            args+=(--case-id "${case_id}")
+        done
+    fi
+
+    python3 "${MATRIX_DIR}/lib/run_cases.py" \
+        --scenario "${scenario}" \
+        --cases "${cases_yaml}" \
+        "${args[@]}" \
+        --summary "${summary_csv}" \
+        --out-dir "${MATRIX_OUT_DIR}"
 }

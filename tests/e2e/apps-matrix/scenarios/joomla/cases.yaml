@@ -15,8 +15,8 @@ cases:
     category: routing
     desc: sef route resolves through front controller
     method: GET
-    path: /index.php/component/users/
-    probe_path: /_probe/router.php?uri=/index.php/component/users/
+    path: /index.php/component/users
+    probe_path: /_probe/router.php?uri=/index.php/component/users
     assert:
       - status_exact: 200
 

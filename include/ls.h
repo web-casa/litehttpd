@@ -519,6 +519,18 @@ const char *lsi_session_get_query_string(lsi_session_t *session, int *len);
 int         lsi_session_set_www_authenticate(lsi_session_t *session,
                                              const char *realm, int realm_len);
 
+/* litehttpd private LSIAPI extension helpers.
+ * These must be used instead of reading appended lsi_api_t fields directly:
+ * stock OLS exposes a shorter lsi_api_t, so direct reads past the public
+ * struct are undefined behavior. */
+int         lsiapi_has_custom_extensions(void);
+int         lsiapi_has_php_config_extensions(void);
+int         lsiapi_has_rewrite_extensions(void);
+void       *lsiapi_parse_rewrite_rules(const char *rules_text, int text_len);
+int         lsiapi_exec_rewrite_rules(lsi_session_t *session, void *handle,
+                                      const char *base, int base_len);
+void        lsiapi_free_rewrite_rules(void *handle);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

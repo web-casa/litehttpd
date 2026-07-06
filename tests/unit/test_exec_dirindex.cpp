@@ -27,7 +27,7 @@ TEST_F(DirIndexTest, SingleFileExists) {
     d->value = strdup("index.html");
 
     int rc = exec_directory_index(session_.handle(), d, "/var/www/html/app");
-    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_EQ(rc, 1);
     EXPECT_EQ(session_.get_internal_uri(), "/app/index.html");
     htaccess_directives_free(d);
 }
@@ -41,7 +41,7 @@ TEST_F(DirIndexTest, FirstExistingFileSelected) {
     d->value = strdup("index.html index.php default.htm");
 
     int rc = exec_directory_index(session_.handle(), d, "/var/www/html");
-    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_EQ(rc, 1);
     EXPECT_EQ(session_.get_internal_uri(), "/index.php");
     htaccess_directives_free(d);
 }
@@ -53,7 +53,7 @@ TEST_F(DirIndexTest, NoFileExistsFallback) {
     d->value = strdup("index.html index.php");
 
     int rc = exec_directory_index(session_.handle(), d, "/var/www/html");
-    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_EQ(rc, 0);
     EXPECT_TRUE(session_.get_internal_uri().empty());
     htaccess_directives_free(d);
 }
@@ -66,7 +66,7 @@ TEST_F(DirIndexTest, TrailingSlashInDir) {
     d->value = strdup("index.html");
 
     int rc = exec_directory_index(session_.handle(), d, "/var/www/html/subdir/");
-    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_EQ(rc, 1);
     EXPECT_EQ(session_.get_internal_uri(), "/subdir/index.html");
     htaccess_directives_free(d);
 }

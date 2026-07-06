@@ -19,6 +19,31 @@
  * full requested duration (HTTP permits large max-age values). */
 #define EXPIRES_DATE_CAP (10L * 365L * 24L * 3600L)
 
+static void set_expires_headers(lsi_session_t *session, long duration_sec)
+{
+    char cache_control_val[64];
+    int cc_len =
+        snprintf(cache_control_val, sizeof(cache_control_val), "max-age=%ld", duration_sec);
+    if (cc_len > 0 && (size_t)cc_len < sizeof(cache_control_val)) {
+        lsi_session_remove_resp_header(session, "Cache-Control", 13);
+        lsi_session_set_resp_header(session, "Cache-Control", 13, cache_control_val, cc_len);
+    }
+
+    /* Cap the addend so the time_t addition cannot overflow. */
+    long expire_add = (duration_sec > EXPIRES_DATE_CAP) ? EXPIRES_DATE_CAP : duration_sec;
+    time_t expire_time = time(NULL) + expire_add;
+    struct tm tm_buf;
+    char expires_val[64];
+    if (gmtime_r(&expire_time, &tm_buf)) {
+        int exp_len =
+            (int)strftime(expires_val, sizeof(expires_val), "%a, %d %b %Y %H:%M:%S GMT", &tm_buf);
+        if (exp_len > 0) {
+            lsi_session_remove_resp_header(session, "Expires", 7);
+            lsi_session_set_resp_header(session, "Expires", 7, expires_val, exp_len);
+        }
+    }
+}
+
 int exec_expires(lsi_session_t *session, const htaccess_directive_t *directives,
                  const char *content_type)
 {
@@ -26,7 +51,7 @@ int exec_expires(lsi_session_t *session, const htaccess_directive_t *directives,
         return LSI_ERROR;
 
     const htaccess_directive_t *dir;
-    int active = 0;  /* Default: expires not active */
+    int active = 0; /* Default: expires not active */
 
     /* First pass: find the last ExpiresActive directive to determine state */
     for (dir = directives; dir != NULL; dir = dir->next) {
@@ -68,32 +93,9 @@ int exec_expires(lsi_session_t *session, const htaccess_directive_t *directives,
         if (duration_sec < 0)
             continue;
 
-        /* Set Cache-Control: max-age=N */
-        char cache_control_val[64];
-        int cc_len = snprintf(cache_control_val, sizeof(cache_control_val),
-                              "max-age=%ld", duration_sec);
-        if (cc_len > 0 && (size_t)cc_len < sizeof(cache_control_val)) {
-            lsi_session_set_resp_header(session,
-                                        "Cache-Control", 13,
-                                        cache_control_val, cc_len);
-        }
-
         /* Set Expires header to an HTTP-date (current time + duration).
          * Cap the addend so the time_t addition cannot overflow. */
-        long expire_add = (duration_sec > EXPIRES_DATE_CAP)
-                              ? EXPIRES_DATE_CAP : duration_sec;
-        time_t expire_time = time(NULL) + expire_add;
-        struct tm tm_buf;
-        char expires_val[64];
-        if (gmtime_r(&expire_time, &tm_buf)) {
-            int exp_len = (int)strftime(expires_val, sizeof(expires_val),
-                                        "%a, %d %b %Y %H:%M:%S GMT", &tm_buf);
-            if (exp_len > 0) {
-                lsi_session_set_resp_header(session,
-                                            "Expires", 7,
-                                            expires_val, exp_len);
-            }
-        }
+        set_expires_headers(session, duration_sec);
 
         /* First match wins */
         return LSI_OK;
@@ -111,30 +113,7 @@ int exec_expires(lsi_session_t *session, const htaccess_directive_t *directives,
         if (duration_sec < 0)
             continue;
 
-        char cache_control_val[64];
-        int cc_len = snprintf(cache_control_val, sizeof(cache_control_val),
-                              "max-age=%ld", duration_sec);
-        if (cc_len > 0 && (size_t)cc_len < sizeof(cache_control_val)) {
-            lsi_session_set_resp_header(session,
-                                        "Cache-Control", 13,
-                                        cache_control_val, cc_len);
-        }
-
-        /* Cap the addend so the time_t addition cannot overflow. */
-        long expire_add = (duration_sec > EXPIRES_DATE_CAP)
-                              ? EXPIRES_DATE_CAP : duration_sec;
-        time_t expire_time = time(NULL) + expire_add;
-        struct tm tm_buf;
-        char expires_val[64];
-        if (gmtime_r(&expire_time, &tm_buf)) {
-            int exp_len = (int)strftime(expires_val, sizeof(expires_val),
-                                        "%a, %d %b %Y %H:%M:%S GMT", &tm_buf);
-            if (exp_len > 0) {
-                lsi_session_set_resp_header(session,
-                                            "Expires", 7,
-                                            expires_val, exp_len);
-            }
-        }
+        set_expires_headers(session, duration_sec);
 
         return LSI_OK;
     }

@@ -20,7 +20,7 @@ extern "C" {
 /**
  * Execute a FilesMatch directive (DIR_FILES_MATCH).
  *
- * Compiles dir->data.files_match.pattern as a POSIX extended regex and
+ * Compiles dir->data.files_match.pattern as a PCRE-compatible regex and
  * matches it against the given filename. If the filename matches, iterates
  * dir->data.files_match.children and executes each nested directive
  * (dispatching by type). If no match, skips all children.
@@ -36,7 +36,7 @@ int exec_files_match(lsi_session_t *session, const htaccess_directive_t *dir,
 /**
  * Check if a filename matches a FilesMatch regex pattern (using cached regex).
  *
- * @param pattern  POSIX extended regex pattern.
+ * @param pattern  PCRE-compatible regex pattern.
  * @param filename The filename to match.
  * @return 1 if matched, 0 if not matched, -1 on error.
  */

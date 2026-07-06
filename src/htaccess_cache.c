@@ -41,9 +41,12 @@ static size_t estimate_directives_memory(const htaccess_directive_t *head)
     size_t total = 0;
     for (const htaccess_directive_t *d = head; d; d = d->next) {
         total += sizeof(htaccess_directive_t);
-        if (d->name)  total += strlen(d->name) + 1;
-        if (d->value) total += strlen(d->value) + 1;
-        if (d->env_condition) total += strlen(d->env_condition) + 1;
+        if (d->name)
+            total += strlen(d->name) + 1;
+        if (d->value)
+            total += strlen(d->value) + 1;
+        if (d->env_condition)
+            total += strlen(d->env_condition) + 1;
 
         switch (d->type) {
         case DIR_REDIRECT:
@@ -113,7 +116,8 @@ static size_t estimate_directives_memory(const htaccess_directive_t *head)
 /* ------------------------------------------------------------------ */
 static void cache_entry_free(cache_entry_t *entry)
 {
-    if (!entry) return;
+    if (!entry)
+        return;
     free(entry->filepath);
     htaccess_directives_free(entry->directives);
     free(entry);
@@ -124,7 +128,7 @@ static void cache_entry_free(cache_entry_t *entry)
 /* ================================================================== */
 
 static ls_hash_t g_native_cache = NULL;
-static cache_entry_t *g_native_entry_list = NULL;  /* side-list for cleanup */
+static cache_entry_t *g_native_entry_list = NULL; /* side-list for cleanup */
 
 static int native_cache_init(size_t initial_buckets)
 {
@@ -132,41 +136,38 @@ static int native_cache_init(size_t initial_buckets)
     if (!api || !ols_native_hash_available())
         return -1;
 
-    g_native_cache = api->hash_new(
-        (int)initial_buckets,
-        api->hash_hfstring,
-        api->hash_cmpstring);
+    g_native_cache = api->hash_new((int)initial_buckets, api->hash_hfstring, api->hash_cmpstring);
     return g_native_cache ? 0 : -1;
 }
 
-static int native_cache_get(const char *filepath, time_t current_mtime,
-                            off_t current_size, ino_t current_inode,
-                            htaccess_directive_t **out_directives)
+static int native_cache_get(const char *filepath, time_t current_mtime, off_t current_size,
+                            ino_t current_inode, htaccess_directive_t **out_directives)
 {
     const ols_native_api_t *api = ols_native_api_get();
-    if (!g_native_cache || !api || !filepath || !out_directives) return -1;
+    if (!g_native_cache || !api || !filepath || !out_directives)
+        return -1;
 
     ls_hashentry_t entry = api->hash_find(g_native_cache, filepath);
-    if (!entry) return -1;
+    if (!entry)
+        return -1;
 
     cache_entry_t *ce = (cache_entry_t *)api->hash_getdata(entry);
-    if (!ce) return -1;
+    if (!ce)
+        return -1;
 
-    if (ce->mtime == current_mtime &&
-        ce->file_size == current_size &&
-        ce->inode == current_inode) {
+    if (ce->mtime == current_mtime && ce->file_size == current_size && ce->inode == current_inode) {
         *out_directives = ce->directives;
         return 0;
     }
     return -1;
 }
 
-static int native_cache_put(const char *filepath, time_t mtime,
-                            off_t file_size, ino_t inode,
+static int native_cache_put(const char *filepath, time_t mtime, off_t file_size, ino_t inode,
                             htaccess_directive_t *directives)
 {
     const ols_native_api_t *api = ols_native_api_get();
-    if (!g_native_cache || !api || !filepath) return -1;
+    if (!g_native_cache || !api || !filepath)
+        return -1;
 
     /* Check for existing entry */
     ls_hashentry_t existing = api->hash_find(g_native_cache, filepath);
@@ -178,26 +179,28 @@ static int native_cache_put(const char *filepath, time_t mtime,
             ce->mtime = mtime;
             ce->file_size = file_size;
             ce->inode = inode;
-            ce->memory_usage = sizeof(cache_entry_t)
-                             + strlen(filepath) + 1
-                             + estimate_directives_memory(directives);
+            ce->memory_usage = sizeof(cache_entry_t) + strlen(filepath) + 1 +
+                               estimate_directives_memory(directives);
             return 0;
         }
     }
 
     /* New entry */
     cache_entry_t *ce = calloc(1, sizeof(cache_entry_t));
-    if (!ce) return -1;
+    if (!ce)
+        return -1;
 
     ce->filepath = strdup(filepath);
-    if (!ce->filepath) { free(ce); return -1; }
+    if (!ce->filepath) {
+        free(ce);
+        return -1;
+    }
     ce->mtime = mtime;
     ce->file_size = file_size;
     ce->inode = inode;
     ce->directives = directives;
-    ce->memory_usage = sizeof(cache_entry_t)
-                     + strlen(filepath) + 1
-                     + estimate_directives_memory(directives);
+    ce->memory_usage =
+        sizeof(cache_entry_t) + strlen(filepath) + 1 + estimate_directives_memory(directives);
 
     ls_hashentry_t inserted = api->hash_insert(g_native_cache, ce->filepath, ce);
     if (!inserted) {
@@ -245,13 +248,18 @@ static size_t hash_string(const char *str, size_t num_buckets)
 
 static int builtin_cache_init(size_t initial_buckets)
 {
-    if (initial_buckets == 0) initial_buckets = 64;
+    if (initial_buckets == 0)
+        initial_buckets = 64;
 
     htaccess_cache_t *cache = calloc(1, sizeof(htaccess_cache_t));
-    if (!cache) return -1;
+    if (!cache)
+        return -1;
 
     cache->buckets = calloc(initial_buckets, sizeof(cache_entry_t *));
-    if (!cache->buckets) { free(cache); return -1; }
+    if (!cache->buckets) {
+        free(cache);
+        return -1;
+    }
 
     cache->num_buckets = initial_buckets;
     cache->num_entries = 0;
@@ -259,19 +267,18 @@ static int builtin_cache_init(size_t initial_buckets)
     return 0;
 }
 
-static int builtin_cache_get(const char *filepath, time_t current_mtime,
-                             off_t current_size, ino_t current_inode,
-                             htaccess_directive_t **out_directives)
+static int builtin_cache_get(const char *filepath, time_t current_mtime, off_t current_size,
+                             ino_t current_inode, htaccess_directive_t **out_directives)
 {
-    if (!g_cache || !filepath || !out_directives) return -1;
+    if (!g_cache || !filepath || !out_directives)
+        return -1;
 
     size_t idx = hash_string(filepath, g_cache->num_buckets);
     cache_entry_t *entry = g_cache->buckets[idx];
 
     while (entry) {
         if (strcmp(entry->filepath, filepath) == 0) {
-            if (entry->mtime == current_mtime &&
-                entry->file_size == current_size &&
+            if (entry->mtime == current_mtime && entry->file_size == current_size &&
                 entry->inode == current_inode) {
                 *out_directives = entry->directives;
                 return 0;
@@ -285,11 +292,11 @@ static int builtin_cache_get(const char *filepath, time_t current_mtime,
     return -1;
 }
 
-static int builtin_cache_put(const char *filepath, time_t mtime,
-                             off_t file_size, ino_t inode,
+static int builtin_cache_put(const char *filepath, time_t mtime, off_t file_size, ino_t inode,
                              htaccess_directive_t *directives)
 {
-    if (!g_cache || !filepath) return -1;
+    if (!g_cache || !filepath)
+        return -1;
 
     size_t idx = hash_string(filepath, g_cache->num_buckets);
     cache_entry_t *entry = g_cache->buckets[idx];
@@ -301,29 +308,32 @@ static int builtin_cache_put(const char *filepath, time_t mtime,
             entry->mtime = mtime;
             entry->file_size = file_size;
             entry->inode = inode;
-            entry->memory_usage = sizeof(cache_entry_t)
-                                + strlen(filepath) + 1
-                                + estimate_directives_memory(directives);
+            entry->memory_usage = sizeof(cache_entry_t) + strlen(filepath) + 1 +
+                                  estimate_directives_memory(directives);
             return 0;
         }
         entry = entry->chain_next;
     }
 
-    if (g_cache->num_entries >= CACHE_MAX_ENTRIES) return -1;
+    if (g_cache->num_entries >= CACHE_MAX_ENTRIES)
+        return -1;
 
     cache_entry_t *new_entry = calloc(1, sizeof(cache_entry_t));
-    if (!new_entry) return -1;
+    if (!new_entry)
+        return -1;
 
     new_entry->filepath = strdup(filepath);
-    if (!new_entry->filepath) { free(new_entry); return -1; }
+    if (!new_entry->filepath) {
+        free(new_entry);
+        return -1;
+    }
 
     new_entry->mtime = mtime;
     new_entry->file_size = file_size;
     new_entry->inode = inode;
     new_entry->directives = directives;
-    new_entry->memory_usage = sizeof(cache_entry_t)
-                            + strlen(filepath) + 1
-                            + estimate_directives_memory(directives);
+    new_entry->memory_usage =
+        sizeof(cache_entry_t) + strlen(filepath) + 1 + estimate_directives_memory(directives);
 
     new_entry->chain_next = g_cache->buckets[idx];
     g_cache->buckets[idx] = new_entry;
@@ -333,7 +343,8 @@ static int builtin_cache_put(const char *filepath, time_t mtime,
 
 static void builtin_cache_destroy(void)
 {
-    if (!g_cache) return;
+    if (!g_cache)
+        return;
 
     for (size_t i = 0; i < g_cache->num_buckets; i++) {
         cache_entry_t *entry = g_cache->buckets[i];
@@ -355,8 +366,19 @@ static void builtin_cache_destroy(void)
 /* Track which mode is active */
 static int g_use_native = 0;
 
+static void cache_destroy_active(void)
+{
+    if (g_use_native)
+        native_cache_destroy();
+    else
+        builtin_cache_destroy();
+    g_use_native = 0;
+}
+
 int htaccess_cache_init(size_t initial_buckets)
 {
+    cache_destroy_active();
+
     /* Try native ls_hash first */
     ols_native_api_init();
     if (ols_native_hash_available()) {
@@ -370,19 +392,16 @@ int htaccess_cache_init(size_t initial_buckets)
     return builtin_cache_init(initial_buckets);
 }
 
-int htaccess_cache_get(const char *filepath, time_t current_mtime,
-                       off_t current_size, ino_t current_inode,
-                       htaccess_directive_t **out_directives)
+int htaccess_cache_get(const char *filepath, time_t current_mtime, off_t current_size,
+                       ino_t current_inode, htaccess_directive_t **out_directives)
 {
     if (g_use_native)
-        return native_cache_get(filepath, current_mtime, current_size,
-                                current_inode, out_directives);
-    return builtin_cache_get(filepath, current_mtime, current_size,
-                             current_inode, out_directives);
+        return native_cache_get(filepath, current_mtime, current_size, current_inode,
+                                out_directives);
+    return builtin_cache_get(filepath, current_mtime, current_size, current_inode, out_directives);
 }
 
-int htaccess_cache_put(const char *filepath, time_t mtime,
-                       off_t file_size, ino_t inode,
+int htaccess_cache_put(const char *filepath, time_t mtime, off_t file_size, ino_t inode,
                        htaccess_directive_t *directives)
 {
     if (g_use_native)
@@ -392,9 +411,5 @@ int htaccess_cache_put(const char *filepath, time_t mtime,
 
 void htaccess_cache_destroy(void)
 {
-    if (g_use_native)
-        native_cache_destroy();
-    else
-        builtin_cache_destroy();
-    g_use_native = 0;
+    cache_destroy_active();
 }

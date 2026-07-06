@@ -228,7 +228,7 @@ static char *extract_env_condition(char *value)
 }
 
 /**
- * Parse: Header [always] set|unset|append|merge|add|edit|edit* <name> [<value>] [env=VAR]
+ * Parse: Header [always|onsuccess] set|unset|append|merge|add|edit|edit* <name> [<value>] [env=VAR]
  */
 static htaccess_directive_t *parse_header(const char *args, int line)
 {
@@ -237,10 +237,11 @@ static htaccess_directive_t *parse_header(const char *args, int line)
     if (!action)
         return NULL;
 
-    /* Check for "always" modifier */
+    /* Check for Apache's response-table condition token. "always" maps to
+     * the existing always variants; "onsuccess" is the default table. */
     int always = 0;
-    if (strcasecmp(action, "always") == 0) {
-        always = 1;
+    if (strcasecmp(action, "always") == 0 || strcasecmp(action, "onsuccess") == 0) {
+        always = (strcasecmp(action, "always") == 0);
         free(action);
         action = next_token(&p);
         if (!action)
@@ -739,6 +740,30 @@ static htaccess_directive_t *parse_error_document(const char *args, int line)
     d->value = value;
     d->data.error_doc.error_code = (int)code;
 
+    return d;
+}
+
+/**
+ * Parse: FallbackResource /local-uri | disabled
+ */
+static htaccess_directive_t *parse_fallback_resource(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *value = next_token(&p);
+    if (!value)
+        return NULL;
+
+    if (strcasecmp(value, "disabled") != 0 && value[0] != '/') {
+        free(value);
+        return NULL;
+    }
+
+    htaccess_directive_t *d = alloc_directive(DIR_FALLBACK_RESOURCE, line);
+    if (!d) {
+        free(value);
+        return NULL;
+    }
+    d->value = value;
     return d;
 }
 
@@ -1471,6 +1496,11 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
     after = match_kw(p, "ErrorDocument");
     if (after)
         return parse_error_document(after, line_num);
+
+    /* FallbackResource */
+    after = match_kw(p, "FallbackResource");
+    if (after)
+        return parse_fallback_resource(after, line_num);
 
     /* ExpiresActive */
     after = match_kw(p, "ExpiresActive");

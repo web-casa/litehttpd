@@ -19,6 +19,7 @@ extern "C" {
 #include "htaccess_exec_acl.h"
 #include "htaccess_exec_require.h"
 #include "htaccess_exec_expires.h"
+#include "htaccess_exec_files_match.h"
 #include "htaccess_exec_header.h"
 #include "htaccess_exec_dirindex.h"
 #include "htaccess_parser.h"
@@ -33,8 +34,9 @@ extern int mod_htaccess_cleanup(lsi_module_t *);
 /* ================================================================== */
 
 class ContainerSemanticsTest : public ::testing::Test {
-protected:
-    void SetUp() override {
+  protected:
+    void SetUp() override
+    {
         mock_lsiapi::reset_global_state();
         session_.reset();
         htaccess_cache_init(64);
@@ -53,26 +55,31 @@ protected:
         }
     }
 
-    void TearDown() override {
-        htaccess_cache_destroy();
-        shm_destroy();
+    void TearDown() override
+    {
+        mod_htaccess_cleanup(&MNAME);
     }
 
-    int call_req_hook() {
-        if (!req_cb_) return -1;
+    int call_req_hook()
+    {
+        if (!req_cb_)
+            return -1;
         lsi_param_t param = {};
         param.session = session_.handle();
         return req_cb_(&param);
     }
 
-    int call_resp_hook() {
-        if (!resp_cb_) return -1;
+    int call_resp_hook()
+    {
+        if (!resp_cb_)
+            return -1;
         lsi_param_t param = {};
         param.session = session_.handle();
         return resp_cb_(&param);
     }
 
-    void setup_htaccess(const char *path, const char *content) {
+    void setup_htaccess(const char *path, const char *content)
+    {
         auto *dirs = htaccess_parse(content, strlen(content), path);
         if (dirs)
             htaccess_cache_put(path, 0, 0, 0, dirs);
@@ -87,12 +94,12 @@ protected:
 /*  Require precedence over legacy ACL                                 */
 /* ================================================================== */
 
-TEST_F(ContainerSemanticsTest, RequireTakesPrecedenceOverDeny) {
+TEST_F(ContainerSemanticsTest, RequireTakesPrecedenceOverDeny)
+{
     /* Deny from all + Require all granted → should ALLOW (Require wins) */
-    setup_htaccess("/var/www/.htaccess",
-        "Order Allow,Deny\n"
-        "Deny from all\n"
-        "Require all granted\n");
+    setup_htaccess("/var/www/.htaccess", "Order Allow,Deny\n"
+                                         "Deny from all\n"
+                                         "Require all granted\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/index.html");
@@ -104,12 +111,12 @@ TEST_F(ContainerSemanticsTest, RequireTakesPrecedenceOverDeny) {
     EXPECT_NE(session_.get_status_code(), 403);
 }
 
-TEST_F(ContainerSemanticsTest, RequireAllDeniedOverridesAllow) {
+TEST_F(ContainerSemanticsTest, RequireAllDeniedOverridesAllow)
+{
     /* Allow from all + Require all denied → should DENY (Require wins) */
-    setup_htaccess("/var/www/.htaccess",
-        "Order Deny,Allow\n"
-        "Allow from all\n"
-        "Require all denied\n");
+    setup_htaccess("/var/www/.htaccess", "Order Deny,Allow\n"
+                                         "Allow from all\n"
+                                         "Require all denied\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/index.html");
@@ -123,11 +130,11 @@ TEST_F(ContainerSemanticsTest, RequireAllDeniedOverridesAllow) {
 /*  <Files> container ACL                                              */
 /* ================================================================== */
 
-TEST_F(ContainerSemanticsTest, FilesRequireAllDenied) {
-    setup_htaccess("/var/www/.htaccess",
-        "<Files secret.txt>\n"
-        "Require all denied\n"
-        "</Files>\n");
+TEST_F(ContainerSemanticsTest, FilesRequireAllDenied)
+{
+    setup_htaccess("/var/www/.htaccess", "<Files secret.txt>\n"
+                                         "Require all denied\n"
+                                         "</Files>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/secret.txt");
@@ -137,11 +144,11 @@ TEST_F(ContainerSemanticsTest, FilesRequireAllDenied) {
     EXPECT_EQ(session_.get_status_code(), 403);
 }
 
-TEST_F(ContainerSemanticsTest, FilesNonMatchingAllowed) {
-    setup_htaccess("/var/www/.htaccess",
-        "<Files secret.txt>\n"
-        "Require all denied\n"
-        "</Files>\n");
+TEST_F(ContainerSemanticsTest, FilesNonMatchingAllowed)
+{
+    setup_htaccess("/var/www/.htaccess", "<Files secret.txt>\n"
+                                         "Require all denied\n"
+                                         "</Files>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/public.html");
@@ -150,18 +157,19 @@ TEST_F(ContainerSemanticsTest, FilesNonMatchingAllowed) {
     int rc = call_req_hook();
     EXPECT_EQ(rc, LSI_OK);
     EXPECT_NE(session_.get_status_code(), 403);
+    call_resp_hook();
 }
 
 /* ================================================================== */
 /*  <FilesMatch> container ACL                                         */
 /* ================================================================== */
 
-TEST_F(ContainerSemanticsTest, FilesMatchDenyEnvFiles) {
-    setup_htaccess("/var/www/.htaccess",
-        "<FilesMatch \"\\.(env|log)$\">\n"
-        "Order allow,deny\n"
-        "Deny from all\n"
-        "</FilesMatch>\n");
+TEST_F(ContainerSemanticsTest, FilesMatchDenyEnvFiles)
+{
+    setup_htaccess("/var/www/.htaccess", "<FilesMatch \"\\.(env|log)$\">\n"
+                                         "Order allow,deny\n"
+                                         "Deny from all\n"
+                                         "</FilesMatch>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/.env");
@@ -171,15 +179,54 @@ TEST_F(ContainerSemanticsTest, FilesMatchDenyEnvFiles) {
     EXPECT_EQ(session_.get_status_code(), 403);
 }
 
+TEST_F(ContainerSemanticsTest, FilesMatchSupportsDrupalStockPcreLookahead)
+{
+    const char *pattern =
+        "\\.(engine|inc|install|make|module|profile|po|sh|.*sql|theme|twig|tpl(\\.php)?|xtmpl|yml)"
+        "(~|\\.sw[op]|\\.bak|\\.orig|\\.save)?$|^(\\.(?!well-known).*|Entries.*|Repository|Root|Tag|Template|composer\\.(json|lock)|web\\.config|yarn\\.lock|package\\.json)$|^#.*#$|\\.php(~|\\.sw[op]|\\.bak|\\.orig|\\.save)$";
+
+    EXPECT_EQ(fm_regex_matches(pattern, "web.config"), 1);
+    EXPECT_EQ(fm_regex_matches(pattern, ".gitignore"), 1);
+    EXPECT_EQ(fm_regex_matches(pattern, ".well-known"), 0);
+
+    setup_htaccess("/var/www/.htaccess", R"HT(<FilesMatch "\.(engine|inc|install|make|module|profile|po|sh|.*sql|theme|twig|tpl(\.php)?|xtmpl|yml)(~|\.sw[op]|\.bak|\.orig|\.save)?$|^(\.(?!well-known).*|Entries.*|Repository|Root|Tag|Template|composer\.(json|lock)|web\.config|yarn\.lock|package\.json)$|^#.*#$|\.php(~|\.sw[op]|\.bak|\.orig|\.save)$">
+Require all denied
+</FilesMatch>
+)HT");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/web.config");
+    session_.set_client_ip("10.0.0.1");
+
+    call_req_hook();
+    EXPECT_EQ(session_.get_status_code(), 403);
+}
+
+TEST_F(ContainerSemanticsTest, FilesMatchDrupalLookaheadAllowsWellKnown)
+{
+    setup_htaccess("/var/www/.htaccess", R"HT(<FilesMatch "\.(engine|inc|install|make|module|profile|po|sh|.*sql|theme|twig|tpl(\.php)?|xtmpl|yml)(~|\.sw[op]|\.bak|\.orig|\.save)?$|^(\.(?!well-known).*|Entries.*|Repository|Root|Tag|Template|composer\.(json|lock)|web\.config|yarn\.lock|package\.json)$|^#.*#$|\.php(~|\.sw[op]|\.bak|\.orig|\.save)$">
+Require all denied
+</FilesMatch>
+)HT");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/.well-known");
+    session_.set_client_ip("10.0.0.1");
+
+    int rc = call_req_hook();
+    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_NE(session_.get_status_code(), 403);
+}
+
 /* ================================================================== */
 /*  <Limit> method restriction                                         */
 /* ================================================================== */
 
-TEST_F(ContainerSemanticsTest, LimitPostDenied) {
-    setup_htaccess("/var/www/.htaccess",
-        "<Limit POST>\n"
-        "Require all denied\n"
-        "</Limit>\n");
+TEST_F(ContainerSemanticsTest, LimitPostDenied)
+{
+    setup_htaccess("/var/www/.htaccess", "<Limit POST>\n"
+                                         "Require all denied\n"
+                                         "</Limit>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/index.html");
@@ -190,11 +237,11 @@ TEST_F(ContainerSemanticsTest, LimitPostDenied) {
     EXPECT_EQ(session_.get_status_code(), 403);
 }
 
-TEST_F(ContainerSemanticsTest, LimitPostAllowsGet) {
-    setup_htaccess("/var/www/.htaccess",
-        "<Limit POST>\n"
-        "Require all denied\n"
-        "</Limit>\n");
+TEST_F(ContainerSemanticsTest, LimitPostAllowsGet)
+{
+    setup_htaccess("/var/www/.htaccess", "<Limit POST>\n"
+                                         "Require all denied\n"
+                                         "</Limit>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/index.html");
@@ -210,12 +257,11 @@ TEST_F(ContainerSemanticsTest, LimitPostAllowsGet) {
 /*  Directory inheritance — child overrides parent                     */
 /* ================================================================== */
 
-TEST_F(ContainerSemanticsTest, ChildHeaderOverridesParent) {
+TEST_F(ContainerSemanticsTest, ChildHeaderOverridesParent)
+{
     /* Parent sets X-Level=parent, child sets X-Level=child → child wins */
-    setup_htaccess("/var/www/.htaccess",
-        "Header set X-Level parent");
-    setup_htaccess("/var/www/sub/.htaccess",
-        "Header set X-Level child");
+    setup_htaccess("/var/www/.htaccess", "Header set X-Level parent");
+    setup_htaccess("/var/www/sub/.htaccess", "Header set X-Level child");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/sub/page.html");
@@ -227,12 +273,13 @@ TEST_F(ContainerSemanticsTest, ChildHeaderOverridesParent) {
     EXPECT_EQ(session_.get_response_header("X-Level"), "child");
 }
 
-TEST_F(ContainerSemanticsTest, ChildExpiresDefaultOverridesParent) {
+TEST_F(ContainerSemanticsTest, ChildExpiresDefaultOverridesParent)
+{
     /* Parent ExpiresDefault 3600, child 7200 → child's 7200 wins */
     setup_htaccess("/var/www/.htaccess",
-        "ExpiresActive On\nExpiresDefault \"access plus 3600 seconds\"");
+                   "ExpiresActive On\nExpiresDefault \"access plus 3600 seconds\"");
     setup_htaccess("/var/www/sub/.htaccess",
-        "ExpiresActive On\nExpiresDefault \"access plus 7200 seconds\"");
+                   "ExpiresActive On\nExpiresDefault \"access plus 7200 seconds\"");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/sub/page.html");
@@ -255,11 +302,11 @@ TEST_F(ContainerSemanticsTest, ChildExpiresDefaultOverridesParent) {
 
 /* --- IfModule flattening (all blocks expanded) --- */
 
-TEST_F(ContainerSemanticsTest, IfModulePositiveExpanded) {
-    setup_htaccess("/var/www/.htaccess",
-        "<IfModule mod_headers.c>\n"
-        "Header set X-IfMod positive\n"
-        "</IfModule>\n");
+TEST_F(ContainerSemanticsTest, IfModulePositiveExpanded)
+{
+    setup_htaccess("/var/www/.htaccess", "<IfModule mod_headers.c>\n"
+                                         "Header set X-IfMod positive\n"
+                                         "</IfModule>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/page.html");
@@ -271,12 +318,12 @@ TEST_F(ContainerSemanticsTest, IfModulePositiveExpanded) {
     EXPECT_EQ(session_.get_response_header("X-IfMod"), "positive");
 }
 
-TEST_F(ContainerSemanticsTest, IfModuleNegatedAlsoExpanded) {
+TEST_F(ContainerSemanticsTest, IfModuleNegatedAlsoExpanded)
+{
     /* Negated IfModule should ALSO expand (we can't verify module existence) */
-    setup_htaccess("/var/www/.htaccess",
-        "<IfModule !mod_nonexistent.c>\n"
-        "Header set X-Negated yes\n"
-        "</IfModule>\n");
+    setup_htaccess("/var/www/.htaccess", "<IfModule !mod_nonexistent.c>\n"
+                                         "Header set X-Negated yes\n"
+                                         "</IfModule>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/page.html");
@@ -290,13 +337,13 @@ TEST_F(ContainerSemanticsTest, IfModuleNegatedAlsoExpanded) {
 
 /* --- Nested RequireAll inside Files --- */
 
-TEST_F(ContainerSemanticsTest, FilesWithNestedRequireAll) {
-    setup_htaccess("/var/www/.htaccess",
-        "<Files secret.txt>\n"
-        "<RequireAll>\n"
-        "Require all denied\n"
-        "</RequireAll>\n"
-        "</Files>\n");
+TEST_F(ContainerSemanticsTest, FilesWithNestedRequireAll)
+{
+    setup_htaccess("/var/www/.htaccess", "<Files secret.txt>\n"
+                                         "<RequireAll>\n"
+                                         "Require all denied\n"
+                                         "</RequireAll>\n"
+                                         "</Files>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/secret.txt");
@@ -308,12 +355,12 @@ TEST_F(ContainerSemanticsTest, FilesWithNestedRequireAll) {
 
 /* --- LimitExcept (inverse of Limit) --- */
 
-TEST_F(ContainerSemanticsTest, LimitExceptGetDenied) {
+TEST_F(ContainerSemanticsTest, LimitExceptGetDenied)
+{
     /* <LimitExcept POST> Require all denied → GET denied, POST allowed */
-    setup_htaccess("/var/www/.htaccess",
-        "<LimitExcept POST>\n"
-        "Require all denied\n"
-        "</LimitExcept>\n");
+    setup_htaccess("/var/www/.htaccess", "<LimitExcept POST>\n"
+                                         "Require all denied\n"
+                                         "</LimitExcept>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/index.html");
@@ -324,11 +371,11 @@ TEST_F(ContainerSemanticsTest, LimitExceptGetDenied) {
     EXPECT_EQ(session_.get_status_code(), 403);
 }
 
-TEST_F(ContainerSemanticsTest, LimitExceptPostAllowed) {
-    setup_htaccess("/var/www/.htaccess",
-        "<LimitExcept POST>\n"
-        "Require all denied\n"
-        "</LimitExcept>\n");
+TEST_F(ContainerSemanticsTest, LimitExceptPostAllowed)
+{
+    setup_htaccess("/var/www/.htaccess", "<LimitExcept POST>\n"
+                                         "Require all denied\n"
+                                         "</LimitExcept>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/index.html");
@@ -342,10 +389,10 @@ TEST_F(ContainerSemanticsTest, LimitExceptPostAllowed) {
 
 /* --- Legacy ACL only (no Require) → still works --- */
 
-TEST_F(ContainerSemanticsTest, LegacyACLAloneWorks) {
-    setup_htaccess("/var/www/.htaccess",
-        "Order Allow,Deny\n"
-        "Deny from all\n");
+TEST_F(ContainerSemanticsTest, LegacyACLAloneWorks)
+{
+    setup_htaccess("/var/www/.htaccess", "Order Allow,Deny\n"
+                                         "Deny from all\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/index.html");
@@ -357,12 +404,11 @@ TEST_F(ContainerSemanticsTest, LegacyACLAloneWorks) {
 
 /* --- Multiple Header directives across parent/child --- */
 
-TEST_F(ContainerSemanticsTest, ChildAddsNewHeaderKeepsParent) {
+TEST_F(ContainerSemanticsTest, ChildAddsNewHeaderKeepsParent)
+{
     /* Parent sets X-Parent, child sets X-Child → both present */
-    setup_htaccess("/var/www/.htaccess",
-        "Header set X-Parent yes");
-    setup_htaccess("/var/www/sub/.htaccess",
-        "Header set X-Child yes");
+    setup_htaccess("/var/www/.htaccess", "Header set X-Parent yes");
+    setup_htaccess("/var/www/sub/.htaccess", "Header set X-Child yes");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/sub/page.html");
@@ -377,11 +423,10 @@ TEST_F(ContainerSemanticsTest, ChildAddsNewHeaderKeepsParent) {
 
 /* --- DirectoryIndex singleton override --- */
 
-TEST_F(ContainerSemanticsTest, ChildDirectoryIndexOverridesParent) {
-    setup_htaccess("/var/www/.htaccess",
-        "DirectoryIndex index.html");
-    setup_htaccess("/var/www/sub/.htaccess",
-        "DirectoryIndex index.php");
+TEST_F(ContainerSemanticsTest, ChildDirectoryIndexOverridesParent)
+{
+    setup_htaccess("/var/www/.htaccess", "DirectoryIndex index.html");
+    setup_htaccess("/var/www/sub/.htaccess", "DirectoryIndex index.php");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/sub/");
@@ -394,15 +439,91 @@ TEST_F(ContainerSemanticsTest, ChildDirectoryIndexOverridesParent) {
     EXPECT_EQ(session_.get_internal_uri(), "/sub/index.php");
 }
 
+TEST_F(ContainerSemanticsTest, FallbackResourceRoutesMissingPath)
+{
+    setup_htaccess("/var/www/.htaccess", "FallbackResource /index.php");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/user/login");
+    session_.set_client_ip("10.0.0.1");
+
+    int rc = call_req_hook();
+
+    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_EQ(session_.get_internal_uri(), "/index.php");
+}
+
+TEST_F(ContainerSemanticsTest, FallbackResourceDoesNotRouteExistingFile)
+{
+    setup_htaccess("/var/www/.htaccess", "FallbackResource /index.php");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/style.css");
+    session_.set_client_ip("10.0.0.1");
+    session_.add_existing_file("/var/www/style.css");
+
+    int rc = call_req_hook();
+
+    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_TRUE(session_.get_internal_uri().empty());
+}
+
+TEST_F(ContainerSemanticsTest, OptionsMinusIndexesDeniesDirectoryRequest)
+{
+    setup_htaccess("/var/www/.htaccess", "Options -Indexes");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/");
+    session_.set_client_ip("10.0.0.1");
+
+    int rc = call_req_hook();
+
+    EXPECT_EQ(rc, LSI_DENY);
+    EXPECT_EQ(session_.get_status_code(), 403);
+}
+
+TEST_F(ContainerSemanticsTest, OptionsMinusIndexesAllowsCommonIndexFile)
+{
+    setup_htaccess("/var/www/.htaccess", "Options -Indexes");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/");
+    session_.set_client_ip("10.0.0.1");
+    session_.add_existing_file("/var/www/index.php");
+
+    int rc = call_req_hook();
+
+    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_NE(session_.get_status_code(), 403);
+    EXPECT_TRUE(session_.get_internal_uri().empty());
+}
+
+TEST_F(ContainerSemanticsTest, OptionsMinusIndexesAllowsExplicitDirectoryIndex)
+{
+    setup_htaccess("/var/www/.htaccess", "Options -Indexes\n"
+                                         "DirectoryIndex app.php\n");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/");
+    session_.set_client_ip("10.0.0.1");
+    session_.add_existing_file("/var/www/app.php");
+
+    int rc = call_req_hook();
+
+    EXPECT_EQ(rc, LSI_OK);
+    EXPECT_NE(session_.get_status_code(), 403);
+    EXPECT_EQ(session_.get_internal_uri(), "/app.php");
+}
+
 /* ================================================================== */
 /*  行为一致性专项: 扩展继承和容器测试                                  */
 /* ================================================================== */
 
 /* --- SetEnvIfNoCase override --- */
 
-TEST_F(ContainerSemanticsTest, SetEnvIfNoCaseInChild) {
-    setup_htaccess("/var/www/.htaccess",
-        "SetEnvIfNoCase User-Agent bot IS_BOT=1");
+TEST_F(ContainerSemanticsTest, SetEnvIfNoCaseInChild)
+{
+    setup_htaccess("/var/www/.htaccess", "SetEnvIfNoCase User-Agent bot IS_BOT=1");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/page.html");
@@ -417,13 +538,12 @@ TEST_F(ContainerSemanticsTest, SetEnvIfNoCaseInChild) {
 
 /* --- IfModule in child directory --- */
 
-TEST_F(ContainerSemanticsTest, IfModuleInChildDir) {
-    setup_htaccess("/var/www/.htaccess",
-        "Header set X-Root root");
-    setup_htaccess("/var/www/sub/.htaccess",
-        "<IfModule mod_headers.c>\n"
-        "Header set X-Sub child\n"
-        "</IfModule>\n");
+TEST_F(ContainerSemanticsTest, IfModuleInChildDir)
+{
+    setup_htaccess("/var/www/.htaccess", "Header set X-Root root");
+    setup_htaccess("/var/www/sub/.htaccess", "<IfModule mod_headers.c>\n"
+                                             "Header set X-Sub child\n"
+                                             "</IfModule>\n");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/sub/page.html");
@@ -438,11 +558,10 @@ TEST_F(ContainerSemanticsTest, IfModuleInChildDir) {
 
 /* --- DirectoryIndex child file doesn't exist → no internal redirect --- */
 
-TEST_F(ContainerSemanticsTest, DirectoryIndexChildFileNotExist) {
-    setup_htaccess("/var/www/.htaccess",
-        "DirectoryIndex default.html");
-    setup_htaccess("/var/www/sub/.htaccess",
-        "DirectoryIndex custom.html");
+TEST_F(ContainerSemanticsTest, DirectoryIndexChildFileNotExist)
+{
+    setup_htaccess("/var/www/.htaccess", "DirectoryIndex default.html");
+    setup_htaccess("/var/www/sub/.htaccess", "DirectoryIndex custom.html");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/sub/");
@@ -457,11 +576,10 @@ TEST_F(ContainerSemanticsTest, DirectoryIndexChildFileNotExist) {
 
 /* --- php_value in child directory --- */
 
-TEST_F(ContainerSemanticsTest, PhpValueInChildDir) {
-    setup_htaccess("/var/www/.htaccess",
-        "php_value upload_max_filesize 8M");
-    setup_htaccess("/var/www/sub/.htaccess",
-        "php_value upload_max_filesize 128M");
+TEST_F(ContainerSemanticsTest, PhpValueInChildDir)
+{
+    setup_htaccess("/var/www/.htaccess", "php_value upload_max_filesize 8M");
+    setup_htaccess("/var/www/sub/.htaccess", "php_value upload_max_filesize 128M");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/sub/upload.php");
@@ -483,9 +601,9 @@ TEST_F(ContainerSemanticsTest, PhpValueInChildDir) {
 
 /* --- Redirect in child directory --- */
 
-TEST_F(ContainerSemanticsTest, RedirectInChildDir) {
-    setup_htaccess("/var/www/sub/.htaccess",
-        "Redirect 301 /sub/old /sub/new");
+TEST_F(ContainerSemanticsTest, RedirectInChildDir)
+{
+    setup_htaccess("/var/www/sub/.htaccess", "Redirect 301 /sub/old /sub/new");
 
     session_.set_doc_root("/var/www");
     session_.set_request_uri("/sub/old");

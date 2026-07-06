@@ -61,19 +61,21 @@
                  addEnv("LS_AI_PATH", 10, pBuf, p - pBuf);
                  const AutoStr2 *pURI = m_pVHost->getAutoIndexURI();
                  ret = internalRedirectURI(pURI->c_str(), pURI->len());
-@@ -2449,6 +2503,15 @@
+@@ -2449,6 +2503,17 @@
                  return LS_FAIL;  //internal redirect
              }
              if (!m_pContext->isAppContext())
-+            /* litehttpd: match Apache behavior — return 403 when autoIndex
-+             * is explicitly disabled (Options -Indexes or autoIndex 0) */
-+            if (m_pContext->isAutoIndexOff())
 +            {
-+                LS_INFO(getLogSession(),
-+                        "Auto Index is disabled for [%s], access denied.",
-+                        pBuf);
-+                return SC_403;
-+            }
++                /* litehttpd: match Apache behavior — return 403 when autoIndex
++                 * is explicitly disabled (Options -Indexes or autoIndex 0) */
++                if (m_pContext->isAutoIndexOff())
++                {
++                    LS_INFO(getLogSession(),
++                            "Auto Index is disabled for [%s], access denied.",
++                            pBuf);
++                    return SC_403;
++                }
                  LS_DBG_L(getLogSession(), "Index file is not available in [%s].",
                           pBuf);
++            }
              return SC_404; //can't find a index file

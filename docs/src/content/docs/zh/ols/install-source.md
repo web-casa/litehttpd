@@ -68,7 +68,7 @@ make -j$(nproc)
 
 ## 应用 LiteHTTPD 补丁
 
-如果您使用 LiteHTTPD 模块（`litehttpd_htaccess.so`）且需要自定义 OLS 支持的功能（PHPConfig 透传、LSIAPI Rewrite），请在编译前应用补丁：
+如果您使用 LiteHTTPD 模块（`ols_htaccess.so`）且需要自定义 OLS 支持的功能（PHPConfig 透传、LSIAPI Rewrite），请在编译前应用补丁：
 
 ```bash
 cd openlitespeed

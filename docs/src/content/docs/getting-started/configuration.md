@@ -17,10 +17,8 @@ Add to your vhost config (`/usr/local/lsws/conf/vhosts/<name>/vhconf.conf`):
 
 ```
 allowOverride 255
-autoLoadHtaccess 0
+autoLoadHtaccess 1
 ```
-
-LiteHTTPD reads `.htaccess` files through its own module hooks. Keep OLS native `autoLoadHtaccess` disabled when LiteHTTPD is loaded to avoid double-processing directives such as `ErrorDocument` and `Options`.
 
 ### AllowOverride Values
 
