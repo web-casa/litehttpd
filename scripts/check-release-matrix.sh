@@ -81,7 +81,7 @@ require_count_at_least "platform: linux/arm64" 4 "ARM64 release jobs"
 require_count_at_least "qemu: true" 4 "QEMU-enabled release jobs"
 require_literal "docker/setup-qemu-action@v3" "QEMU setup action"
 require_literal "fail-fast: false" "OLS RPM matrix fail-fast disabled"
-require_literal "timeout-minutes: 120" "OLS RPM release timeout"
+require_literal "timeout-minutes: 360" "OLS RPM release timeout allows ARM64/QEMU builds to finish"
 
 require_literal "bash tests/check_patches.sh" "release workflow runs patch consistency checks"
 require_literal "bash scripts/check-release-source-isolated.sh" "release workflow checks clean release source"

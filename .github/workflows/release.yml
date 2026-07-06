@@ -346,7 +346,7 @@ jobs:
             qemu: true
 
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 360
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
