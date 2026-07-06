@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 # Dispatch and optionally watch the final apps-matrix DigitalOcean release gate.
-# This goes through nightly.yml so the runtime images are built once in GHCR and
-# the DO job can run with MATRIX_COMPOSE_BUILD=0.
+# This dispatches the dedicated DO release-gate workflow. The workflow builds or
+# reuses GHCR runtime images, then runs the VPS gate with MATRIX_COMPOSE_BUILD=0.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-WORKFLOW="${APPS_MATRIX_FINAL_DO_WORKFLOW:-nightly.yml}"
+WORKFLOW="${APPS_MATRIX_FINAL_DO_WORKFLOW:-apps-matrix-do-release-gate.yml}"
 REF="${APPS_MATRIX_FINAL_DO_REF:-}"
 REPO="${APPS_MATRIX_FINAL_DO_REPO:-}"
 SCENARIOS="${APPS_MATRIX_FINAL_DO_SCENARIOS:-heavy}"
 DROPLET_IMAGE="${APPS_MATRIX_FINAL_DO_DROPLET_IMAGE:-${APPS_MATRIX_DO_IMAGE:-}}"
 SKIP_DEP_INSTALL="${APPS_MATRIX_FINAL_DO_SKIP_DEP_INSTALL:-${APPS_MATRIX_DO_SKIP_DEP_INSTALL:-0}}"
 CONTINUE_ON_FAILURE="${APPS_MATRIX_FINAL_DO_CONTINUE_ON_FAILURE:-0}"
+RUNTIME_IMAGES_REUSE_EXISTING="${APPS_MATRIX_FINAL_DO_RUNTIME_IMAGES_REUSE_EXISTING:-1}"
 WATCH="${APPS_MATRIX_FINAL_DO_WATCH:-1}"
 CHECK_DO_CLEANUP="${APPS_MATRIX_FINAL_DO_CHECK_CLEANUP:-1}"
 GH_REPO_ARGS=()
@@ -23,21 +24,23 @@ usage() {
     cat <<'USAGE'
 Usage: bash scripts/apps-matrix-final-do-gate.sh [options]
 
-Dispatches nightly.yml with run_do_release_gate=1. The nightly workflow builds
-and pushes the apps-matrix runtime images, then calls the DO release gate with
-those exact image refs so the VPS does not rebuild runtimes.
+Dispatches apps-matrix-do-release-gate.yml. The workflow builds or reuses the
+apps-matrix runtime images, then calls the DO release gate with those exact image
+refs so the VPS does not rebuild runtimes.
 
 Options:
   --repo OWNER/REPO          GitHub repository. Default: private remote when
                             present, otherwise gh infers it.
   --ref REF                 Branch, tag, or SHA. Default: main unless the
                             current branch is main/master.
-  --workflow FILE           Workflow file. Default: nightly.yml.
+  --workflow FILE           Workflow file. Default:
+                            apps-matrix-do-release-gate.yml.
   --scenarios LIST          heavy, wordpress, cms, framework, all, or scenario.
                             Default: heavy.
   --droplet-image IMAGE     DO image slug or prepared snapshot ID.
   --skip-dep-install 0|1    Use 1 with prepared DO snapshots. Default: 0.
   --continue-on-failure 0|1 Default: 0.
+  --runtime-reuse 0|1       Reuse existing GHCR runtime image tags. Default: 1.
   --watch 0|1               Watch run and return its status. Default: 1.
   --check-cleanup 0|1       After watched runs, require no DO droplets. Default: 1.
 
@@ -293,6 +296,11 @@ while [ "$#" -gt 0 ]; do
             CONTINUE_ON_FAILURE="$2"
             shift
             ;;
+        --runtime-reuse)
+            [ "$#" -ge 2 ] || fail "--runtime-reuse requires a value"
+            RUNTIME_IMAGES_REUSE_EXISTING="$2"
+            shift
+            ;;
         --watch)
             [ "$#" -ge 2 ] || fail "--watch requires a value"
             WATCH="$2"
@@ -318,9 +326,14 @@ done
 require_tool gh
 validate_bool APPS_MATRIX_FINAL_DO_SKIP_DEP_INSTALL "$SKIP_DEP_INSTALL"
 validate_bool APPS_MATRIX_FINAL_DO_CONTINUE_ON_FAILURE "$CONTINUE_ON_FAILURE"
+validate_bool APPS_MATRIX_FINAL_DO_RUNTIME_IMAGES_REUSE_EXISTING "$RUNTIME_IMAGES_REUSE_EXISTING"
 validate_bool APPS_MATRIX_FINAL_DO_WATCH "$WATCH"
 validate_bool APPS_MATRIX_FINAL_DO_CHECK_CLEANUP "$CHECK_DO_CLEANUP"
 validate_scenarios "$SCENARIOS"
+case "$WORKFLOW" in
+    apps-matrix-do-release-gate.yml) ;;
+    *) fail "unsupported final DO workflow: $WORKFLOW; use apps-matrix-do-release-gate.yml" ;;
+esac
 
 if [ -z "$REPO" ]; then
     REPO="$(github_repo_from_remote private)"
@@ -344,17 +357,25 @@ fi
 
 dispatch_started="$(date -u -d '2 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')"
 head_sha="$(resolve_ref_sha "$REF" 2>/dev/null || true)"
+workflow_args=(
+    --ref "$REF"
+    -f scenarios="$SCENARIOS"
+    -f engines="apache,ols_module"
+    -f droplet_image="$DROPLET_IMAGE"
+    -f skip_dep_install="$SKIP_DEP_INSTALL"
+    -f continue_on_failure="$CONTINUE_ON_FAILURE"
+    -f artifact_mode=summary
+    -f enforce_budgets=0
+    -f runtime_images_reuse_existing="$RUNTIME_IMAGES_REUSE_EXISTING"
+)
+if [ -n "$head_sha" ]; then
+    workflow_args+=(-f image_tag="$head_sha")
+fi
 
 printf 'Dispatching %s on %s with DO scenarios=%s repo=%s\n' \
     "$WORKFLOW" "$REF" "$SCENARIOS" "${REPO:-gh-default}"
 dispatch_output="$(
-    gh workflow run "$WORKFLOW" "${GH_REPO_ARGS[@]}" \
-        --ref "$REF" \
-        -f run_do_release_gate=1 \
-        -f do_release_gate_scenarios="$SCENARIOS" \
-        -f do_release_gate_droplet_image="$DROPLET_IMAGE" \
-        -f do_release_gate_skip_dep_install="$SKIP_DEP_INSTALL" \
-        -f do_release_gate_continue_on_failure="$CONTINUE_ON_FAILURE"
+    gh workflow run "$WORKFLOW" "${GH_REPO_ARGS[@]}" "${workflow_args[@]}"
 )"
 
 if [ -n "$dispatch_output" ]; then

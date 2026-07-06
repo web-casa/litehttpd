@@ -33,7 +33,7 @@ Options:
   --sha SHA              Expected commit SHA for workflow runs. Default:
                           resolved from --ref.
   --skip-dependabot      Do not query Dependabot alerts.
-  --rerun-formal         Rerun failed CI/CodeQL runs and dispatch runtime/nightly.
+  --rerun-formal         Rerun failed CI/CodeQL runs and dispatch runtime images.
   --watch                Poll required workflows until success/failure.
   --timeout-seconds N    Watch timeout. Default: 21600.
   --poll-seconds N       Watch poll interval. Default: 30.
@@ -211,9 +211,8 @@ wait_for_dispatched_run_id() {
 dispatch_workflow() {
     local workflow="$1"
     local kind="$2"
-    local short_sha output run_id created_after
+    local output run_id created_after
 
-    short_sha="${SHA:0:12}"
     created_after="$(date -u -d '2 minutes ago' '+%Y-%m-%dT%H:%M:%SZ')"
     printf 'Dispatching %s on %s\n' "$workflow" "$REF"
 
@@ -222,18 +221,10 @@ dispatch_workflow() {
             output="$(
                 gh workflow run "$workflow" "${GH_REPO_ARGS[@]}" \
                     --ref "$REF" \
-                    -f image_tag="$short_sha" \
+                    -f image_tag="$SHA" \
                     -f extra_tag=release-gate \
                     -f push_images=1 \
                     -f reuse_existing=0
-            )"
-            ;;
-        nightly)
-            output="$(
-                gh workflow run "$workflow" "${GH_REPO_ARGS[@]}" \
-                    --ref "$REF" \
-                    -f run_do_release_gate=0 \
-                    -f runtime_images_reuse_existing=1
             )"
             ;;
         codeql)
@@ -271,7 +262,7 @@ maybe_rerun_or_dispatch() {
             printf 'Rerunning %s run %s\n' "$workflow" "$run_id"
             gh run rerun "$run_id" "${GH_REPO_ARGS[@]}"
             ;;
-        runtime|nightly|codeql)
+        runtime|codeql)
             dispatch_workflow "$workflow" "$kind"
             ;;
         *)
@@ -341,7 +332,6 @@ check_workflows_once() {
 ci.yml|CI|rerun
 codeql.yml|CodeQL|codeql
 apps-matrix-runtime-images.yml|Apps Matrix Runtime Images|runtime
-nightly.yml|Nightly|nightly
 WORKFLOWS
 
     if [ "$billing_blocked" -eq 1 ]; then
@@ -478,7 +468,6 @@ done <<'WORKFLOWS'
 ci.yml|CI|rerun
 codeql.yml|CodeQL|codeql
 apps-matrix-runtime-images.yml|Apps Matrix Runtime Images|runtime
-nightly.yml|Nightly|nightly
 WORKFLOWS
 
 if [ "$WATCH" = "1" ]; then

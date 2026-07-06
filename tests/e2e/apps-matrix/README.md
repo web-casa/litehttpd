@@ -159,10 +159,11 @@ Real provisioning also writes:
   `MATRIX_REAL_RUN_APP_INSTALL=1`
 
 `Dockerfile.fixture` provides a cacheable fixture-builder image with PHP,
-Composer, MySQL client tools, and archive utilities. CI also caches
-`MATRIX_REAL_DOWNLOAD_DIR` and Composer packages between nightly runs. The image
-defaults to `prewarm_fixture_cache.sh`, which can prefetch pinned app archives
-and Composer dependencies for `MATRIX_SCENARIOS=heavy|wordpress|cms|framework`.
+Composer, MySQL client tools, and archive utilities. CI/release-gate jobs can
+cache `MATRIX_REAL_DOWNLOAD_DIR` and Composer packages between explicit runs.
+The image defaults to `prewarm_fixture_cache.sh`, which can prefetch pinned app
+archives and Composer dependencies for
+`MATRIX_SCENARIOS=heavy|wordpress|cms|framework`.
 
 ## Scenario List
 
@@ -231,9 +232,9 @@ bash tests/e2e/apps-matrix/run_full_matrix.sh
 ```
 
 Use `MATRIX_SCENARIOS=all`, `heavy`, `wordpress`, `cms`, `framework`, or a
-comma-separated list to run more than one scenario locally. The nightly workflow
-runs all 12 scenarios as a GitHub Actions matrix and uploads one artifact per
-scenario.
+comma-separated list to run more than one scenario locally. The manual heavy
+workflow can run all 12 scenarios as a GitHub Actions matrix and upload one
+artifact per scenario.
 
 `MATRIX_FULL_PHASE=install|verify|all` can split source/app provisioning from
 the engine run. `install` writes docroot fixtures and `db-dumps/<scenario>.sql.gz`;
@@ -290,8 +291,8 @@ The workflow resolves image refs once, then builds the Apache and patched OLS
 images in parallel. Both builds use Docker BuildKit `type=gha` cache. By
 default `reuse_existing=1` makes the workflow inspect every requested GHCR tag
 and skip a runtime build when all tags already exist, which makes repeated
-Nightly/release-gate attempts for the same SHA avoid rebuilding large images.
-Set `reuse_existing=0` only when intentionally refreshing a tag.
+release-gate or heavy workflow attempts for the same SHA avoid rebuilding large
+images. Set `reuse_existing=0` only when intentionally refreshing a tag.
 
 The patched OLS image uses the LiteSpeed runtime image and official `lsphp`
 packages by default (`litespeedtech/openlitespeed:1.9.1-lsphp82` with
@@ -310,11 +311,11 @@ The compose wrapper passes `MATRIX_OLS_BUILD_JOBS` and
 script exposes the same knobs as `APPS_MATRIX_DO_OLS_BUILD_JOBS` and
 `APPS_MATRIX_DO_OLS_RPM_BUILD_MODE`.
 
-Nightly consumes those images with `MATRIX_COMPOSE_BUILD=0`, so the 12 scenario
-jobs pull the same runtime images instead of rebuilding Apache and patched OLS
-independently. Manual Nightly dispatches expose `runtime_images_reuse_existing`;
-leave it at `1` for reruns and set it to `0` only when a pushed tag must be
-rebuilt intentionally.
+Manual heavy and DO release-gate workflows consume those images with
+`MATRIX_COMPOSE_BUILD=0`, so scenario jobs pull the same runtime images instead
+of rebuilding Apache and patched OLS independently. Leave
+`runtime_images_reuse_existing` at `1` for reruns and set it to `0` only when a
+pushed tag must be rebuilt intentionally.
 
 ## Heavy Real Install
 
@@ -372,9 +373,9 @@ bash scripts/apps-matrix-do-vps-test.sh
 `.github/workflows/apps-matrix-do-release-gate.yml` automates this path: it
 first calls the runtime-image workflow, then runs the DO VPS test with
 `APPS_MATRIX_DO_COMPOSE_BUILD=0`, registry login, and pre-pulled GHCR images.
-Direct release-gate dispatches use the same `runtime_images_reuse_existing`
-switch as Nightly; callers that pass both `apache_image` and `ols_module_image`
-skip the runtime-image build job entirely.
+Direct release-gate dispatches expose `runtime_images_reuse_existing`; callers
+that pass both `apache_image` and `ols_module_image` skip the runtime-image build
+job entirely.
 
 For private registries, pass Docker credentials explicitly; the runner logs in
 before syncing/running the matrix and pre-pulls both runtime images:

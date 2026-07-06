@@ -35,8 +35,9 @@ Options:
   --ref REF              Branch, tag, or SHA to release. Default: main.
   --tag vX.Y.Z           Release tag. Default: derived from package metadata.
   --skip-github-gates    Skip formal GitHub CI gate check.
-  --require-do-gate      Require a successful Nightly run with the
-                          apps-matrix-do-release-gate artifact for the SHA.
+  --require-do-gate      Require a successful Apps Matrix DO Release Gate run
+                          with the apps-matrix-do-release-gate artifact for the
+                          SHA.
   --allow-existing-tag   Do not fail if the tag already exists at the same SHA.
   --create-tag           Create an annotated local tag after checks pass.
   --push-tag             Push the tag to the private remote after checks pass.
@@ -281,7 +282,7 @@ check_do_release_gate_artifact() {
 
     run_ids="$(
         gh run list "${GH_REPO_ARGS[@]}" \
-            --workflow nightly.yml \
+            --workflow apps-matrix-do-release-gate.yml \
             --limit 50 \
             --json databaseId,headSha,status,conclusion \
             --jq ".[] | select(.headSha == \"$sha\" and .status == \"completed\" and .conclusion == \"success\") | .databaseId"
@@ -295,13 +296,13 @@ check_do_release_gate_artifact() {
         )"
         if printf '%s\n' "$artifact_names" | grep -Fxq apps-matrix-do-release-gate; then
             run_url="$(gh run view "$run_id" "${GH_REPO_ARGS[@]}" --json url --jq '.url')"
-            printf 'OK: DO release gate artifact found on Nightly run %s\n' "$run_id"
+            printf 'OK: DO release gate artifact found on Apps Matrix DO Release Gate run %s\n' "$run_id"
             printf '  %s\n' "$run_url"
             return 0
         fi
     done <<< "$run_ids"
 
-    fail "no successful Nightly run with apps-matrix-do-release-gate artifact found for $sha"
+    fail "no successful Apps Matrix DO Release Gate run with apps-matrix-do-release-gate artifact found for $sha"
 }
 
 run_clean_worktree_checks() {
