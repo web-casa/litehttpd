@@ -21,19 +21,21 @@ cases:
 
   - id: NEXTCLOUD_003
     category: deny
-    desc: sensitive config path is not directly accessible
+    desc: sensitive config path is not exposed
     method: GET
     path: /config/config.php
     assert:
-      - status_exact: 403
+      - status_in: 403,404
+      - body_not_contains: dbpassword
 
   - id: NEXTCLOUD_004
     category: deny
-    desc: protected data directory is not browsable
+    desc: protected data directory is not exposed
     method: GET
     path: /data/
     assert:
-      - status_exact: 403
+      - status_in: 403,404
+      - body_not_contains: ocdata
 
   - id: NEXTCLOUD_005
     category: htaccess

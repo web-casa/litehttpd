@@ -72,6 +72,15 @@ TEST_F(ParserTest, HeaderUnset) {
     htaccess_directives_free(d);
 }
 
+TEST_F(ParserTest, HeaderOnSuccessUnset) {
+    auto *d = parse("Header onsuccess unset X-Content-Type-Options\n");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->type, DIR_HEADER_UNSET);
+    EXPECT_STREQ(d->name, "X-Content-Type-Options");
+    EXPECT_EQ(d->value, nullptr);
+    htaccess_directives_free(d);
+}
+
 TEST_F(ParserTest, HeaderAppend) {
     auto *d = parse("Header append Cache-Control no-transform\n");
     ASSERT_NE(d, nullptr);
@@ -339,6 +348,22 @@ TEST_F(ParserTest, ErrorDocumentQuotedMessage) {
        can detect text message mode via value[0] == '"' */
     EXPECT_EQ(d->value[0], '"');
     EXPECT_TRUE(strstr(d->value, "Service Temporarily Unavailable") != nullptr);
+    htaccess_directives_free(d);
+}
+
+TEST_F(ParserTest, FallbackResourceLocalPath) {
+    auto *d = parse("FallbackResource /index.php\n");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->type, DIR_FALLBACK_RESOURCE);
+    EXPECT_STREQ(d->value, "/index.php");
+    htaccess_directives_free(d);
+}
+
+TEST_F(ParserTest, FallbackResourceDisabled) {
+    auto *d = parse("FallbackResource disabled\n");
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->type, DIR_FALLBACK_RESOURCE);
+    EXPECT_STREQ(d->value, "disabled");
     htaccess_directives_free(d);
 }
 
@@ -1210,4 +1235,36 @@ TEST_F(ParserTest, Phase1RoundTrip) {
     htaccess_directives_free(d);
     htaccess_directives_free(d2);
     free(printed);
+}
+
+/* A nested <RequireAll> inside <RequireAny> must keep its children in the
+ * INNER RequireAll (AND), not leak them into the outer RequireAny (OR).
+ * Regression: previously the leaf-routing checked in_require_any first, so
+ * the inner RequireAll ended up empty and the rules became OR (security). */
+TEST_F(ParserTest, NestedRequireAllInsideRequireAnyKeepsAndLogic) {
+    const char *input =
+        "<RequireAny>\n"
+        "<RequireAll>\n"
+        "Require ip 10.0.0.0/8\n"
+        "Require ip 192.168.0.0/16\n"
+        "</RequireAll>\n"
+        "</RequireAny>\n";
+    auto *d = parse(input);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(d->type, DIR_REQUIRE_ANY_OPEN);
+
+    /* The RequireAny must contain exactly the nested RequireAll, and the two
+     * Require ip rules must live INSIDE that RequireAll, not in RequireAny. */
+    auto *any_child = d->data.require_container.children;
+    ASSERT_NE(any_child, nullptr);
+    EXPECT_EQ(any_child->type, DIR_REQUIRE_ALL_OPEN);
+    EXPECT_EQ(any_child->next, nullptr) << "IP rules leaked into RequireAny (AND became OR)";
+
+    auto *all_child = any_child->data.require_container.children;
+    ASSERT_NE(all_child, nullptr);
+    EXPECT_EQ(all_child->type, DIR_REQUIRE_IP);
+    ASSERT_NE(all_child->next, nullptr);
+    EXPECT_EQ(all_child->next->type, DIR_REQUIRE_IP);
+
+    htaccess_directives_free(d);
 }

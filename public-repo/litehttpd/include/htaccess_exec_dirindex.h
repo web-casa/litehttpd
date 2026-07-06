@@ -14,7 +14,8 @@ extern "C" {
  * sets internal redirect to the first existing file.
  *
  * @param target_dir  The directory path to check files in.
- * @return LSI_OK on success (or no match), LSI_ERROR on error.
+ * @return 1 when an index file is found, 0 when no index file matches,
+ *         LSI_ERROR on error.
  */
 int exec_directory_index(lsi_session_t *session,
                          const htaccess_directive_t *dir,

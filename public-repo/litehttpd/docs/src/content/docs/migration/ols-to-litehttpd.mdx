@@ -3,102 +3,203 @@ title: From Stock OLS to LiteHTTPD
 description: Add .htaccess support to your existing OpenLiteSpeed installation
 ---
 
-import { Steps } from '@astrojs/starlight/components';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 
 ## Overview
 
-This page covers upgrading stock OLS to LiteHTTPD (Full edition) for maximum .htaccess compatibility. If you want a quick evaluation without replacing the OLS binary, start with LiteHTTPD-Thin: just drop in the `.so` module (steps 1-3 below) and skip the patches. You can upgrade to Full later.
+If you are running stock OpenLiteSpeed (installed via the [official repo](https://docs.openlitespeed.org/installation/), [ols1clk.sh script](https://docs.openlitespeed.org/installation/script/), or manual download), adding LiteHTTPD gives you full `.htaccess` support without changing your existing configuration.
 
-If you are already running OpenLiteSpeed (stock), adding LiteHTTPD gives you full `.htaccess` support without changing your existing configuration. Stock OLS only processes 44% of `.htaccess` directives -- LiteHTTPD brings that to 100%.
+Stock OLS only handles a small subset of `.htaccess` directives (primarily `RewriteFile` for basic rewrite rules). LiteHTTPD adds 80 directives including `Header`, `Require`, `FilesMatch`, `AuthType Basic`, `If/ElseIf/Else`, and more.
 
 ## What You Gain
 
 | Feature | Stock OLS | With LiteHTTPD |
 |---------|-----------|----------------|
-| .htaccess compatibility | 44% (8/18) | **90%+ (18/18)** |
+| .htaccess directives | ~6 (RewriteFile only) | **80** |
 | `Require all denied` | Returns 200 (broken) | Returns 403 |
 | `Header set` | Ignored | Applied |
 | `RewriteRule [R=301]` | 404 | 301 redirect |
-| `Options -Indexes` | 404 | 403 |
+| `Options -Indexes` | 404 | 403 (with patch 0004) |
 | `FilesMatch` ACL | Ignored | Enforced |
 | `AuthType Basic` | Not supported | Full support |
-| PHP `php_value` | Not supported | Supported (with patch) |
+| PHP `php_value` | Not supported | Supported (Full mode) |
+| `.ht*` file protection | May serve or 404 | Always 403 |
 | Static file performance | Baseline | -5% (negligible) |
 | Memory overhead | Baseline | +13 MB |
 
-## Migration Steps
+## Installation
+
+<Tabs>
+<TabItem label="RPM (Recommended)">
 
 <Steps>
-1. **Install the module**
+1. Add the LiteHTTPD RPM repository and install:
+
+   ```bash
+   curl -s https://rpms.litehttpd.com/setup.sh | bash
+   dnf install openlitespeed-litehttpd
+   ```
+
+   This installs Full mode: patched OLS binary + `litehttpd_htaccess.so` module + auto-configuration. The RPM uses `Conflicts: openlitespeed` to replace the stock package.
+
+2. Restart OLS:
+
+   ```bash
+   systemctl restart lsws
+   ```
+</Steps>
+
+The RPM automatically (on fresh install only):
+- Replaces the OLS binary with the patched version (4 patches)
+- Installs `litehttpd_htaccess.so` to `/usr/local/lsws/modules/`
+- Adds the module block to `httpd_config.conf`
+- Enables rewrite in the Example vhost
+- Adds `index.php` to `indexFiles`
+
+**Your existing config files are preserved** — the RPM uses `%config(noreplace)`.
+
+</TabItem>
+<TabItem label="Thin Mode (Module Only)">
+
+For a quick evaluation without replacing the OLS binary:
+
+<Steps>
+1. Copy the module to OLS:
 
    ```bash
    cp litehttpd_htaccess.so /usr/local/lsws/modules/
    ```
 
-2. **Enable in OLS config**
+2. Enable the module in `httpd_config.conf`:
 
-   Add to `/usr/local/lsws/conf/httpd_config.conf`:
-   ```
+   ```bash
+   cat >> /usr/local/lsws/conf/httpd_config.conf <<'EOF'
+
    module litehttpd_htaccess {
        ls_enabled              1
    }
+   EOF
    ```
 
-3. **Enable .htaccess for your vhost**
-
-   Add to `/usr/local/lsws/conf/vhosts/<name>/vhconf.conf`:
-   ```
-   allowOverride 255
-   autoLoadHtaccess 1
-   ```
-
-4. **Disable OLS native cache (optional)**
-
-   For accurate .htaccess header testing, disable the built-in cache module:
-   ```
-   # In httpd_config.conf, set cache module to disabled:
-   module cache {
-       ls_enabled          0
-   }
-   ```
-
-5. **Restart OLS**
+3. Restart OLS:
 
    ```bash
-   /usr/local/lsws/bin/lswsctrl restart
-   ```
-
-6. **Verify**
-
-   ```bash
-   # Check module loaded
-   grep "litehttpd" /usr/local/lsws/logs/error.log
-
-   # Test .htaccess processing
-   echo 'Header set X-Test "OK"' > /var/www/html/.htaccess
-   curl -I http://localhost:8088/
-   # Should show: x-test: OK
+   systemctl restart lsws
    ```
 </Steps>
 
-## Optional: Apply OLS Patches (Thin to Full Upgrade)
+Thin mode limitations:
+- `RewriteRule` / `RewriteCond` are parsed but **not executed**
+- `php_value` / `php_flag` are parsed but **not passed to lsphp**
+- `Options -Indexes` does not return 403
+- `readApacheConf` is not available
 
-For full feature support (upgrading from LiteHTTPD-Thin to Full), apply the OLS patches and rebuild, or install the pre-patched RPM:
+You can upgrade to Full later by installing the RPM.
+
+</TabItem>
+<TabItem label="From Source">
+
+<Steps>
+1. Clone OLS, apply patches, and build:
+
+   ```bash
+   git clone --branch v1.8.5 https://github.com/litespeedtech/openlitespeed.git
+   cd openlitespeed
+   patch -p1 < /path/to/patches/0001-lsiapi-phpconfig.patch
+   patch -p1 < /path/to/patches/0002-lsiapi-rewrite.patch
+   patch -p1 < /path/to/patches/0003-readapacheconf.patch
+   patch -p1 < /path/to/patches/0004-autoindex-403.patch
+   bash build.sh
+   ```
+
+2. Build the module:
+
+   ```bash
+   cd /path/to/litehttpd
+   cmake -B build -DCMAKE_BUILD_TYPE=Release
+   cmake --build build --target litehttpd_htaccess
+   cp build/litehttpd_htaccess.so /usr/local/lsws/modules/
+   ```
+</Steps>
+
+</TabItem>
+</Tabs>
+
+## Prevent Auto-Upgrade Reverting the Binary
+
+If you originally installed OLS from the official LiteSpeed repo, package manager updates could revert to the stock binary.
 
 ```bash
-dnf install ./openlitespeed-litehttpd-*.rpm
+# Pin the package version (EL 8/9/10)
+dnf install python3-dnf-plugin-versionlock
+dnf versionlock add openlitespeed
+
+# Or exclude from updates
+echo "exclude=openlitespeed" >> /etc/dnf/dnf.conf
 ```
 
-Alternatively, apply the 4 OLS patches manually and rebuild:
+Also disable the OLS built-in upgrade script to prevent the WebAdmin console from triggering an in-place upgrade:
 
-| Patch | Enables | Required? |
-|-------|---------|-----------|
-| 0001 PHPConfig | `php_value`, `php_flag` | Only if you use PHP INI in .htaccess |
-| 0002 Rewrite | `RewriteRule` execution | Only if you need rewrite beyond basic WordPress |
-| 0003 readApacheConf | Auto-convert Apache config at startup | Optional convenience |
-| 0004 autoIndex | `Options -Indexes` returns 403 | Recommended for security |
+```bash
+mv /usr/local/lsws/admin/misc/lsup.sh /usr/local/lsws/admin/misc/lsup.sh.bak
+```
 
-See [Patches](/development/patches/) for details.
+## Disable OLS autoLoadHtaccess
+
+If your vhost configs have OLS's native `autoLoadHtaccess 1`, disable it. OLS's native `.htaccess` parser handles a small set of directives (mainly `ErrorDocument`, `Options`). With LiteHTTPD also processing these directives, you get double-processing.
+
+```bash
+# Check current state
+grep -r 'autoLoadHtaccess' /usr/local/lsws/conf/vhosts/
+
+# Disable if set to 1
+sed -i 's/autoLoadHtaccess.*1/autoLoadHtaccess 0/' /usr/local/lsws/conf/vhosts/*/vhost.conf
+```
+
+## Behavioral Changes from Stock OLS
+
+After installing LiteHTTPD, be aware of these changes:
+
+### Security Improvements (Automatic)
+
+- **`.ht*` files are blocked** — Requests to `.htaccess`, `.htpasswd`, etc. return 403. Stock OLS either serves these files (security risk) or returns 404. LiteHTTPD matches Apache's default `<Files ".ht*"> Require all denied</Files>` behavior.
+
+- **Path traversal blocked** — Encoded `../` sequences (like `%2e%2e/`) return 403 instead of stock OLS's 400/404.
+
+### .htaccess Directives Now Active
+
+**This is important.** If your document roots contain `.htaccess` files with directives that stock OLS previously ignored, those directives are now active. For example:
+
+- `Require all denied` in a directory now actually blocks access (403)
+- `Header set X-Frame-Options DENY` now adds the header
+- `FilesMatch` rules now enforce access control
+
+Review your `.htaccess` files before enabling LiteHTTPD in production.
+
+### Handler Directives (No-op)
+
+`AddHandler`, `SetHandler`, `RemoveHandler`, and `Action` are parsed but do not change request handling. OLS uses `scriptHandler` in vhost config instead.
+
+### ExecCGI Blocked
+
+`Options +ExecCGI` in `.htaccess` is silently ignored for security. OLS does not support CGI execution via `.htaccess`.
+
+## Verification
+
+```bash
+# Check module loaded
+grep 'litehttpd_htaccess' /usr/local/lsws/conf/httpd_config.conf
+
+# Verify patches (Full mode only)
+strings /usr/local/lsws/bin/openlitespeed | grep -q 'set_php_config_value' && echo "patch 0001 OK"
+strings /usr/local/lsws/bin/openlitespeed | grep -q 'parse_rewrite_rules' && echo "patch 0002 OK"
+strings /usr/local/lsws/bin/openlitespeed | grep -q 'readApacheConf' && echo "patch 0003 OK"
+
+# Test .htaccess processing
+echo 'Header set X-LiteHTTPD "active"' > /var/www/html/.htaccess
+curl -sI http://localhost/ | grep X-LiteHTTPD
+# Expected: X-LiteHTTPD: active
+```
 
 ## What Does Not Change
 
@@ -106,4 +207,5 @@ See [Patches](/development/patches/) for details.
 - Virtual host settings, listeners, and SSL config stay the same
 - PHP (lsphp) configuration is unchanged
 - OLS admin panel continues to work
-- No OLS binary replacement needed (unless applying patches)
+- LSCache / LiteSpeed Cache plugin works normally
+- HTTP/3 / QUIC unchanged

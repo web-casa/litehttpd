@@ -12,6 +12,9 @@ services:
     build:
       context: ../..
       dockerfile: tests/e2e/Dockerfile.app
+      args:
+        OLS_APP_BASE_IMAGE: "${OLS_APP_BASE_IMAGE:-litespeedtech/openlitespeed:1.9.1-lsphp82}"
+        OLS_APP_LSPHP_VERSION: "${OLS_APP_LSPHP_VERSION:-82}"
     container_name: ols-app-e2e
     ports:
       - "8088:80"

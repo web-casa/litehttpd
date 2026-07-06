@@ -25,7 +25,7 @@
      int appendUnparsedRule(AutoStr2 &sDirective, char *pBegin,
 --- a/src/lsiapi/lsiapilib.cpp
 +++ b/src/lsiapi/lsiapilib.cpp
-@@ -38,6 +38,8 @@
+@@ -43,6 +43,8 @@
  #include <http/reqparser.h>
  #include <http/clientinfo.h>
  #include <http/ntwkiolink.h>
@@ -34,7 +34,7 @@
  
  #include <log4cxx/logger.h>
  #include <lsiapi/envmanager.h>
-@@ -3829,6 +3831,95 @@
+@@ -3829,6 +3831,96 @@
      pApi->get_php_config = nullptr;
      pApi->set_req_header = nullptr;
  
@@ -42,7 +42,8 @@
 +    pApi->parse_rewrite_rules = [](const char *rules_text,
 +                                    int text_len) -> void * {
 +        if (!rules_text || text_len <= 0)
-+        if (text_len > 1024 * 1024) return NULL; /* 1MB max */
++            return NULL;
++        if (text_len > 1024 * 1024)
 +            return NULL;
 +        char *buf = (char *)malloc(text_len + 1);
 +        if (!buf) return NULL;

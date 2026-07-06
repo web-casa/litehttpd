@@ -162,8 +162,14 @@ static int eval_single_require(const htaccess_directive_t *dir,
         }
         return 0;
     case DIR_REQUIRE_VALID_USER:
-        /* Use pre-validated auth result */
+    case DIR_REQUIRE_USER:
+        /* Use pre-validated auth result. The actual username-list check for
+         * "Require user" is enforced in exec_auth_basic(); here we only need
+         * the auth-required semantics (deny unless authenticated). */
         return auth_ok ? 1 : -2; /* -2 = defer if no credentials yet */
+    case DIR_REQUIRE_GROUP:
+        /* Unsupported requirement (no AuthGroupFile) — never grant. */
+        return 0;
     default:
         return -1; /* Not a Require directive */
     }
@@ -269,6 +275,8 @@ int exec_require(lsi_session_t *session,
         case DIR_REQUIRE_ALL_OPEN:
         case DIR_REQUIRE_ENV:
         case DIR_REQUIRE_VALID_USER:
+        case DIR_REQUIRE_USER:
+        case DIR_REQUIRE_GROUP:
             has_require = 1;
             break;
         default:
@@ -338,14 +346,16 @@ int exec_require(lsi_session_t *session,
     /* Pre-scan for valid-user anywhere in the Require tree (including containers) */
     int has_valid_user_anywhere = 0;
     for (dir = directives; dir; dir = dir->next) {
-        if (dir->type == DIR_REQUIRE_VALID_USER) {
+        if (dir->type == DIR_REQUIRE_VALID_USER ||
+            dir->type == DIR_REQUIRE_USER) {
             has_valid_user_anywhere = 1;
             break;
         }
         if (dir->type == DIR_REQUIRE_ANY_OPEN || dir->type == DIR_REQUIRE_ALL_OPEN) {
             const htaccess_directive_t *child;
             for (child = dir->data.require_container.children; child; child = child->next) {
-                if (child->type == DIR_REQUIRE_VALID_USER) {
+                if (child->type == DIR_REQUIRE_VALID_USER ||
+                    child->type == DIR_REQUIRE_USER) {
                     has_valid_user_anywhere = 1;
                     break;
                 }
@@ -369,7 +379,8 @@ int exec_require(lsi_session_t *session,
     int granted = 0;
     int has_valid_user = 0;
     for (dir = directives; dir; dir = dir->next) {
-        if (dir->type == DIR_REQUIRE_VALID_USER) {
+        if (dir->type == DIR_REQUIRE_VALID_USER ||
+            dir->type == DIR_REQUIRE_USER) {
             has_valid_user = 1;
             if (auth_ok) { granted = 1; break; }
             continue; /* No credentials yet — defer to exec_auth_basic */

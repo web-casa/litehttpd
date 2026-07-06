@@ -130,6 +130,8 @@ int directive_category(directive_type_t type)
     case DIR_AUTH_NAME:
     case DIR_AUTH_USER_FILE:
     case DIR_REQUIRE_VALID_USER:
+    case DIR_REQUIRE_USER:
+    case DIR_REQUIRE_GROUP:
     case DIR_REQUIRE_ALL_GRANTED:
     case DIR_REQUIRE_ALL_DENIED:
     case DIR_REQUIRE_IP:
@@ -155,6 +157,7 @@ int directive_category(directive_type_t type)
     case DIR_REDIRECT:
     case DIR_REDIRECT_MATCH:
     case DIR_ERROR_DOCUMENT:
+    case DIR_FALLBACK_RESOURCE:
     case DIR_REWRITE_ENGINE:
     case DIR_REWRITE_BASE:
     case DIR_REWRITE_COND:

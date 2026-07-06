@@ -923,10 +923,6 @@ install_sucuri() {
   Order Allow,Deny
   Deny from all
 </Files>
-<FilesMatch "\.(php|phtml)$">
-  Order Allow,Deny
-  Deny from all
-</FilesMatch>
 Options -Indexes
 Header always set X-Content-Type-Options "nosniff"
 Header always set X-Frame-Options "SAMEORIGIN"
@@ -2536,38 +2532,69 @@ install_laravel() {
         fi
     '
 
-    # Create Laravel project via Composer (Req 19.1)
-    # Pin to Laravel 10.x which supports PHP 8.1 (Laravel 11+ requires 8.2+)
-    # Use --ignore-platform-req=ext-* to avoid extension issues, and set platform
-    # PHP version to prevent Composer from resolving deps needing newer PHP.
+    # Create Laravel project via Composer (Req 19.1).  Use the current
+    # supported major for PHP 8.2+ so Composer's security advisory policy does
+    # not block the install on old Laravel 10 framework releases.
     docker exec "${OLS_CONTAINER}" bash -c "
         export COMPOSER_ALLOW_SUPERUSER=1
-        composer create-project laravel/laravel:'^10.0' \
+        composer create-project laravel/laravel:'^12.0' \
             '${OLS_DOCROOT}/laravel' \
             --no-interaction --prefer-dist --no-dev
-        cd '${OLS_DOCROOT}/laravel'
-        composer config platform.php 8.1.34
-        composer update --no-interaction --prefer-dist --no-dev
+    "
+
+    # Laravel 12 defaults to sqlite-backed bootstrap checks.  The app e2e
+    # image intentionally keeps PHP lean, so use the existing MariaDB service.
+    docker exec "${OLS_CONTAINER}" bash -c "
+        mariadb --ssl=0 -h db -uroot -prootpass -e \"
+            CREATE DATABASE IF NOT EXISTS laravel;
+            GRANT ALL ON laravel.* TO 'appuser'@'%';
+            FLUSH PRIVILEGES;
+        \"
+        cd ${OLS_DOCROOT}/laravel
+        cat > .env <<'LARENV'
+APP_NAME=Laravel
+APP_ENV=testing
+APP_KEY=
+APP_DEBUG=true
+APP_URL=http://localhost:8088/laravel/public
+LOG_CHANNEL=stack
+LOG_LEVEL=debug
+DB_CONNECTION=mysql
+DB_HOST=db
+DB_PORT=3306
+DB_DATABASE=laravel
+DB_USERNAME=appuser
+DB_PASSWORD=apppass
+SESSION_DRIVER=file
+SESSION_LIFETIME=120
+CACHE_STORE=file
+CACHE_DRIVER=file
+QUEUE_CONNECTION=sync
+MAIL_MAILER=array
+LARENV
     "
 
     # Generate APP_KEY if not already set (Req 19.1)
     docker exec "${OLS_CONTAINER}" bash -c "
-        cd ${OLS_DOCROOT}/laravel && php artisan key:generate --force
+        cd ${OLS_DOCROOT}/laravel
+        php artisan key:generate --force
+        php artisan config:clear || true
     "
 
     # Create a test API route (Req 19.5)
     docker exec "${OLS_CONTAINER}" bash -c "
         cd ${OLS_DOCROOT}/laravel
-        # Ensure routes/api.php exists and add our test route
+        # Use web.php so the route is loaded across Laravel 10+ skeletons,
+        # including newer skeletons where API routes are opt-in.
         mkdir -p routes
-        if [ ! -f routes/api.php ]; then
-            echo '<?php' > routes/api.php
-            echo '' >> routes/api.php
-            echo 'use Illuminate\Support\Facades\Route;' >> routes/api.php
+        if [ ! -f routes/web.php ]; then
+            echo '<?php' > routes/web.php
+            echo '' >> routes/web.php
+            echo 'use Illuminate\Support\Facades\Route;' >> routes/web.php
         fi
         # Append the test route
-        echo '' >> routes/api.php
-        echo \"Route::get('/test', function() { return response()->json(['status' => 'ok']); });\" >> routes/api.php
+        echo '' >> routes/web.php
+        echo \"Route::get('/api/test', function() { return response()->json(['status' => 'ok']); });\" >> routes/web.php
     "
 
     # Fix ownership so OLS (nobody:nogroup) can read/write
@@ -2764,7 +2791,7 @@ install_joomla() {
     fi
 
     docker exec "${OLS_CONTAINER}" bash -c "
-        mariadb -h db -uroot -prootpass -e \"
+        mariadb --ssl=0 -h db -uroot -prootpass -e \"
             CREATE DATABASE IF NOT EXISTS joomla;
             GRANT ALL ON joomla.* TO 'appuser'@'%';
             FLUSH PRIVILEGES;
@@ -2855,7 +2882,7 @@ install_mediawiki() {
     fi
 
     docker exec "${OLS_CONTAINER}" bash -euc "
-        mariadb -h db -uroot -prootpass -e \"
+        mariadb --ssl=0 -h db -uroot -prootpass -e \"
             CREATE DATABASE IF NOT EXISTS mediawiki;
             GRANT ALL ON mediawiki.* TO 'appuser'@'%';
             FLUSH PRIVILEGES;

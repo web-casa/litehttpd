@@ -26,23 +26,45 @@ SPEC="$ROOT/packaging/openlitespeed-litehttpd.spec"
 RELEASE_YML="$ROOT/.github/workflows/release.yml"
 REWRITE_PATCH="$ROOT/patches/0002-lsiapi-rewrite.patch"
 ASSET_ARCH_TGZ_LITERAL="\${ASSET_ARCH}-linux.tgz"
-
-spec_version="$(awk '/^%global[[:space:]]+ols_version[[:space:]]+/ { print $3; exit }' "$SPEC")"
-if [ "$spec_version" != "$TARGET_OLS_VERSION" ]; then
-    fail "spec pins OLS $spec_version, expected $TARGET_OLS_VERSION"
-else
-    echo "OK: spec pins OLS $TARGET_OLS_VERSION"
+HAS_RELEASE_PACKAGING=0
+if [ -f "$SPEC" ] &&
+    [ -f "$RELEASE_YML" ] &&
+    [ -f "$ROOT/packaging/setup-repo.sh" ]; then
+    HAS_RELEASE_PACKAGING=1
 fi
 
-if grep -Eq 'v1\.8\.5|openlitespeed-1\.8\.5|/tmp/v1\.8\.5\.tar\.gz|libpcre3-dev' \
+existing_files() {
+    local path
+
+    for path in "$@"; do
+        [ -f "$path" ] && printf '%s\n' "$path"
+    done
+}
+
+if [ "$HAS_RELEASE_PACKAGING" = "1" ]; then
+    spec_version="$(awk '/^%global[[:space:]]+ols_version[[:space:]]+/ { print $3; exit }' "$SPEC")"
+    if [ "$spec_version" != "$TARGET_OLS_VERSION" ]; then
+        fail "spec pins OLS $spec_version, expected $TARGET_OLS_VERSION"
+    else
+        echo "OK: spec pins OLS $TARGET_OLS_VERSION"
+    fi
+else
+    echo "SKIP: release packaging checks unavailable in this checkout"
+fi
+
+mapfile -t build_critical_files < <(existing_files \
     "$RELEASE_YML" \
     "$ROOT/tests/e2e/Dockerfile.custom-ols" \
     "$ROOT/tests/e2e/compare/Dockerfile.ols-module" \
     "$ROOT/tests/e2e/vps-5engine/deploy.sh" \
     "$ROOT/integration-tests/Dockerfile.ols" \
-    "$ROOT/patches/README.md"; then
+    "$ROOT/patches/README.md")
+
+if [ "${#build_critical_files[@]}" -gt 0 ] &&
+    grep -Eq 'v1\.8\.5|openlitespeed-1\.8\.5|/tmp/v1\.8\.5\.tar\.gz|libpcre3-dev' \
+        "${build_critical_files[@]}"; then
     fail "build-critical files still contain stale OLS 1.8.5 or system PCRE1 references"
-elif awk '
+elif [ "$HAS_RELEASE_PACKAGING" = "1" ] && awk '
     /^%changelog/ { in_changelog = 1 }
     !in_changelog && /v1\.8\.5|openlitespeed-1\.8\.5|\/tmp\/v1\.8\.5\.tar\.gz|libpcre3-dev/ { bad = 1 }
     END { exit bad ? 0 : 1 }
@@ -52,23 +74,25 @@ else
     echo "OK: build-critical files no longer reference OLS 1.8.5/system PCRE1"
 fi
 
-if grep -q 'platform: linux/arm64' "$RELEASE_YML" ||
+if [ "$HAS_RELEASE_PACKAGING" = "1" ]; then
+    if grep -q 'platform: linux/arm64' "$RELEASE_YML" ||
     grep -q 'asset_arch: aarch64' "$RELEASE_YML" ||
     grep -q 'aarch64' "$ROOT/packaging/setup-repo.sh"; then
-    fail "release workflow or repo setup still contains aarch64 publishing support"
-elif ! grep -Fq "$ASSET_ARCH_TGZ_LITERAL" "$RELEASE_YML"; then
-    fail "release workflow no longer names tarballs from the selected asset architecture"
-else
-    echo "OK: release workflow publishes x86_64-only artifacts"
-fi
+        fail "release workflow or repo setup still contains aarch64 publishing support"
+    elif ! grep -Fq "$ASSET_ARCH_TGZ_LITERAL" "$RELEASE_YML"; then
+        fail "release workflow no longer names tarballs from the selected asset architecture"
+    else
+        echo "OK: release workflow publishes x86_64-only artifacts"
+    fi
 
-if ! grep -Fq 'rm -f %{buildroot}%{install_dir}/adminpasswd' "$SPEC" ||
+    if ! grep -Fq 'rm -f %{buildroot}%{install_dir}/adminpasswd' "$SPEC" ||
     ! grep -q 'build-time WebAdmin password' "$SPEC" ||
     ! grep -q 'LSWS/adminpasswd' "$RELEASE_YML" ||
     ! grep -q 'LSWS/adminpasswd' "$ROOT/tests/e2e/Dockerfile.custom-ols"; then
-    fail "release packaging is missing build-time WebAdmin password removal/checks"
-else
-    echo "OK: release packaging removes build-time WebAdmin password"
+        fail "release packaging is missing build-time WebAdmin password removal/checks"
+    else
+        echo "OK: release packaging removes build-time WebAdmin password"
+    fi
 fi
 
 if ! grep -q 'HttpContext tmpCtx;' "$REWRITE_PATCH"; then

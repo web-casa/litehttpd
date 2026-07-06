@@ -169,3 +169,11 @@ LiteHTTPD 不捆绑 PHP，你可以选择：
 - **lsphp（LiteSpeed 仓库）** — `dnf install lsphp83`（推荐）
 - **php-litespeed（Remi 仓库）** — `dnf install php-litespeed`
 - **任何 LSAPI 兼容的 PHP** — 配置 `httpd_config.conf` 中的 `extProcessor` 路径
+
+### 如何从 CyberPanel / aaPanel / Docker 切换到 LiteHTTPD？
+
+详见迁移指南：
+- [从原版 OLS 迁移](/zh/migration/ols-to-litehttpd/)
+- [从 CyberPanel 迁移](/zh/migration/cyberpanel/)
+- [从 aaPanel 迁移](/zh/migration/aapanel/)
+- [Docker 环境](/zh/migration/docker/)

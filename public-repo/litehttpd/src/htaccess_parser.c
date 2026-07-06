@@ -228,7 +228,7 @@ static char *extract_env_condition(char *value)
 }
 
 /**
- * Parse: Header [always] set|unset|append|merge|add|edit|edit* <name> [<value>] [env=VAR]
+ * Parse: Header [always|onsuccess] set|unset|append|merge|add|edit|edit* <name> [<value>] [env=VAR]
  */
 static htaccess_directive_t *parse_header(const char *args, int line)
 {
@@ -237,10 +237,11 @@ static htaccess_directive_t *parse_header(const char *args, int line)
     if (!action)
         return NULL;
 
-    /* Check for "always" modifier */
+    /* Check for Apache's response-table condition token. "always" maps to
+     * the existing always variants; "onsuccess" is the default table. */
     int always = 0;
-    if (strcasecmp(action, "always") == 0) {
-        always = 1;
+    if (strcasecmp(action, "always") == 0 || strcasecmp(action, "onsuccess") == 0) {
+        always = (strcasecmp(action, "always") == 0);
         free(action);
         action = next_token(&p);
         if (!action)
@@ -743,6 +744,30 @@ static htaccess_directive_t *parse_error_document(const char *args, int line)
 }
 
 /**
+ * Parse: FallbackResource /local-uri | disabled
+ */
+static htaccess_directive_t *parse_fallback_resource(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *value = next_token(&p);
+    if (!value)
+        return NULL;
+
+    if (strcasecmp(value, "disabled") != 0 && value[0] != '/') {
+        free(value);
+        return NULL;
+    }
+
+    htaccess_directive_t *d = alloc_directive(DIR_FALLBACK_RESOURCE, line);
+    if (!d) {
+        free(value);
+        return NULL;
+    }
+    d->value = value;
+    return d;
+}
+
+/**
  * Parse: ExpiresActive On|Off
  */
 static htaccess_directive_t *parse_expires_active(const char *args, int line)
@@ -1178,6 +1203,17 @@ static htaccess_directive_t *parse_require(const char *args, int line)
     if (after)
         return alloc_directive(DIR_REQUIRE_VALID_USER, line);
 
+    /* Require user u1 u2 ... — store space-separated allowed username list */
+    after = match_kw(p, "user");
+    if (after) {
+        char *val = rest_of_line(&after);
+        if (!val) return NULL;
+        htaccess_directive_t *d = alloc_directive(DIR_REQUIRE_USER, line);
+        if (!d) { free(val); return NULL; }
+        d->value = val;
+        return d;
+    }
+
     /* Require env VARNAME */
     after = match_kw(p, "env");
     if (after) {
@@ -1195,7 +1231,21 @@ static htaccess_directive_t *parse_require(const char *args, int line)
         return d;
     }
 
-    return NULL;
+    /* Any other Require form (group, ldap-group, expr, ...) is NOT supported.
+     * Previously these fell through to "return NULL" and the directive was
+     * silently dropped, leaving a directory the admin intended to protect
+     * served with NO access control (fail-open). Emit a DIR_REQUIRE_GROUP
+     * marker that never grants, so unrecognized requirements fail CLOSED. */
+    {
+        char *val = rest_of_line(&p);
+        lsi_log(NULL, LSI_LOG_WARN,
+                "[htaccess] line %d: unsupported 'Require %s' — access will be "
+                "denied (fail-closed)", line, val ? val : "");
+        htaccess_directive_t *d = alloc_directive(DIR_REQUIRE_GROUP, line);
+        if (!d) { free(val); return NULL; }
+        d->value = val; /* may be NULL; kept only for round-trip printing */
+        return d;
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1447,6 +1497,11 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
     if (after)
         return parse_error_document(after, line_num);
 
+    /* FallbackResource */
+    after = match_kw(p, "FallbackResource");
+    if (after)
+        return parse_fallback_resource(after, line_num);
+
     /* ExpiresActive */
     after = match_kw(p, "ExpiresActive");
     if (after)
@@ -1525,6 +1580,18 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
         char *val = rest_of_line(&after);
         if (!val) return NULL;
         htaccess_directive_t *d = alloc_directive(DIR_BRUTE_FORCE_WHITELIST, line_num);
+        if (!d) { free(val); return NULL; }
+        d->value = val;
+        return d;
+    }
+
+    /* BruteForceTrustedProxy CIDR list — only honor X-Forwarded-For when the
+     * direct peer matches one of these CIDRs (prevents header spoofing). */
+    after = match_kw(p, "BruteForceTrustedProxy");
+    if (after) {
+        char *val = rest_of_line(&after);
+        if (!val) return NULL;
+        htaccess_directive_t *d = alloc_directive(DIR_BRUTE_FORCE_TRUSTED_PROXY, line_num);
         if (!d) { free(val); return NULL; }
         d->value = val;
         return d;
@@ -2329,6 +2396,13 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
     htaccess_directive_t *rqall_children_head = NULL;
     htaccess_directive_t *rqall_children_tail = NULL;
 
+    /* Innermost open Require container (0=none, 1=RequireAny, 2=RequireAll).
+     * With single-level nesting both in_require_any and in_require_all can be
+     * set at once; leaf children must go to the INNERMOST one, otherwise a
+     * nested <RequireAll> inside <RequireAny> would route its children to the
+     * outer RequireAny, silently turning AND logic into OR (security bug). */
+    int require_innermost = 0;
+
     /* Limit block state */
     int in_limit = 0;
     char *limit_methods = NULL;
@@ -2859,6 +2933,7 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
             rqa_children_head = NULL;
             rqa_children_tail = NULL;
             in_require_any = 0;
+            require_innermost = in_require_all ? 2 : 0;
             if (pending_conds) {
                 lsi_log(NULL, LSI_LOG_WARN,
                         "[htaccess] %s:%d: orphaned RewriteCond inside <RequireAny>, discarding",
@@ -2874,6 +2949,7 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
          * Allow inside RequireAll (single-level nesting) */
         if (!in_require_any && is_require_any_open(p)) {
             in_require_any = 1;
+            require_innermost = 1;
             require_any_start_line = line_num;
             rqa_children_head = NULL;
             rqa_children_tail = NULL;
@@ -2911,6 +2987,7 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
             rqall_children_head = NULL;
             rqall_children_tail = NULL;
             in_require_all = 0;
+            require_innermost = in_require_any ? 1 : 0;
             if (pending_conds) {
                 lsi_log(NULL, LSI_LOG_WARN,
                         "[htaccess] %s:%d: orphaned RewriteCond inside <RequireAll>, discarding",
@@ -2926,6 +3003,7 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
          * Allow inside RequireAny (single-level nesting) */
         if (!in_require_all && is_require_all_open(p)) {
             in_require_all = 1;
+            require_innermost = 2;
             require_all_start_line = line_num;
             rqall_children_head = NULL;
             rqall_children_tail = NULL;
@@ -3046,14 +3124,17 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
                 append_directive(&fm_children_head, &fm_children_tail, dir);
             } else if (in_files) {
                 append_directive(&files_children_head, &files_children_tail, dir);
-            } else if (in_require_any) {
-                /* Only allow Require* directives inside RequireAny */
+            } else if (in_require_any && require_innermost == 1) {
+                /* RequireAny is the innermost open container.
+                 * Only allow Require* directives inside RequireAny */
                 if (dir->type == DIR_REQUIRE_ALL_GRANTED ||
                     dir->type == DIR_REQUIRE_ALL_DENIED ||
                     dir->type == DIR_REQUIRE_IP ||
                     dir->type == DIR_REQUIRE_NOT_IP ||
                     dir->type == DIR_REQUIRE_ENV ||
                     dir->type == DIR_REQUIRE_VALID_USER ||
+                    dir->type == DIR_REQUIRE_USER ||
+                    dir->type == DIR_REQUIRE_GROUP ||
                     dir->type == DIR_REQUIRE_ANY_OPEN ||
                     dir->type == DIR_REQUIRE_ALL_OPEN) {
                     append_directive(&rqa_children_head, &rqa_children_tail, dir);
@@ -3071,6 +3152,8 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
                     dir->type == DIR_REQUIRE_NOT_IP ||
                     dir->type == DIR_REQUIRE_ENV ||
                     dir->type == DIR_REQUIRE_VALID_USER ||
+                    dir->type == DIR_REQUIRE_USER ||
+                    dir->type == DIR_REQUIRE_GROUP ||
                     dir->type == DIR_REQUIRE_ANY_OPEN ||
                     dir->type == DIR_REQUIRE_ALL_OPEN) {
                     append_directive(&rqall_children_head, &rqall_children_tail, dir);
