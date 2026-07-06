@@ -15,10 +15,9 @@ usage() {
     cat <<'USAGE'
 Usage: bash scripts/assemble-release-tarballs.sh [--out-dir DIR] [--require] [artifact-dir ...]
 
-Finds openlitespeed-litehttpd-<ols-version>-<arch>-linux.tgz for x86_64 and
-aarch64, then assembles:
-  litehttpd-ols-patch-<ols-version>-<arch>-linux.tgz
-  litehttpd-module-<module-version>-<arch>-linux.tgz
+Finds openlitespeed-litehttpd-<ols-version>-x86_64-linux.tgz, then assembles:
+  litehttpd-ols-patch-<ols-version>-x86_64-linux.tgz
+  litehttpd-module-<module-version>-x86_64-linux.tgz
 
 If --out-dir is omitted, each derived tarball is written next to its source
 full tarball. If no artifact directories are given, the script looks in:
@@ -154,8 +153,9 @@ OLS_VERSION="$(spec_global_value ols_version "$OLS_SPEC")"
 MODULE_VERSION="$(spec_version "$MODULE_SPEC")"
 [ -n "$OLS_VERSION" ] || die "could not read OLS version from $OLS_SPEC"
 [ -n "$MODULE_VERSION" ] || die "could not read module version from $MODULE_SPEC"
+RELEASE_ARCHES=(x86_64)
 
-for arch in x86_64 aarch64; do
+for arch in "${RELEASE_ARCHES[@]}"; do
     dest=""
     mapfile -t matches < <(find_full_tgz "$arch" "$@")
     if [ "${#matches[@]}" -eq 0 ]; then

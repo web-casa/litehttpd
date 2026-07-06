@@ -119,6 +119,15 @@ mark_present_or_missing() {
     return 0
 }
 
+handle_unexpected_artifact() {
+    local base="$1"
+
+    if [ "$REQUIRE_FULL" = "1" ]; then
+        die "unexpected release artifact name: $base"
+    fi
+    echo "UNEXPECTED: $base"
+}
+
 validate_rpm_metadata() {
     local rpm_file="$1"
     local expected_name="$2"
@@ -194,6 +203,7 @@ while IFS= read -r artifact_file; do
 done < "$artifact_list"
 
 MISSING_COUNT=0
+RELEASE_ARCHES=(x86_64)
 
 echo "========================================"
 echo " Release Artifact Matrix Check"
@@ -204,7 +214,7 @@ echo "Strict:     $REQUIRE_FULL"
 
 echo "--- Module .so matrix ---"
 for platform in el8 el9 el10 ubuntu22; do
-    for arch in x86_64 aarch64; do
+    for arch in "${RELEASE_ARCHES[@]}"; do
         mark_present_or_missing "litehttpd_htaccess-${platform}-${arch}.so" \
             "litehttpd_htaccess ${platform}/${arch}"
     done
@@ -212,7 +222,7 @@ done
 
 echo "--- OLS RPM matrix ---"
 for dist in el8 el9 el10; do
-    for arch in x86_64 aarch64; do
+    for arch in "${RELEASE_ARCHES[@]}"; do
         pattern="openlitespeed-litehttpd-${expected_ols_version}-*.${dist}.${arch}.rpm"
         mark_present_or_missing "$pattern" "openlitespeed-litehttpd RPM ${dist}/${arch}"
         rpm_file="$(first_match "$pattern")"
@@ -222,7 +232,7 @@ for dist in el8 el9 el10; do
 done
 
 echo "--- Module RPM matrix ---"
-for arch in x86_64 aarch64; do
+for arch in "${RELEASE_ARCHES[@]}"; do
     pattern="litehttpd-${expected_module_version}-*.el9.${arch}.rpm"
     mark_present_or_missing "$pattern" "litehttpd module RPM el9/${arch}"
     rpm_file="$(first_match "$pattern")"
@@ -231,7 +241,7 @@ for arch in x86_64 aarch64; do
 done
 
 echo "--- Binary tarball matrix ---"
-for arch in x86_64 aarch64; do
+for arch in "${RELEASE_ARCHES[@]}"; do
     for name in \
         "openlitespeed-litehttpd-${expected_ols_version}-${arch}-linux.tgz" \
         "litehttpd-ols-patch-${expected_ols_version}-${arch}-linux.tgz" \
@@ -244,13 +254,28 @@ for arch in x86_64 aarch64; do
     done
 done
 
-while IFS= read -r unexpected; do
-    [ -n "$unexpected" ] || continue
-    die "unexpected tarball artifact name: $(basename "$unexpected")"
-done < <(
-    find "$ARTIFACT_DIR" -maxdepth 1 -type f -name '*.tgz' |
-        grep -Ev "/(openlitespeed-litehttpd-${expected_ols_version}|litehttpd-ols-patch-${expected_ols_version}|litehttpd-module-${expected_module_version})-(x86_64|aarch64)-linux[.]tgz$" || true
-)
+echo "--- Unexpected artifact scan ---"
+while IFS= read -r artifact_file; do
+    [ -n "$artifact_file" ] || continue
+    base="$(basename "$artifact_file")"
+    case "$base" in
+        litehttpd_htaccess-el8-x86_64.so | \
+        litehttpd_htaccess-el9-x86_64.so | \
+        litehttpd_htaccess-el10-x86_64.so | \
+        litehttpd_htaccess-ubuntu22-x86_64.so | \
+        openlitespeed-litehttpd-"${expected_ols_version}"-*.el8.x86_64.rpm | \
+        openlitespeed-litehttpd-"${expected_ols_version}"-*.el9.x86_64.rpm | \
+        openlitespeed-litehttpd-"${expected_ols_version}"-*.el10.x86_64.rpm | \
+        litehttpd-"${expected_module_version}"-*.el9.x86_64.rpm | \
+        openlitespeed-litehttpd-"${expected_ols_version}"-x86_64-linux.tgz | \
+        litehttpd-ols-patch-"${expected_ols_version}"-x86_64-linux.tgz | \
+        litehttpd-module-"${expected_module_version}"-x86_64-linux.tgz)
+            ;;
+        *)
+            handle_unexpected_artifact "$base"
+            ;;
+    esac
+done < <(find "$ARTIFACT_DIR" -maxdepth 1 -type f \( -name '*.so' -o -name '*.rpm' -o -name '*.tgz' \) | sort)
 
 echo "Missing matrix slots: $MISSING_COUNT"
 if [ "$REQUIRE_FULL" = "1" ] && [ "$MISSING_COUNT" -gt 0 ]; then

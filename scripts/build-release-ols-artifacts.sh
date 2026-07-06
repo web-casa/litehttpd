@@ -7,7 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${RELEASE_ARTIFACT_OUT_DIR:-/tmp/ols-p2-artifacts}"
 CACHE_DIR="${RELEASE_SOURCE_CACHE_DIR:-/tmp/litehttpd-p2-source-cache}"
-ARCH_FILTER="all"
+ARCH_FILTER="x86_64"
 DIST_FILTER="all"
 CONTINUE_ON_ERROR="${RELEASE_ARTIFACT_CONTINUE_ON_ERROR:-0}"
 FAIL_COUNT=0
@@ -19,21 +19,21 @@ usage() {
 Usage: bash scripts/build-release-ols-artifacts.sh [options]
 
 Options:
-  --arch x86_64|aarch64|all      Limit CPU architecture. Default: all.
+  --arch x86_64                  Limit CPU architecture. Default: x86_64.
   --dist el8|el9|el10|all        Limit EL dist tag. Default: all.
-  --only DIST-ARCH               Build one matrix leg, e.g. el9-aarch64.
+  --only DIST-ARCH               Build one matrix leg, e.g. el9-x86_64.
                                  Can be repeated.
   --out-dir DIR                  Artifact output dir.
   --cache-dir DIR                Source-cache dir. Default: /tmp/litehttpd-p2-source-cache.
   --continue-on-error            Continue remaining legs after a failure.
 
 Builds full OLS RPMs:
-  openlitespeed-litehttpd-<ols-version>-*.{el8,el9,el10}.{x86_64,aarch64}.rpm
+  openlitespeed-litehttpd-<ols-version>-*.{el8,el9,el10}.x86_64.rpm
 
 For el8 legs, also assembles:
-  openlitespeed-litehttpd-<ols-version>-<arch>-linux.tgz
-  litehttpd-ols-patch-<ols-version>-<arch>-linux.tgz
-  litehttpd-module-<module-version>-<arch>-linux.tgz
+  openlitespeed-litehttpd-<ols-version>-x86_64-linux.tgz
+  litehttpd-ols-patch-<ols-version>-x86_64-linux.tgz
+  litehttpd-module-<module-version>-x86_64-linux.tgz
 
 The build intentionally runs every dist tag through packaging/openlitespeed-
 litehttpd.spec. It never renames or edits an existing RPM to fill the matrix.
@@ -156,9 +156,8 @@ want_arch() {
     local arch="$1"
 
     case "$ARCH_FILTER" in
-        all) return 0 ;;
-        x86_64 | aarch64) [ "$ARCH_FILTER" = "$arch" ] ;;
-        *) die "--arch must be x86_64, aarch64, or all" ;;
+        x86_64) [ "$ARCH_FILTER" = "$arch" ] ;;
+        *) die "--arch must be x86_64" ;;
     esac
 }
 
@@ -190,7 +189,6 @@ want_target() {
 platform_arch() {
     case "$1" in
         linux/amd64) printf 'x86_64\n' ;;
-        linux/arm64) printf 'aarch64\n' ;;
         *) die "unknown Docker platform: $1" ;;
     esac
 }
@@ -433,7 +431,6 @@ select_docker
 
 for dist in el8 el9 el10; do
     run_step build_ols_rpm "$dist" "linux/amd64"
-    run_step build_ols_rpm "$dist" "linux/arm64"
 done
 
 echo "Artifacts written to $OUT_DIR"

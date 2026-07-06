@@ -56,32 +56,45 @@ require_count_at_least() {
     fi
 }
 
+forbid_literal() {
+    local literal="$1"
+    local label="$2"
+
+    if grep -Fq -- "$literal" "$RELEASE_YML"; then
+        fail "$label still present ($literal)"
+    else
+        echo "OK: $label absent"
+    fi
+}
+
 echo "========================================"
 echo " Release Matrix Check"
 echo "========================================"
 
+RELEASE_ARCHES=(x86_64)
+
 for suffix in \
-    el8-x86_64 el9-x86_64 el10-x86_64 ubuntu22-x86_64 \
-    el8-aarch64 el9-aarch64 el10-aarch64 ubuntu22-aarch64
+    el8-x86_64 el9-x86_64 el10-x86_64 ubuntu22-x86_64
 do
     require_literal "suffix: $suffix" "module .so matrix includes $suffix"
 done
 
-for arch in x86_64 aarch64; do
+for arch in "${RELEASE_ARCHES[@]}"; do
     require_literal "arch_suffix: $arch" "module RPM matrix includes $arch"
     require_literal "asset_arch: $arch" "OLS RPM matrix includes $arch"
 done
 
 for dist in el8 el9 el10; do
-    require_count_at_least "dist_tag: $dist" 2 "OLS RPM matrix includes $dist for both arches"
+    require_count_at_least "dist_tag: $dist" 1 "OLS RPM matrix includes $dist for x86_64"
     require_literal "repo/\$dist/\$arch/RPMS" "RPM repo loop publishes $dist per arch"
 done
 
-require_count_at_least "platform: linux/arm64" 4 "ARM64 release jobs"
-require_count_at_least "qemu: true" 4 "QEMU-enabled release jobs"
-require_literal "docker/setup-qemu-action@v3" "QEMU setup action"
+forbid_literal "platform: linux/arm64" "ARM64 release jobs"
+forbid_literal "qemu: true" "QEMU-enabled release jobs"
+forbid_literal "docker/setup-qemu-action@v3" "QEMU setup action"
+forbid_literal "aarch64" "ARM64 release artifact references"
 require_literal "fail-fast: false" "OLS RPM matrix fail-fast disabled"
-require_literal "timeout-minutes: 360" "OLS RPM release timeout allows ARM64/QEMU builds to finish"
+require_literal "timeout-minutes: 120" "OLS RPM release timeout"
 
 require_literal "bash tests/check_patches.sh" "release workflow runs patch consistency checks"
 require_literal "bash scripts/check-release-source-isolated.sh" "release workflow checks clean release source"
@@ -89,8 +102,8 @@ require_literal "bash scripts/check-release-metadata.sh" "release workflow check
 require_literal "bash scripts/check-apps-matrix-budget-policy.sh" "release workflow checks budget policy"
 require_literal "bash scripts/check-public-release-sync.sh" "release workflow reports public sync delta"
 require_literal "-DBUILD_TESTING=OFF" "module .so release build skips test dependency fetch"
-require_count_at_least "pcre2-devel" 7 "EL release module builds install PCRE2 development files"
-require_count_at_least "libpcre2-dev" 2 "Ubuntu release module builds install PCRE2 development files"
+require_count_at_least "pcre2-devel" 4 "EL release module builds install PCRE2 development files"
+require_count_at_least "libpcre2-dev" 1 "Ubuntu release module builds install PCRE2 development files"
 require_literal "bash scripts/create-release-source-cache.sh /tmp" "release workflow creates source cache"
 require_literal "--with source_cache" "OLS rpmbuild uses source cache"
 require_literal "/tmp/third-party-src.tar.gz:/tmp/third-party-src.tar.gz:ro" "third-party source cache is mounted"
@@ -110,7 +123,7 @@ require_regex 'grep -Eq "\(\^\|/\)adminpasswd\$|\(\^\|/\)phpbuild\(/\|\$\)"' "fu
 
 require_literal "repo_gpgcheck=1" "setup repo enables repo metadata GPG verification"
 require_literal "for dist in el8 el9 el10" "publish repo loops over EL versions"
-require_literal "for arch in x86_64 aarch64" "publish repo loops over architectures"
+require_literal "for arch in x86_64" "publish repo loops over x86_64 only"
 require_literal "createrepo_c \"repo/\$dist/\$arch/\"" "publish repo generates repodata per arch"
 require_literal "repodata/repomd.xml" "publish repo signs repomd.xml"
 require_literal "find artifacts -maxdepth 1 -name '*.tgz'" "publish repo copies tarballs without unsafe glob"

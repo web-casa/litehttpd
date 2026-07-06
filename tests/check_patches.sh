@@ -52,13 +52,14 @@ else
     echo "OK: build-critical files no longer reference OLS 1.8.5/system PCRE1"
 fi
 
-if ! grep -q 'platform: linux/arm64' "$RELEASE_YML" ||
-    ! grep -q 'asset_arch: aarch64' "$RELEASE_YML" ||
-    ! grep -Fq "$ASSET_ARCH_TGZ_LITERAL" "$RELEASE_YML" ||
-    ! grep -q 'aarch64' "$ROOT/packaging/setup-repo.sh"; then
-    fail "release workflow or repo setup is missing aarch64 publishing support"
+if grep -q 'platform: linux/arm64' "$RELEASE_YML" ||
+    grep -q 'asset_arch: aarch64' "$RELEASE_YML" ||
+    grep -q 'aarch64' "$ROOT/packaging/setup-repo.sh"; then
+    fail "release workflow or repo setup still contains aarch64 publishing support"
+elif ! grep -Fq "$ASSET_ARCH_TGZ_LITERAL" "$RELEASE_YML"; then
+    fail "release workflow no longer names tarballs from the selected asset architecture"
 else
-    echo "OK: release workflow includes aarch64 artifacts and repo setup support"
+    echo "OK: release workflow publishes x86_64-only artifacts"
 fi
 
 if ! grep -Fq 'rm -f %{buildroot}%{install_dir}/adminpasswd' "$SPEC" ||

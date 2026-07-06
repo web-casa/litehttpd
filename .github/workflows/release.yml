@@ -64,14 +64,14 @@ jobs:
 
           Apache .htaccess compatibility module for OpenLiteSpeed (84 directive types, full CI/release-gate coverage).
 
-          ### RPM Packages (x86_64 and aarch64)
+          ### RPM Packages (x86_64)
 
           | Package | Description |
           |---------|-------------|
-          | `openlitespeed-litehttpd-*.el8.<arch>.rpm` | Patched OLS + bundled module (EL 8) |
-          | `openlitespeed-litehttpd-*.el9.<arch>.rpm` | Patched OLS + bundled module (EL 9) |
-          | `openlitespeed-litehttpd-*.el10.<arch>.rpm` | Patched OLS + bundled module (EL 10) |
-          | `litehttpd-*.el9.<arch>.rpm` | Standalone module RPM (EL 9) |
+          | `openlitespeed-litehttpd-*.el8.x86_64.rpm` | Patched OLS + bundled module (EL 8) |
+          | `openlitespeed-litehttpd-*.el9.x86_64.rpm` | Patched OLS + bundled module (EL 9) |
+          | `openlitespeed-litehttpd-*.el10.x86_64.rpm` | Patched OLS + bundled module (EL 10) |
+          | `litehttpd-*.el9.x86_64.rpm` | Standalone module RPM (EL 9) |
 
           ```bash
           # Install both (replaces stock OLS, enables php_value + RewriteRule)
@@ -88,9 +88,9 @@ jobs:
 
           | Tarball | Use when | Effect |
           |---------|----------|--------|
-          | `openlitespeed-litehttpd-*-<arch>-linux.tgz` | Fresh install / no OLS yet | Installs the **complete patched OLS + module** to `/usr/local/lsws` |
-          | `litehttpd-ols-patch-*-<arch>-linux.tgz` | You already run **official OLS (same version)** | Overlay: backs up & **replaces the binary** + adds module (full features) |
-          | `litehttpd-module-*-<arch>-linux.tgz` | You already run **official OLS (any version)** | Overlay: **module only**, no binary change (RewriteRule/php_value not executed) |
+          | `openlitespeed-litehttpd-*-x86_64-linux.tgz` | Fresh install / no OLS yet | Installs the **complete patched OLS + module** to `/usr/local/lsws` |
+          | `litehttpd-ols-patch-*-x86_64-linux.tgz` | You already run **official OLS (same version)** | Overlay: backs up & **replaces the binary** + adds module (full features) |
+          | `litehttpd-module-*-x86_64-linux.tgz` | You already run **official OLS (any version)** | Overlay: **module only**, no binary change (RewriteRule/php_value not executed) |
 
           ```bash
           # Full install (no OLS yet)
@@ -114,10 +114,6 @@ jobs:
           | `litehttpd_htaccess-el9-x86_64.so` | EL 9 x86_64 |
           | `litehttpd_htaccess-el10-x86_64.so` | EL 10 x86_64 |
           | `litehttpd_htaccess-ubuntu22-x86_64.so` | Ubuntu 22.04+, Debian 12+ x86_64 |
-          | `litehttpd_htaccess-el8-aarch64.so` | EL 8 aarch64 |
-          | `litehttpd_htaccess-el9-aarch64.so` | EL 9 aarch64 |
-          | `litehttpd_htaccess-el10-aarch64.so` | EL 10 aarch64 |
-          | `litehttpd_htaccess-ubuntu22-aarch64.so` | Ubuntu 22.04+, Debian 12+ aarch64 |
 
           ### OLS Patches
 
@@ -167,38 +163,12 @@ jobs:
             suffix: ubuntu22-x86_64
             platform: linux/amd64
             pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev libpcre2-dev"
-          - container: almalinux:8
-            suffix: el8-aarch64
-            platform: linux/arm64
-            qemu: true
-            pkg_cmd: "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel pcre2-devel && (command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake)"
-          - container: almalinux:9
-            suffix: el9-aarch64
-            platform: linux/arm64
-            qemu: true
-            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel"
-          - container: almalinux:10
-            suffix: el10-aarch64
-            platform: linux/arm64
-            qemu: true
-            pkg_cmd: "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel"
-          - container: ubuntu:22.04
-            suffix: ubuntu22-aarch64
-            platform: linux/arm64
-            qemu: true
-            pkg_cmd: "apt-get update && apt-get install -y cmake gcc g++ git libcrypt-dev libpcre2-dev"
 
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
-
-      - name: Set up QEMU for ARM builds
-        if: matrix.qemu
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
 
       - name: Build .so
         run: |
@@ -232,7 +202,7 @@ jobs:
           done
           [ "$uploaded" -eq 1 ]
 
-  # ── Build litehttpd RPM (EL9, x86_64/aarch64) ──────────────────────
+  # ── Build litehttpd RPM (EL9, x86_64) ──────────────────────────────
   build-rpm-module:
     needs: [create-release]
     strategy:
@@ -241,22 +211,12 @@ jobs:
           - container: almalinux:9
             platform: linux/amd64
             arch_suffix: x86_64
-          - container: almalinux:9
-            platform: linux/arm64
-            arch_suffix: aarch64
-            qemu: true
 
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
-
-      - name: Set up QEMU for ARM builds
-        if: matrix.qemu
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
 
       - name: Extract version from spec
         id: ver
@@ -301,7 +261,7 @@ jobs:
           done
           [ "$uploaded" -eq 1 ]
 
-  # ── Build openlitespeed-litehttpd RPM (EL8/9/10, x86_64/aarch64) ────
+  # ── Build openlitespeed-litehttpd RPM (EL8/9/10, x86_64) ───────────
   build-rpm-ols:
     needs: [create-release]
     strategy:
@@ -326,37 +286,13 @@ jobs:
             pkg_cmd: yum
             platform: linux/amd64
             asset_arch: x86_64
-          - container: almalinux:8
-            dist_tag: el8
-            pkg_cmd: yum
-            platform: linux/arm64
-            asset_arch: aarch64
-            qemu: true
-          - container: almalinux:8
-            dist_tag: el9
-            pkg_cmd: yum
-            platform: linux/arm64
-            asset_arch: aarch64
-            qemu: true
-          - container: almalinux:8
-            dist_tag: el10
-            pkg_cmd: yum
-            platform: linux/arm64
-            asset_arch: aarch64
-            qemu: true
 
     runs-on: ubuntu-22.04
-    timeout-minutes: 360
+    timeout-minutes: 120
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
-
-      - name: Set up QEMU for ARM builds
-        if: matrix.qemu
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
 
       - name: Validate patch and release target
         run: bash tests/check_patches.sh
@@ -404,7 +340,7 @@ jobs:
               # OLS third-party libraries are built from litespeedtech/third-party,
               # matching official LiteSpeed. libcap/libaio/expat devel headers
               # satisfy upstream build-time checks; libxml2/zlib devel headers are
-              # used to rebuild WebAdmin admin_php locally for EL8/aarch64 ABI.
+              # used to rebuild WebAdmin admin_php locally for the EL8 ABI.
               if command -v dnf &>/dev/null; then
                 dnf -y install dnf-plugins-core
                 # Lock glibc to keep minimum version requirement low.
@@ -633,7 +569,7 @@ jobs:
 
           # Create per-EL-version and per-architecture directories.
           for dist in el8 el9 el10; do
-            for arch in x86_64 aarch64; do
+            for arch in x86_64; do
               mkdir -p "repo/$dist/$arch/RPMS"
               cp repo-staging/openlitespeed-litehttpd-*.$dist.$arch.rpm \
                 "repo/$dist/$arch/RPMS/" 2>/dev/null || true
@@ -661,7 +597,7 @@ jobs:
           cp packaging/setup-repo.sh repo/setup.sh
 
           # Publish the binary tarballs at the repo root so they get stable
-          # URLs (https://rpms.litehttpd.com/<name>-<arch>-linux.tgz).
+          # URLs (https://rpms.litehttpd.com/<name>-x86_64-linux.tgz).
           find artifacts -maxdepth 1 -name '*.tgz' -type f -exec cp {} repo/ \;
 
           # Generate static index.html directory listings

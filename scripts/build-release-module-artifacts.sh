@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${RELEASE_ARTIFACT_OUT_DIR:-/tmp/ols-p2-artifacts}"
 BUILD_SO=1
 BUILD_RPM=1
-ARCH_FILTER="all"
+ARCH_FILTER="x86_64"
 CONTINUE_ON_ERROR="${RELEASE_ARTIFACT_CONTINUE_ON_ERROR:-0}"
 FAIL_COUNT=0
 DOCKER_CMD=()
@@ -16,16 +16,15 @@ ONLY_TARGETS=()
 
 usage() {
     cat <<'USAGE'
-Usage: bash scripts/build-release-module-artifacts.sh [--so-only|--rpm-only] [--arch x86_64|aarch64|all] [--out-dir DIR] [--only TARGET] [--continue-on-error]
+Usage: bash scripts/build-release-module-artifacts.sh [--so-only|--rpm-only] [--arch x86_64] [--out-dir DIR] [--only TARGET] [--continue-on-error]
 
 Builds:
-  litehttpd_htaccess-{el8,el9,el10,ubuntu22}-{x86_64,aarch64}.so
-  litehttpd-<version>-*.el9.{x86_64,aarch64}.rpm
+  litehttpd_htaccess-{el8,el9,el10,ubuntu22}-x86_64.so
+  litehttpd-<version>-*.el9.x86_64.rpm
 
 Targets accepted by --only:
   el8-x86_64 el9-x86_64 el10-x86_64 ubuntu22-x86_64
-  el8-aarch64 el9-aarch64 el10-aarch64 ubuntu22-aarch64
-  rpm-x86_64 rpm-aarch64
+  rpm-x86_64
 
 The Docker build commands intentionally mirror the Release workflow matrix.
 If the current user cannot access Docker directly, the script tries
@@ -137,9 +136,8 @@ want_arch() {
     local arch="$1"
 
     case "$ARCH_FILTER" in
-        all) return 0 ;;
-        x86_64 | aarch64) [ "$ARCH_FILTER" = "$arch" ] ;;
-        *) die "--arch must be x86_64, aarch64, or all" ;;
+        x86_64) [ "$ARCH_FILTER" = "$arch" ] ;;
+        *) die "--arch must be x86_64" ;;
     esac
 }
 
@@ -161,7 +159,6 @@ want_target() {
 platform_arch() {
     case "$1" in
         linux/amd64) printf 'x86_64\n' ;;
-        linux/arm64) printf 'aarch64\n' ;;
         *) die "unknown Docker platform: $1" ;;
     esac
 }
@@ -282,19 +279,10 @@ if [ "$BUILD_SO" = "1" ]; then
         "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel"
     run_step build_so "ubuntu:22.04" "ubuntu22-x86_64" "linux/amd64" \
         "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y cmake gcc g++ git libcrypt-dev libpcre2-dev"
-    run_step build_so "almalinux:8" "el8-aarch64" "linux/arm64" \
-        "yum -y install cmake3 gcc gcc-c++ git libxcrypt-devel pcre2-devel && (command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake)"
-    run_step build_so "almalinux:9" "el9-aarch64" "linux/arm64" \
-        "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel"
-    run_step build_so "almalinux:10" "el10-aarch64" "linux/arm64" \
-        "dnf -y install cmake gcc gcc-c++ git-core libxcrypt-devel pcre2-devel"
-    run_step build_so "ubuntu:22.04" "ubuntu22-aarch64" "linux/arm64" \
-        "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y cmake gcc g++ git libcrypt-dev libpcre2-dev"
 fi
 
 if [ "$BUILD_RPM" = "1" ]; then
     run_step build_module_rpm "linux/amd64"
-    run_step build_module_rpm "linux/arm64"
 fi
 
 echo "Artifacts written to $OUT_DIR"

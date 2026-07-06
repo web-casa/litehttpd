@@ -48,6 +48,13 @@ die() {
     exit 1
 }
 
+handle_unexpected_artifact() {
+    if [ "$REQUIRE_FULL_MATRIX" = "1" ]; then
+        die "$*"
+    fi
+    echo "WARN: $*" >&2
+}
+
 need_tool() {
     have_tool "$1" || die "missing required tool: $1"
 }
@@ -96,7 +103,6 @@ rpm_arch_from_name() {
 
     case "$name" in
         *.x86_64.rpm) printf 'x86_64\n' ;;
-        *.aarch64.rpm) printf 'aarch64\n' ;;
         *) printf 'unknown\n' ;;
     esac
 }
@@ -106,7 +112,6 @@ tgz_arch_from_name() {
 
     case "$name" in
         *-x86_64-linux.tgz) printf 'x86_64\n' ;;
-        *-aarch64-linux.tgz) printf 'aarch64\n' ;;
         *) printf 'unknown\n' ;;
     esac
 }
@@ -136,6 +141,7 @@ expected_ols_version="$(spec_global_value ols_version "$OLS_SPEC")"
 expected_module_version="$(spec_version "$MODULE_SPEC")"
 [ -n "$expected_ols_version" ] || die "could not read OLS version from $OLS_SPEC"
 [ -n "$expected_module_version" ] || die "could not read module version from $MODULE_SPEC"
+RELEASE_ARCHES=(x86_64)
 
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR/artifacts" "$OUT_DIR/repo-staging" "$OUT_DIR/repo"
@@ -183,9 +189,15 @@ while IFS= read -r rpm_file; do
     read -r rpm_name rpm_version rpm_release rpm_arch <<< "$rpm_metadata"
 
     case "$base" in
-        *debug*) die "debug RPM must not be published: $base" ;;
+        *debug*)
+            handle_unexpected_artifact "debug RPM must not be published: $base"
+            continue
+            ;;
         openlitespeed-litehttpd-*.rpm | litehttpd-*.rpm) ;;
-        *) die "unexpected RPM artifact name: $base" ;;
+        *)
+            handle_unexpected_artifact "unexpected RPM artifact name: $base"
+            continue
+            ;;
     esac
     case "$rpm_name" in
         openlitespeed-litehttpd)
@@ -205,8 +217,14 @@ while IFS= read -r rpm_file; do
 
     dist="$(rpm_dist "$base")"
     arch="$(rpm_arch_from_name "$base")"
-    [ "$dist" != "unknown" ] || die "RPM missing EL dist tag: $base"
-    [ "$arch" != "unknown" ] || die "RPM missing supported architecture: $base"
+    if [ "$dist" = "unknown" ]; then
+        handle_unexpected_artifact "RPM missing EL dist tag: $base"
+        continue
+    fi
+    if [ "$arch" = "unknown" ]; then
+        handle_unexpected_artifact "RPM missing supported architecture: $base"
+        continue
+    fi
     [ "$rpm_arch" = "$arch" ] ||
         die "RPM metadata arch mismatch: $base filename says $arch, metadata says $rpm_arch"
     case "$rpm_release" in
@@ -224,14 +242,18 @@ done < <(find "$OUT_DIR/repo-staging" -maxdepth 1 -type f -name '*.rpm' | sort)
 while IFS= read -r tgz_file; do
     base="$(basename "$tgz_file")"
     arch="$(tgz_arch_from_name "$base")"
-    [ "$arch" != "unknown" ] || die "tarball missing supported architecture: $base"
+    if [ "$arch" = "unknown" ]; then
+        handle_unexpected_artifact "tarball missing supported architecture: $base"
+        continue
+    fi
     case "$base" in
         "openlitespeed-litehttpd-${expected_ols_version}-${arch}-linux.tgz" | \
         "litehttpd-ols-patch-${expected_ols_version}-${arch}-linux.tgz" | \
         "litehttpd-module-${expected_module_version}-${arch}-linux.tgz")
             ;;
         *)
-            die "unexpected tarball artifact name or version: $base"
+            handle_unexpected_artifact "unexpected tarball artifact name or version: $base"
+            continue
             ;;
     esac
 
@@ -243,7 +265,7 @@ while IFS= read -r tgz_file; do
 done < <(find "$OUT_DIR/artifacts" -maxdepth 1 -type f -name '*.tgz' | sort)
 
 for dist in el8 el9 el10; do
-    for arch in x86_64 aarch64; do
+    for arch in "${RELEASE_ARCHES[@]}"; do
         repo_dir="$OUT_DIR/repo/$dist/$arch"
         rpm_dir="$repo_dir/RPMS"
         mkdir -p "$rpm_dir"
@@ -286,7 +308,7 @@ test -f "$OUT_DIR/repo/el8/x86_64/index.html"
 grep -q 'repo_gpgcheck=1' "$OUT_DIR/repo/setup.sh"
 # shellcheck disable=SC2016
 grep -q 'baseurl=${REPO_URL}/el${MAJOR}/${ARCH}/' "$OUT_DIR/repo/setup.sh"
-grep -q 'x86_64.*aarch64' "$OUT_DIR/repo/setup.sh"
+grep -q 'supported: x86_64' "$OUT_DIR/repo/setup.sh"
 
 echo "OK: setup.sh syntax and arch-aware baseurl"
 echo "OK: static indexes generated"

@@ -26,8 +26,8 @@ if [ "$MAJOR" != "8" ] && [ "$MAJOR" != "9" ] && [ "$MAJOR" != "10" ]; then
     exit 1
 fi
 
-if [ "$ARCH" != "x86_64" ] && [ "$ARCH" != "aarch64" ]; then
-    echo "Error: Unsupported architecture: $ARCH (supported: x86_64, aarch64)"
+if [ "$ARCH" != "x86_64" ]; then
+    echo "Error: Unsupported architecture: $ARCH (supported: x86_64)"
     exit 1
 fi
 
