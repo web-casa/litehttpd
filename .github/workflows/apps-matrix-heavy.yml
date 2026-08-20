@@ -452,6 +452,7 @@ jobs:
           name: apps-matrix-heavy-${{ matrix.scenario }}
           path: ${{ runner.temp }}/apps-matrix-heavy-summary/${{ matrix.scenario }}
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload heavy full artifacts
         if: always() && steps.filter.outputs.run == 'true' && inputs.artifact_mode == 'full'
@@ -460,6 +461,7 @@ jobs:
           name: apps-matrix-heavy-${{ matrix.scenario }}
           path: ${{ runner.temp }}/apps-matrix-heavy/${{ matrix.scenario }}
           if-no-files-found: ignore
+          retention-days: 7
 
   apps-matrix-heavy-install:
     if: inputs.phase == 'split' || inputs.phase == 'install'
@@ -583,6 +585,7 @@ jobs:
           name: apps-matrix-heavy-install-${{ matrix.scenario }}
           path: ${{ runner.temp }}/apps-matrix-heavy-install/${{ matrix.scenario }}
           if-no-files-found: error
+          retention-days: 7
 
   apps-matrix-heavy-verify:
     if: inputs.phase == 'split'
@@ -705,6 +708,7 @@ jobs:
           name: apps-matrix-heavy-verify-${{ matrix.scenario }}
           path: ${{ runner.temp }}/apps-matrix-heavy-verify-summary/${{ matrix.scenario }}
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload verify full artifacts
         if: always() && steps.filter.outputs.run == 'true' && inputs.artifact_mode == 'full'
@@ -713,3 +717,4 @@ jobs:
           name: apps-matrix-heavy-verify-${{ matrix.scenario }}
           path: ${{ runner.temp }}/apps-matrix-heavy-verify/${{ matrix.scenario }}
           if-no-files-found: ignore
+          retention-days: 7
