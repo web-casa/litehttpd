@@ -652,8 +652,88 @@ static htaccess_directive_t *filter_by_allow_override(htaccess_directive_t *head
 /* ------------------------------------------------------------------ */
 
 /**
+ * Apache modules whose directives this implementation honors.
+ *
+ * <IfModule> is evaluated against this table (Apache semantics): a block is
+ * kept when its module is listed here, dropped otherwise; a "!" prefix
+ * inverts the test. Names are matched case-sensitively after stripping one
+ * optional ".c"/".so" suffix, so "mod_rewrite.c" and "mod_rewrite" both
+ * match. Anything else — mod_ssl, mod_proxy, mod_deflate, typos — counts
+ * as not loaded.
+ *
+ * Notes:
+ * - "litehttpd_htaccess" is this module itself; it is always loaded, which
+ *   lets configs feature-sniff for this implementation.
+ * - mod_php* is listed because php_value/php_flag are honored; handler
+ *   mapping (AddHandler/SetHandler) is intentionally NOT provided, so
+ *   mod_actions / mod_cgi are absent.
+ * - mod_rewrite is listed even on stock OLS (Thin) builds: rewrite rules
+ *   still gate on the engine extensions at exec time, so listing it here
+ *   only affects non-rewrite siblings inside the block.
+ */
+static const char *const s_ifmodule_provided[] = {
+    "mod_rewrite",
+    "mod_alias",
+    "mod_headers",
+    "mod_expires",
+    "mod_mime",
+    "mod_env",
+    "mod_setenvif",
+    "mod_dir",
+    "mod_auth_basic",
+    "mod_authn_file",
+    "mod_authz_core",
+    "mod_authz_host",
+    "mod_authz_user",
+    "mod_access_compat",
+    "mod_php",
+    "mod_php5",
+    "mod_php7",
+    "mod_php8",
+    "litehttpd_htaccess",
+    NULL
+};
+
+/**
+ * True when `name` (the raw <IfModule> argument, "!" already stripped by
+ * the caller if present) names a provided module. Bounded: names longer
+ * than 128 bytes never match. No allocation.
+ */
+static int ifmodule_name_loaded(const char *name)
+{
+    static const size_t kMaxName = 128;
+    size_t len, i;
+
+    if (!name)
+        return 0;
+    /* Skip a defensive leading "!" (the negated flag is authoritative). */
+    if (*name == '!')
+        ++name;
+    len = strlen(name);
+    if (len == 0 || len > kMaxName)
+        return 0;
+    /* Tolerate one trailing ".c" / ".so" suffix. */
+    if (len > 2 && name[len - 2] == '.' &&
+        (name[len - 1] == 'c' || name[len - 1] == 'C'))
+        len -= 2;
+    else if (len > 3 && name[len - 3] == '.' &&
+             (name[len - 2] == 's' || name[len - 2] == 'S') &&
+             (name[len - 1] == 'o' || name[len - 1] == 'O'))
+        len -= 3;
+
+    for (i = 0; s_ifmodule_provided[i]; ++i) {
+        const char *entry = s_ifmodule_provided[i];
+        size_t elen = strlen(entry);
+        if (elen == len && memcmp(entry, name, len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/**
  * Recursively flatten DIR_IFMODULE in a directive list.
- * IfModule containers are spliced out, their children promoted in-place.
+ * Blocks whose condition holds are spliced out, their children promoted
+ * in-place; blocks whose condition fails are dropped with their subtree.
  * Then recurse into container children (Files, FilesMatch, If, Limit, etc.)
  */
 static htaccess_directive_t *flatten_ifmodule(htaccess_directive_t *head)
@@ -665,6 +745,19 @@ static htaccess_directive_t *flatten_ifmodule(htaccess_directive_t *head)
     while (cur) {
         htaccess_directive_t *next = cur->next;
         if (cur->type == DIR_IFMODULE) {
+            int loaded = ifmodule_name_loaded(cur->name);
+            int keep = loaded ^ (cur->data.ifmodule.negated ? 1 : 0);
+            if (!keep) {
+                /* Condition false: drop the block and its subtree. */
+                lsi_log(NULL, LSI_LOG_INFO,
+                        "[htaccess] line %d: <IfModule %s> condition false, "
+                        "block skipped",
+                        cur->line_number, cur->name ? cur->name : "?");
+                cur->next = NULL; /* directives_free walks the chain */
+                htaccess_directives_free(cur);
+                cur = next;
+                continue;
+            }
             /* Splice children (recursively flatten them too) */
             htaccess_directive_t *ic = flatten_ifmodule(cur->data.ifmodule.children);
             if (ic) {
@@ -911,21 +1004,20 @@ htaccess_directive_t *htaccess_dirwalk(lsi_session_t *session, const char *doc_r
     if (merged && allow_override != ALLOW_OVERRIDE_ALL)
         merged = filter_by_allow_override(merged, allow_override, "AllowOverride");
 
-    /* Flatten IfModule containers — expand ALL blocks unconditionally.
+    /* Flatten IfModule containers — evaluate each condition (Apache semantics).
      *
-     * OLS cannot query Apache's module registry, so we cannot determine
-     * whether a module is actually loaded. CyberPanel takes the same approach:
-     * treat all IfModule blocks (both positive and negated) as TRUE.
+     * OLS cannot query Apache's module registry, so "loaded" means "this
+     * implementation honors that module's directives" (see the provided
+     * table above flatten_ifmodule). A "!" prefix inverts the test:
      *
-     * This means:
-     *   <IfModule mod_headers.c>   → expand (module assumed loaded)
-     *   <IfModule !mod_headers.c>  → expand (cannot verify, safer to include)
+     *   <IfModule mod_headers.c>   → expand (headers are honored)
+     *   <IfModule mod_ssl.c>       → drop (not implemented here)
+     *   <IfModule !mod_headers.c>  → drop (headers ARE honored)
+     *   <IfModule !mod_ssl.c>      → expand (ssl is absent, fallback runs)
      *
-     * Rationale: dropping negated blocks breaks real configs like:
-     *   <IfModule !mod_nonexistent.c>
-     *     Header set X-Fallback "yes"
-     *   </IfModule>
-     * which should always execute since mod_nonexistent doesn't exist. */
+     * Real-world fallback configs keep working: negated blocks for absent
+     * modules (e.g. <IfModule !mod_nonexistent.c>) still expand, while
+     * positive blocks for unimplemented modules no longer over-apply. */
     merged = flatten_ifmodule(merged);
 
     return merged;

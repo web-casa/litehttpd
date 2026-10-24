@@ -320,7 +320,7 @@ TEST_F(ContainerSemanticsTest, IfModulePositiveExpanded)
 
 TEST_F(ContainerSemanticsTest, IfModuleNegatedAlsoExpanded)
 {
-    /* Negated IfModule should ALSO expand (we can't verify module existence) */
+    /* Negated IfModule for an ABSENT module expands (fallback runs) */
     setup_htaccess("/var/www/.htaccess", "<IfModule !mod_nonexistent.c>\n"
                                          "Header set X-Negated yes\n"
                                          "</IfModule>\n");
@@ -333,6 +333,59 @@ TEST_F(ContainerSemanticsTest, IfModuleNegatedAlsoExpanded)
     call_resp_hook();
 
     EXPECT_EQ(session_.get_response_header("X-Negated"), "yes");
+}
+
+TEST_F(ContainerSemanticsTest, IfModulePositiveUnknownDropped)
+{
+    /* Positive IfModule for an unimplemented module is dropped (Apache: the
+     * condition is false because the module is not loaded). */
+    setup_htaccess("/var/www/.htaccess", "<IfModule mod_nonexistent.c>\n"
+                                         "Header set X-Dropped yes\n"
+                                         "</IfModule>\n");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/page.html");
+    session_.set_client_ip("10.0.0.1");
+
+    call_req_hook();
+    call_resp_hook();
+
+    EXPECT_TRUE(session_.get_response_header("X-Dropped").empty());
+}
+
+TEST_F(ContainerSemanticsTest, IfModuleNegatedProvidedDropped)
+{
+    /* Negated IfModule for a PROVIDED module is dropped: headers ARE
+     * honored here, so !mod_headers.c is false. */
+    setup_htaccess("/var/www/.htaccess", "<IfModule !mod_headers.c>\n"
+                                         "Header set X-NegProv yes\n"
+                                         "</IfModule>\n");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/page.html");
+    session_.set_client_ip("10.0.0.1");
+
+    call_req_hook();
+    call_resp_hook();
+
+    EXPECT_TRUE(session_.get_response_header("X-NegProv").empty());
+}
+
+TEST_F(ContainerSemanticsTest, IfModuleSelfModuleExpanded)
+{
+    /* This implementation itself is always "loaded" for feature-sniffing. */
+    setup_htaccess("/var/www/.htaccess", "<IfModule litehttpd_htaccess>\n"
+                                         "Header set X-Self yes\n"
+                                         "</IfModule>\n");
+
+    session_.set_doc_root("/var/www");
+    session_.set_request_uri("/page.html");
+    session_.set_client_ip("10.0.0.1");
+
+    call_req_hook();
+    call_resp_hook();
+
+    EXPECT_EQ(session_.get_response_header("X-Self"), "yes");
 }
 
 /* --- Nested RequireAll inside Files --- */
