@@ -359,6 +359,8 @@ static int directives_match_for_override(const htaccess_directive_t *a,
     case DIR_BRUTE_FORCE_WINDOW:
     case DIR_BRUTE_FORCE_ACTION:
     case DIR_BRUTE_FORCE_THROTTLE_DURATION:
+    case DIR_RATE_LIMIT:
+    case DIR_SEC_RULE_ENGINE:
         return 1;
 
     /* Allow/Deny: match by value (CIDR or "all") */

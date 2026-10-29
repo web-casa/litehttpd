@@ -24,10 +24,16 @@ typedef struct {
     size_t       buf_cap;
     int          strip_depth;   /* nesting depth for remove/comment */
     int          bypassed;      /* 1 if no ESI detected in first window */
+    /* Document root that <esi:include> resolves against. NULL/0 = includes
+     * are REFUSED (fail closed): resolving against "/" would turn every
+     * src into an absolute filesystem path, i.e. arbitrary file read. */
+    const char  *docroot;
+    size_t       docroot_len;
 } esi_ctx_t;
 
-/* Initialize/reset context. Call once per response. */
-void esi_ctx_init(esi_ctx_t *ctx);
+/* Initialize/reset context. Call once per response.
+ * docroot (may be NULL) bounds <esi:include> resolution. */
+void esi_ctx_init(esi_ctx_t *ctx, const char *docroot, size_t docroot_len);
 void esi_ctx_free(esi_ctx_t *ctx);
 
 /**

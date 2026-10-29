@@ -13,12 +13,18 @@
 #define ESI_COMMENT_CLOSE "</esi:comment>"
 #define ESI_VARS_CLOSE    "</esi:vars>"
 
-void esi_ctx_init(esi_ctx_t *ctx)
+void esi_ctx_init(esi_ctx_t *ctx, const char *docroot, size_t docroot_len)
 {
     memset(ctx, 0, sizeof(*ctx));
     ctx->state = ESI_STATE_PASSTHROUGH;
     ctx->buf_cap = 16384;
     ctx->buf = malloc(ctx->buf_cap);
+    /* Set after the memset: NULL/0 docroot disables <esi:include>
+     * (fail closed — resolving against "/" would be arbitrary file read). */
+    if (docroot && docroot_len > 0) {
+        ctx->docroot = docroot;
+        ctx->docroot_len = docroot_len;
+    }
 }
 
 void esi_ctx_free(esi_ctx_t *ctx)
@@ -137,9 +143,11 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                         /* Extract src attribute */
                         char *src = esi_extract_src(tag_start, full_tag_len);
                         if (src) {
-                            /* Read included file (docroot from global) */
+                            /* Read included file, bounded by the ctx docroot.
+                             * NULL docroot refuses the include (fail closed). */
                             size_t inc_len = 0;
-                            char *inc_content = esi_include_read(src, "/", 1, &inc_len);
+                            char *inc_content = esi_include_read(
+                                src, ctx->docroot, ctx->docroot_len, &inc_len);
                             free(src);
 
                             if (inc_content && inc_len > 0) {
@@ -313,6 +321,7 @@ int esi_should_process(const char *content_type, int content_type_len,
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <limits.h>
 
 /* Extract src="..." attribute value from an esi:include tag */
 static char *esi_extract_src(const char *tag_start, size_t tag_len)
@@ -346,7 +355,7 @@ static char *esi_extract_src(const char *tag_start, size_t tag_len)
 char *esi_include_read(const char *src, const char *docroot, size_t docroot_len,
                        size_t *out_len)
 {
-    if (!src || !docroot || !out_len || src[0] != '/')
+    if (!src || !docroot || docroot_len == 0 || !out_len || src[0] != '/')
         return NULL;
 
     /* Security: reject path traversal */
@@ -359,6 +368,32 @@ char *esi_include_read(const char *src, const char *docroot, size_t docroot_len,
                      (int)docroot_len, docroot, src);
     if (n <= 0 || n >= (int)sizeof(path))
         return NULL;
+
+    /* Containment check: resolve symlinks and require the result to stay
+     * under the resolved docroot. O_NOFOLLOW below protects only the final
+     * component; an intermediate symlinked directory (e.g. an
+     * attacker-writable uploads/ pointing at /etc) would otherwise escape. */
+    {
+        char resolved_docroot[4096];
+        if (!realpath(docroot, resolved_docroot))
+            return NULL;
+        char resolved_path[4096];
+        if (!realpath(path, resolved_path))
+            return NULL; /* missing file or permission — indistinguishable, refuse */
+        size_t rd_len = strlen(resolved_docroot);
+        /* Boundary-safe prefix: equal, or resolved_path starts with
+         * resolved_docroot + '/'. */
+        if (strncmp(resolved_path, resolved_docroot, rd_len) != 0)
+            return NULL;
+        if (resolved_path[rd_len] != '\0' && resolved_path[rd_len] != '/')
+            return NULL;
+        /* Re-target the open at the verified resolved path (the realpath
+         * call above already followed intermediates; O_NOFOLLOW then pins
+         * the final component). */
+        n = snprintf(path, sizeof(path), "%s", resolved_path);
+        if (n <= 0 || n >= (int)sizeof(path))
+            return NULL;
+    }
 
     /* Open with hardening (consistent with dirwalker.c) */
     int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);

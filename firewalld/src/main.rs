@@ -27,6 +27,29 @@ fn valid_ip(s: &str) -> bool {
     s.parse::<IpAddr>().is_ok()
 }
 
+/// Resolve the gid the socket should be group-owned by. Numeric
+/// LITEHTTPD_FW_SOCK_GID wins; otherwise look up LITEHTTPD_FW_SOCK_GROUP
+/// (default "nobody") in /etc/group. None = leave root-owned.
+fn sock_group_gid() -> Option<u32> {
+    if let Ok(g) = std::env::var("LITEHTTPD_FW_SOCK_GID") {
+        return g.trim().parse::<u32>().ok();
+    }
+    let content = std::fs::read_to_string("/etc/group").ok()?;
+    // "nobody" covers RHEL-family, "nogroup" Debian-family; an explicit
+    // LITEHTTPD_FW_SOCK_GROUP skips both.
+    let groups: Vec<String> = match std::env::var("LITEHTTPD_FW_SOCK_GROUP") {
+        Ok(g) => vec![g],
+        Err(_) => vec!["nobody".to_string(), "nogroup".to_string()],
+    };
+    for line in content.lines() {
+        let cols: Vec<&str> = line.split(':').collect();
+        if cols.len() >= 3 && groups.iter().any(|g| g == cols[0]) {
+            return cols[2].parse::<u32>().ok();
+        }
+    }
+    None
+}
+
 fn main() {
     let sock_path = std::env::var("LITEHTTPD_FW_SOCK")
         .unwrap_or_else(|_| "/var/run/litehttpd/firewall.sock".to_string());
@@ -43,10 +66,25 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // The daemon must run as root (nftables), but the OLS worker (typically
+    // user "nobody") needs to connect. 0660 alone leaves the socket
+    // root:root, so every fw_client_block() from the worker gets EACCES
+    // and escalation silently never happens. chgrp the socket to the
+    // worker group: LITEHTTPD_FW_SOCK_GID (numeric) overrides the
+    // default lookup of "nobody" in /etc/group.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o660));
+        if let Some(gid) = sock_group_gid() {
+            use std::os::unix::fs::chown;
+            if let Err(e) = chown(&sock_path, None, Some(gid)) {
+                eprintln!("warn: cannot chgrp socket to gid {}: {}", gid, e);
+            }
+        } else {
+            eprintln!("warn: LITEHTTPD_FW_SOCK_GROUP not found; socket stays root-owned \
+                      (set LITEHTTPD_FW_SOCK_GID if the web worker cannot connect)");
+        }
     }
 
     let fw_backend = backend::detect();

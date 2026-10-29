@@ -305,7 +305,7 @@ TEST_F(ExecBruteForceTest, WindowExpiryResetsCount)
     exec_brute_force(session_.handle(), dirs, "10.0.0.1", 1);
 
     /* Expire the window by manipulating the record */
-    brute_force_record_t *rec = shm_get_record("10.0.0.1");
+    brute_force_record_t *rec = shm_get_record("b:10.0.0.1");
     ASSERT_NE(rec, nullptr);
     rec->first_attempt = time(nullptr) - 61; /* Past the 60s window */
 
@@ -315,7 +315,7 @@ TEST_F(ExecBruteForceTest, WindowExpiryResetsCount)
     EXPECT_EQ(session_.get_status_code(), 200);
 
     /* Verify count was reset */
-    rec = shm_get_record("10.0.0.1");
+    rec = shm_get_record("b:10.0.0.1");
     ASSERT_NE(rec, nullptr);
     EXPECT_EQ(rec->attempt_count, 1);
 

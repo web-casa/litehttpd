@@ -6,6 +6,10 @@ After=network.target
 Type=simple
 ExecStart=/usr/local/bin/litehttpd-firewalld
 Environment=LITEHTTPD_FW_SOCK=/var/run/litehttpd/firewall.sock
+# The socket is chgrp'd to this group (default: nobody) so the OLS worker
+# can connect while the daemon stays root for nftables. Override with
+# LITEHTTPD_FW_SOCK_GID=<numeric gid> if your worker uses another group.
+Environment=LITEHTTPD_FW_SOCK_GROUP=nobody
 Environment=LITEHTTPD_FW_DB=/var/lib/litehttpd/firewall.db
 Restart=always
 RestartSec=5

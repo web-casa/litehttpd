@@ -1460,6 +1460,7 @@ static int on_uri_map(lsi_session_t *session)
                 lsi_log(session, LSI_LOG_WARN,
                         "mod_htaccess: RateLimit exceeded for this client");
                 free(target_dir);
+                htaccess_directives_free(directives);
                 lsi_session_set_status(session, 403);
                 lsi_session_end_resp(session);
                 return LSI_DENY;

@@ -60,15 +60,27 @@ int exec_ratelimit(lsi_session_t *session, const htaccess_directive_t *dir)
     if (ip_len <= 0)
         return LSI_OK; /* can't rate-limit without IP */
 
+    /* SHM namespace key "r:<ip>" — brute-force protection keys "b:<ip>".
+     * Sharing the bare IP made rate limiting feed the brute-force
+     * counters (and vice versa). */
+    char rl_key[52];
+    {
+        size_t keep = (size_t)ip_len > 46 ? 46 : (size_t)ip_len;
+        rl_key[0] = 'r';
+        rl_key[1] = ':';
+        memcpy(rl_key + 2, ip, keep);
+        rl_key[2 + keep] = '\0';
+    }
+
     /* Get current counter from SHM */
     time_t now = time(NULL);
-    brute_force_record_t *rec = shm_get_record(ip);
+    brute_force_record_t *rec = shm_get_record(rl_key);
     if (!rec) {
         /* First request — create record */
         brute_force_record_t new_rec = {0};
         new_rec.attempt_count = 1;
         new_rec.first_attempt = now;
-        shm_update_record(ip, &new_rec);
+        shm_update_record(rl_key, &new_rec);
         return LSI_OK;
     }
 
@@ -77,13 +89,13 @@ int exec_ratelimit(lsi_session_t *session, const htaccess_directive_t *dir)
         /* Window expired — reset */
         rec->attempt_count = 1;
         rec->first_attempt = now;
-        shm_update_record(ip, rec);
+        shm_update_record(rl_key, rec);
         return LSI_OK;
     }
 
     /* Within window — increment */
     brute_force_record_t out;
-    shm_atomic_increment(ip, now, &out);
+    shm_atomic_increment(rl_key, now, &out);
     int current = out.attempt_count;
 
     if (current > cfg.requests + cfg.burst) {

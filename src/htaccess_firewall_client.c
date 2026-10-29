@@ -18,6 +18,9 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/time.h>
+#include <poll.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -44,17 +47,50 @@ static int fw_connect_once(void)
     if (fd < 0)
         return -1;
 
+    /* SO_SNDTIMEO/SO_RCVTIMEO do NOT bound connect() on AF_UNIX — a full
+     * listen backlog would stall the worker forever. Connect non-blocking
+     * under a poll deadline, then restore blocking mode for the send and
+     * receive phases (which the socket timeouts below do bound). */
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        close(fd);
+        return -1;
+    }
+
+    int rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+    if (rc < 0 && errno != EINPROGRESS) {
+        close(fd);
+        return -1;
+    }
+    if (rc < 0) {
+        struct pollfd pfd;
+        pfd.fd = fd;
+        pfd.events = POLLOUT;
+        pfd.revents = 0;
+        if (poll(&pfd, 1, FW_IO_TIMEOUT_MS) != 1) {
+            close(fd);
+            return -1;
+        }
+        int soerr = 0;
+        socklen_t slen = sizeof(soerr);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &slen) < 0 ||
+            soerr != 0) {
+            close(fd);
+            return -1;
+        }
+    }
+
+    if (fcntl(fd, F_SETFL, flags) < 0) {
+        close(fd);
+        return -1;
+    }
+
     struct timeval tv = {
         .tv_sec = FW_IO_TIMEOUT_MS / 1000,
         .tv_usec = (FW_IO_TIMEOUT_MS % 1000) * 1000,
     };
     (void)setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     (void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        return -1;
-    }
     return fd;
 }
 
