@@ -21,6 +21,7 @@
 #include "htaccess_exec_env.h"
 #include "htaccess_exec_brute_force.h"
 #include "htaccess_exec_ratelimit.h"
+#include "htaccess_exec_cache.h"
 #include "htaccess_exec_header.h"
 #include "htaccess_exec_expires.h"
 #include "htaccess_exec_error_doc.h"
@@ -2241,7 +2242,10 @@ static int on_send_resp_header(lsi_session_t *session)
         content_type = lsi_session_get_resp_content_type(session, &ct_iov_len);
     if (!content_type)
         content_type = "application/octet-stream";
-    exec_expires(session, directives, content_type);
+        /* LSCache bridge: set X-LiteSpeed-Cache-Control from .htaccess */
+    exec_cache_bridge(session, directives);
+
+exec_expires(session, directives, content_type);
 
     /* (f) ErrorDocument directives.
      * NOTE: HTTP_BEGIN always fires with status=200 (before URI_MAP sets the

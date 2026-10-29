@@ -1503,6 +1503,18 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
         return parse_fallback_resource(after, line_num);
 
     /* ExpiresActive */
+    if (strncasecmp(line, "CacheEnable", 11) == 0) {
+        return parse_cache_directive(st, line, DIR_CACHE_ENABLE);
+    }
+    if (strncasecmp(line, "CacheDisable", 12) == 0) {
+        return parse_cache_directive(st, line, DIR_CACHE_DISABLE);
+    }
+    if (strncasecmp(line, "CacheMaxExpire", 14) == 0) {
+        return parse_cache_directive(st, line, DIR_CACHE_MAX_EXPIRE);
+    }
+    if (strncasecmp(line, "CacheDefaultExpire", 18) == 0) {
+        return parse_cache_directive(st, line, DIR_CACHE_DEFAULT_EXPIRE);
+    }
     if (strncasecmp(line, "RateLimit", 9) == 0) {
         return parse_rate_limit(st, line);
     }
@@ -3259,6 +3271,30 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
 }
 
 /* Parse: RateLimit N/M [burst=B] [action=deny|throttle|log] */
+
+/* Parse: CacheEnable public|private / CacheDisable / CacheMaxExpire N / CacheDefaultExpire N */
+static htaccess_directive_t *parse_cache_directive(parser_state_t *st, const char *line,
+                                                    htaccess_directive_type_t type)
+{
+    const char *p = line;
+    while (*p && !isspace((unsigned char)*p))
+        p++;
+    SKIP_WS(p);
+
+    htaccess_directive_t *d = alloc_directive(type, line);
+    if (!d)
+        return NULL;
+    if (*p) {
+        size_t vlen = strlen(p);
+        if (vlen >= sizeof(d->value_buf))
+            vlen = sizeof(d->value_buf) - 1;
+        memcpy(d->value_buf, p, vlen);
+        d->value_buf[vlen] = '\0';
+        d->value = d->value_buf;
+    }
+    return d;
+}
+
 static htaccess_directive_t *parse_rate_limit(parser_state_t *st, const char *line)
 {
     const char *p = line;

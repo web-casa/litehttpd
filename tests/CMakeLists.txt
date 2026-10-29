@@ -98,3 +98,9 @@ target_sources(test_shm_fork PRIVATE ../src/htaccess_shm.c ../src/ols_native_api
 target_include_directories(test_shm_fork PRIVATE ../include)
 target_link_libraries(test_shm_fork gtest_main pthread rt crypt)
 gtest_discover_tests(test_shm_fork)
+
+add_executable(test_cache_bridge test_cache_bridge.cpp)
+target_sources(test_cache_bridge PRIVATE ../src/htaccess_exec_cache.c)
+target_include_directories(test_cache_bridge PRIVATE ../include)
+target_link_libraries(test_cache_bridge gtest_main)
+gtest_discover_tests(test_cache_bridge)
