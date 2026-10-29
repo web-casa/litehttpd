@@ -147,6 +147,7 @@ typedef enum {
     DIR_CACHE_DISABLE,                 /* 85 */
     DIR_CACHE_MAX_EXPIRE,              /* 86 */
     DIR_CACHE_DEFAULT_EXPIRE,          /* 87 */
+    DIR_RATE_LIMIT,                    /* 88 */
 } directive_type_t;
 
 /**

@@ -408,6 +408,23 @@ struct lsi_api_s {
     void (*free_rewrite_rules)(void *handle);
 };
 
+/* litehttpd ABI version handshake */
+#define LITEHTTPD_ABI_MAGIC     0x4C485444  /* "LHTD" */
+#define LITEHTTPD_ABI_VERSION_1 1
+
+#define LITEHTTPD_FEAT_PHP_CONFIG   (1u << 0)
+#define LITEHTTPD_FEAT_REWRITE      (1u << 1)
+#define LITEHTTPD_FEAT_REQ_HEADER   (1u << 2)
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t api_struct_size;
+    uint32_t feature_bitmap;
+} litehttpd_abi_info_t;
+
+extern const litehttpd_abi_info_t *litehttpd_get_abi_info(void);
+
 extern __thread const lsi_api_t *g_api;
 
 /* ------------------------------------------------------------------ */

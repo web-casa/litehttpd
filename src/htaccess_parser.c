@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <stdio.h>
 
 /* ------------------------------------------------------------------ */
 /*  Internal helpers                                                    */
@@ -767,6 +768,113 @@ static htaccess_directive_t *parse_fallback_resource(const char *args, int line)
     return d;
 }
 
+
+/**
+ * Parse: CacheEnable public|private
+ */
+static htaccess_directive_t *parse_cache_enable(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    htaccess_directive_t *d = alloc_directive(DIR_CACHE_ENABLE, line);
+    if (!d) {
+        free(val);
+        return NULL;
+    }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: CacheDisable (no arguments needed)
+ */
+static htaccess_directive_t *parse_cache_disable(const char *args, int line)
+{
+    (void)args;
+    return alloc_directive(DIR_CACHE_DISABLE, line);
+}
+
+/**
+ * Parse: CacheMaxExpire N (seconds)
+ */
+static htaccess_directive_t *parse_cache_max_expire(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    htaccess_directive_t *d = alloc_directive(DIR_CACHE_MAX_EXPIRE, line);
+    if (!d) {
+        free(val);
+        return NULL;
+    }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: CacheDefaultExpire N (seconds)
+ */
+static htaccess_directive_t *parse_cache_default_expire(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    htaccess_directive_t *d = alloc_directive(DIR_CACHE_DEFAULT_EXPIRE, line);
+    if (!d) {
+        free(val);
+        return NULL;
+    }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: RateLimit N/M [burst=B] [action=deny|throttle|log]
+ */
+static htaccess_directive_t *parse_rate_limit(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    /* Reconstruct full value (may contain spaces for burst/action params) */
+    char full_val[256];
+    snprintf(full_val, sizeof(full_val), "%s", val);
+    free(val);
+
+    /* Look for additional parameters */
+    char *extra = next_token(&p);
+    while (extra) {
+        size_t cur_len = strlen(full_val);
+        size_t extra_len = strlen(extra);
+        if (cur_len + extra_len + 1 < sizeof(full_val)) {
+            snprintf(full_val + cur_len, sizeof(full_val) - cur_len, " %s", extra);
+        }
+        free(extra);
+        extra = next_token(&p);
+    }
+
+    char *stored = strdup(full_val);
+    if (!stored)
+        return NULL;
+
+    htaccess_directive_t *d = alloc_directive(DIR_RATE_LIMIT, line);
+    if (!d) {
+        free(stored);
+        return NULL;
+    }
+    d->value = stored;
+    return d;
+}
+
 /**
  * Parse: ExpiresActive On|Off
  */
@@ -1502,26 +1610,32 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
     if (after)
         return parse_fallback_resource(after, line_num);
 
+    /* CacheEnable */
+    after = match_kw(p, "CacheEnable");
+    if (after)
+        return parse_cache_enable(after, line_num);
+
+    /* CacheDisable */
+    after = match_kw(p, "CacheDisable");
+    if (after)
+        return parse_cache_disable(after, line_num);
+
+    /* CacheMaxExpire */
+    after = match_kw(p, "CacheMaxExpire");
+    if (after)
+        return parse_cache_max_expire(after, line_num);
+
+    /* CacheDefaultExpire */
+    after = match_kw(p, "CacheDefaultExpire");
+    if (after)
+        return parse_cache_default_expire(after, line_num);
+
+    /* RateLimit */
+    after = match_kw(p, "RateLimit");
+    if (after)
+        return parse_rate_limit(after, line_num);
+
     /* ExpiresActive */
-    if (strncasecmp(line, "CacheEnable", 11) == 0 && \
-        (line[11] == 0 || isspace((unsigned char)line[11]))) {
-        return parse_cache_directive(st, line, DIR_CACHE_ENABLE);
-    }
-    if (strncasecmp(line, "CacheDisable", 12) == 0 && \
-        (line[12] == 0 || isspace((unsigned char)line[12]))) {
-        return parse_cache_directive(st, line, DIR_CACHE_DISABLE);
-    }
-    if (strncasecmp(line, "CacheMaxExpire", 14) == 0 && \
-        (line[14] == 0 || isspace((unsigned char)line[14]))) {
-        return parse_cache_directive(st, line, DIR_CACHE_MAX_EXPIRE);
-    }
-    if (strncasecmp(line, "CacheDefaultExpire", 18) == 0 && \
-        (line[18] == 0 || isspace((unsigned char)line[18]))) {
-        return parse_cache_directive(st, line, DIR_CACHE_DEFAULT_EXPIRE);
-    }
-    if (strncasecmp(line, "RateLimit", 9) == 0) {
-        return parse_rate_limit(st, line);
-    }
     after = match_kw(p, "ExpiresActive");
     if (after)
         return parse_expires_active(after, line_num);
@@ -3274,48 +3388,4 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
     return head;
 }
 
-/* Parse: RateLimit N/M [burst=B] [action=deny|throttle|log] */
 
-/* Parse: CacheEnable public|private / CacheDisable / CacheMaxExpire N / CacheDefaultExpire N */
-static htaccess_directive_t *parse_cache_directive(parser_state_t *st, const char *line,
-                                                    htaccess_directive_type_t type)
-{
-    const char *p = line;
-    while (*p && !isspace((unsigned char)*p))
-        p++;
-    SKIP_WS(p);
-
-    htaccess_directive_t *d = alloc_directive(type, line);
-    if (!d)
-        return NULL;
-    if (*p) {
-        size_t vlen = strlen(p);
-        if (vlen >= sizeof(d->value_buf))
-            vlen = sizeof(d->value_buf) - 1;
-        memcpy(d->value_buf, p, vlen);
-        d->value_buf[vlen] = '\0';
-        d->value = d->value_buf;
-    }
-    return d;
-}
-
-static htaccess_directive_t *parse_rate_limit(parser_state_t *st, const char *line)
-{
-    const char *p = line;
-    while (*p && !isspace((unsigned char)*p))
-        p++;
-    SKIP_WS(p);
-    if (!*p)
-        return alloc_directive(DIR_UNKNOWN, line);
-
-    htaccess_directive_t *d = alloc_directive(DIR_RATE_LIMIT, line);
-    if (!d)
-        return NULL;
-    size_t vlen = strlen(p);
-    if (vlen >= sizeof(d->value_buf))
-        vlen = sizeof(d->value_buf) - 1;
-    memcpy(d->value_buf, p, vlen);
-    d->value_buf[vlen] = '\0';
-    d->value = d->value_buf;
-    return d;
-}
