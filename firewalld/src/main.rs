@@ -95,8 +95,11 @@ fn main() {
         if !valid_ip(&ip) { continue; }
         let blocked_at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(ts);
         let expires_at = ttl.map(|t| blocked_at + std::time::Duration::from_secs(t));
-        let _ = fw_backend.block(&ip);
-        eprintln!("restored block: {}", ip);
+        if let Err(e) = fw_backend.block(&ip, ttl) {
+            eprintln!("restored block {} failed: {}", ip, e);
+        } else {
+            eprintln!("restored block: {}", ip);
+        }
         restored.insert(ip.clone(), BlockEntry { ip, blocked_at, ttl, expires_at });
     }
 
@@ -181,7 +184,7 @@ fn process_command(cmd: &str, state: &Arc<Mutex<State>>) -> String {
             let ttl: Option<u64> = parts.get(2).and_then(|s| s.parse().ok());
             let now = std::time::SystemTime::now();
             let expires = ttl.map(|t| now + std::time::Duration::from_secs(t));
-            let result = st.backend.block(&ip);
+            let result = st.backend.block(&ip, ttl);
             st.blocked.insert(ip.clone(), BlockEntry {
                 ip: ip.clone(), blocked_at: now, ttl, expires_at: expires,
             });

@@ -128,6 +128,7 @@ set(MODULE_SOURCES
     src/htaccess_exec_cache.c
     src/htaccess_exec_modsec.c
     src/htaccess_firewall_client.c
+    src/htaccess_stream.c
     src/htaccess_esi.c
     src/htaccess_cidr_table.c
     src/htaccess_regex.c
