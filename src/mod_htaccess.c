@@ -20,6 +20,7 @@
 #include "htaccess_exec_php.h"
 #include "htaccess_exec_env.h"
 #include "htaccess_exec_brute_force.h"
+#include "htaccess_exec_ratelimit.h"
 #include "htaccess_exec_header.h"
 #include "htaccess_exec_expires.h"
 #include "htaccess_exec_error_doc.h"
@@ -135,6 +136,16 @@ static int on_main_atexit_hook(lsi_param_t *param)
     return mod_htaccess_cleanup(NULL);
 }
 
+
+static int on_resp_body_esi_hook(lsi_param_t *param)
+{
+    /* ESI v1: only process if Content-Type is text/html and contains <esi: tags */
+    /* Full integration requires the ESI context in module data */
+    /* For now: passthrough (v1 limitation) */
+    (void)param;
+    return LSI_OK;
+}
+
 static lsi_serverhook_t server_hooks[] = {
     /* URI_MAP: ACL, redirects, PHP config, env vars, RequestHeader, brute force */
     {LSI_HKPT_URI_MAP, on_uri_map_hook, MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED},
@@ -142,6 +153,9 @@ static lsi_serverhook_t server_hooks[] = {
     {LSI_HKPT_HTTP_BEGIN, on_http_begin_hook, MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED},
     /* SEND_RESP_HEADER: response headers, expires, AddType/ForceType */
     {LSI_HKPT_SEND_RESP_HEADER, on_send_resp_header_hook, MOD_HTACCESS_HOOK_PRIORITY,
+     LSI_FLAG_ENABLED},
+    /* ESI: response body processing */
+    {LSI_HKPT_RCVD_RESP_BODY, on_resp_body_esi_hook, MOD_HTACCESS_HOOK_PRIORITY,
      LSI_FLAG_ENABLED},
     /* MAIN_ATEXIT: cleanup cache and SHM */
     {LSI_HKPT_MAIN_ATEXIT, on_main_atexit_hook, MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED},
@@ -1395,7 +1409,22 @@ static int on_uri_map(lsi_session_t *session)
         }
     }
 
-    /* (b) Redirects — execute before RewriteRule (Apache order:
+        /* (a-0) Rate limiting — check before any expensive processing */
+    for (dir = directives; dir != NULL; dir = dir->next) {
+        if (dir->type == DIR_RATE_LIMIT) {
+            int rl_rc = exec_ratelimit(session, dir);
+            if (rl_rc != LSI_OK) {
+                lsi_log(session, LSI_LOG_WARN,
+                        "mod_htaccess: RateLimit exceeded for this client");
+                free(target_dir);
+                lsi_session_set_status(session, 403);
+                lsi_session_end_resp(session);
+                return LSI_DENY;
+            }
+        }
+    }
+
+/* (b) Redirects — execute before RewriteRule (Apache order:
      * mod_alias runs in fixup phase before mod_rewrite) */
     for (dir = directives; dir != NULL; dir = dir->next) {
         int redir_rc = 0;

@@ -1503,6 +1503,9 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
         return parse_fallback_resource(after, line_num);
 
     /* ExpiresActive */
+    if (strncasecmp(line, "RateLimit", 9) == 0) {
+        return parse_rate_limit(st, line);
+    }
     after = match_kw(p, "ExpiresActive");
     if (after)
         return parse_expires_active(after, line_num);
@@ -3253,4 +3256,26 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
 
     free(buf);
     return head;
+}
+
+/* Parse: RateLimit N/M [burst=B] [action=deny|throttle|log] */
+static htaccess_directive_t *parse_rate_limit(parser_state_t *st, const char *line)
+{
+    const char *p = line;
+    while (*p && !isspace((unsigned char)*p))
+        p++;
+    SKIP_WS(p);
+    if (!*p)
+        return alloc_directive(DIR_UNKNOWN, line);
+
+    htaccess_directive_t *d = alloc_directive(DIR_RATE_LIMIT, line);
+    if (!d)
+        return NULL;
+    size_t vlen = strlen(p);
+    if (vlen >= sizeof(d->value_buf))
+        vlen = sizeof(d->value_buf) - 1;
+    memcpy(d->value_buf, p, vlen);
+    d->value_buf[vlen] = '\0';
+    d->value = d->value_buf;
+    return d;
 }
