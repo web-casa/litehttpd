@@ -177,6 +177,36 @@ inline rc::Gen<TaggedLine> taggedDirectiveLine()
                 return {block ? "BruteForceAction block"
                               : "BruteForceAction throttle",
                         DIR_BRUTE_FORCE_ACTION};
+            }),
+        /* CacheEnable public|private|off */
+        rc::gen::map(
+            rc::gen::element("public", "private", "off"),
+            [](const std::string &v) -> TaggedLine {
+                return {"CacheEnable " + v, DIR_CACHE_ENABLE};
+            }),
+        /* CacheDisable (no args) */
+        rc::gen::just(TaggedLine{"CacheDisable", DIR_CACHE_DISABLE}),
+        /* CacheMaxExpire <sec> */
+        rc::gen::map(
+            rc::gen::inRange(1, 86400),
+            [](int n) -> TaggedLine {
+                return {"CacheMaxExpire " + std::to_string(n),
+                        DIR_CACHE_MAX_EXPIRE};
+            }),
+        /* CacheDefaultExpire <sec> */
+        rc::gen::map(
+            rc::gen::inRange(1, 86400),
+            [](int n) -> TaggedLine {
+                return {"CacheDefaultExpire " + std::to_string(n),
+                        DIR_CACHE_DEFAULT_EXPIRE};
+            }),
+        /* RateLimit N/M */
+        rc::gen::map(
+            rc::gen::pair(rc::gen::inRange(1, 1000), rc::gen::inRange(1, 3600)),
+            [](const std::pair<int, int> &p) -> TaggedLine {
+                return {"RateLimit " + std::to_string(p.first) + "/" +
+                            std::to_string(p.second),
+                        DIR_RATE_LIMIT};
             })
     );
 }

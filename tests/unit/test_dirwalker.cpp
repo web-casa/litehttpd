@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <cstdlib>
+#include <sys/stat.h>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -198,6 +199,10 @@ TEST_F(DirWalkerTest, NewlyCreatedHtaccess_IsVisibleImmediately)
         std::ofstream htaccess(doc_root + "/.htaccess");
         htaccess << "Header set X-New-Rule active\n";
     }
+    /* ofstream creates 0666&~umask; with a permissive umask (e.g. 0002)
+     * that is group-writable and read_and_cache correctly refuses it.
+     * Real admin-owned .htaccess files are 0644 — match that. */
+    ASSERT_EQ(chmod((doc_root + "/.htaccess").c_str(), 0644), 0);
 
     htaccess_directive_t *merged = htaccess_dirwalk(nullptr, doc_root.c_str(), doc_root.c_str());
 
