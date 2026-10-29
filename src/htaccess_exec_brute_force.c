@@ -9,6 +9,7 @@
 #include "htaccess_exec_brute_force.h"
 #include "htaccess_shm.h"
 #include "htaccess_cidr.h"
+#include "htaccess_firewall_client.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -271,6 +272,18 @@ int exec_brute_force(lsi_session_t *session,
                 shm_update_record(effective_ip, &new_rec);
 
                 if (action == BF_ACTION_BLOCK) {
+                    /* Escalate to the kernel-level firewall daemon when it is
+                     * running. TTL mirrors the detection window so the rule
+                     * lapses with the application-level record; a repeat
+                     * offender that keeps probing re-triggers escalation.
+                     * Failure here is non-fatal and silent-by-design: the
+                     * application-level 403 below still applies, so sites
+                     * without the daemon see no behaviour change. */
+                    if (fw_client_block(effective_ip, window_sec) == 0)
+                        lsi_log(session, LSI_LOG_INFO,
+                                "[htaccess] brute force: %s escalated to "
+                                "firewall daemon (ttl %ds)",
+                                effective_ip, window_sec);
                     lsi_session_set_status(session, 403);
                     free(xff_ip);
                     return LSI_ERROR;
