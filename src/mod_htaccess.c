@@ -21,6 +21,7 @@
 #include "htaccess_exec_env.h"
 #include "htaccess_exec_brute_force.h"
 #include "htaccess_exec_ratelimit.h"
+#include "htaccess_exec_modsec.h"
 #include "htaccess_exec_cache.h"
 #include "htaccess_exec_header.h"
 #include "htaccess_exec_expires.h"
@@ -117,6 +118,18 @@ static int on_uri_map_hook(lsi_param_t *param)
     return on_uri_map((lsi_session_t *)param->session);
 }
 
+/* Early URI_MAP pass (LSI_HOOK_EARLY, before modsecurity-ls at NORMAL):
+ * applies SecRuleEngine from .htaccess through the request-env bypass
+ * contract. Self-contained walk — the main pass at priority 100 owns its
+ * own directive list and its error paths free it, so sharing the list
+ * through req_cache would race ownership; the second walk is a validated
+ * cache hit (no re-parse), costing only the merge deep-copy. */
+static int on_uri_map_early(lsi_session_t *session);
+static int on_uri_map_early_hook(lsi_param_t *param)
+{
+    return on_uri_map_early((lsi_session_t *)param->session);
+}
+
 static int on_http_begin_hook(lsi_param_t *param)
 {
     return on_http_begin((lsi_session_t *)param->session);
@@ -148,6 +161,9 @@ static int on_resp_body_esi_hook(lsi_param_t *param)
 }
 
 static lsi_serverhook_t server_hooks[] = {
+    /* URI_MAP early pass: SecRuleEngine bridge — must run before
+     * modsecurity-ls (LSI_HOOK_NORMAL) to win the env race */
+    {LSI_HKPT_URI_MAP, on_uri_map_early_hook, LSI_HOOK_EARLY, LSI_FLAG_ENABLED},
     /* URI_MAP: ACL, redirects, PHP config, env vars, RequestHeader, brute force */
     {LSI_HKPT_URI_MAP, on_uri_map_hook, MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED},
     /* HTTP_BEGIN: ErrorDocument local-path (internal redirect on error status) */
@@ -1052,6 +1068,32 @@ static int exec_if_child_response(lsi_session_t *session, const htaccess_directi
  *    e. Brute force protection
  * 5. Free directives and return
  */
+static int on_uri_map_early(lsi_session_t *session)
+{
+    int doc_root_len = 0;
+    const char *doc_root = lsi_session_get_doc_root(session, &doc_root_len);
+    if (!doc_root || doc_root_len <= 0)
+        return LSI_OK;
+
+    int uri_len = 0;
+    const char *uri = lsi_session_get_uri(session, &uri_len);
+    if (!uri || uri_len <= 0)
+        return LSI_OK;
+
+    char *target_dir = build_target_dir(doc_root, doc_root_len, uri, uri_len);
+    if (!target_dir)
+        return LSI_OK; /* main pass re-runs the checks and denies */
+
+    htaccess_directive_t *directives = htaccess_dirwalk(session, doc_root, target_dir);
+    free(target_dir);
+    if (!directives)
+        return LSI_OK;
+
+    exec_modsec_bridge(session, directives);
+    htaccess_directives_free(directives);
+    return LSI_OK;
+}
+
 static int on_uri_map(lsi_session_t *session)
 {
     /* New request: bump the generation counter and clear any stale cache.

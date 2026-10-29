@@ -210,6 +210,16 @@ struct lsi_serverhook_s {
 #define LSI_HOOK_END    {0, NULL, 0, 0}
 #define LSI_FLAG_ENABLED 8
 
+/* Hook priorities at a shared hookpoint: lower value runs first
+ * (LSI_HOOK_PRIORITY semantics in OLS's ls.h). The modsecurity-ls
+ * module registers its URI_MAP hook at LSI_HOOK_NORMAL (10), so any
+ * priority below 10 runs ahead of it. */
+#define LSI_HOOK_FIRST  (-10)
+#define LSI_HOOK_EARLY  (0)
+#define LSI_HOOK_NORMAL (10)
+#define LSI_HOOK_LATE   (20)
+#define LSI_HOOK_LAST   (30)
+
 /* ------------------------------------------------------------------ */
 /*  Module reserved size and descriptor                                */
 /* ------------------------------------------------------------------ */

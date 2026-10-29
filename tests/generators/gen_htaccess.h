@@ -200,6 +200,12 @@ inline rc::Gen<TaggedLine> taggedDirectiveLine()
                 return {"CacheDefaultExpire " + std::to_string(n),
                         DIR_CACHE_DEFAULT_EXPIRE};
             }),
+        /* SecRuleEngine On|Off|DetectionOnly */
+        rc::gen::map(
+            rc::gen::element("On", "Off", "DetectionOnly"),
+            [](const std::string &v) -> TaggedLine {
+                return {"SecRuleEngine " + v, DIR_SEC_RULE_ENGINE};
+            }),
         /* RateLimit N/M */
         rc::gen::map(
             rc::gen::pair(rc::gen::inRange(1, 1000), rc::gen::inRange(1, 3600)),

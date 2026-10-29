@@ -687,6 +687,14 @@ static int print_directive(strbuf_t *sb, const htaccess_directive_t *d)
         }
         break;
 
+    /* --- ModSecurity bridge --- */
+    case DIR_SEC_RULE_ENGINE:
+        if (strbuf_append(sb, "SecRuleEngine ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
     /* --- Per-IP rate limiting --- */
     case DIR_RATE_LIMIT:
         if (strbuf_append(sb, "RateLimit ") != 0) return -1;

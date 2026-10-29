@@ -876,6 +876,36 @@ static htaccess_directive_t *parse_rate_limit(const char *args, int line)
 }
 
 /**
+ * Parse: SecRuleEngine On|Off|DetectionOnly
+ * Value is stored verbatim (lowercased) for the bridge executor; the
+ * mode string is validated here so bad configs die at parse time.
+ */
+static htaccess_directive_t *parse_sec_rule_engine(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    for (char *q = val; *q; q++)
+        *q = (char)tolower((unsigned char)*q);
+
+    if (strcmp(val, "on") != 0 && strcmp(val, "off") != 0 &&
+        strcmp(val, "detectiononly") != 0) {
+        free(val);
+        return NULL;
+    }
+
+    htaccess_directive_t *d = alloc_directive(DIR_SEC_RULE_ENGINE, line);
+    if (!d) {
+        free(val);
+        return NULL;
+    }
+    d->value = val;
+    return d;
+}
+
+/**
  * Parse: ExpiresActive On|Off
  */
 static htaccess_directive_t *parse_expires_active(const char *args, int line)
@@ -1634,6 +1664,11 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
     after = match_kw(p, "RateLimit");
     if (after)
         return parse_rate_limit(after, line_num);
+
+    /* SecRuleEngine */
+    after = match_kw(p, "SecRuleEngine");
+    if (after)
+        return parse_sec_rule_engine(after, line_num);
 
     /* ExpiresActive */
     after = match_kw(p, "ExpiresActive");

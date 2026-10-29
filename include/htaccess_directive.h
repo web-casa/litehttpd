@@ -148,6 +148,11 @@ typedef enum {
     DIR_CACHE_MAX_EXPIRE,              /* 86 */
     DIR_CACHE_DEFAULT_EXPIRE,          /* 87 */
     DIR_RATE_LIMIT,                    /* 88 */
+
+    /* === ModSecurity bridge (v3) === */
+    /** SecRuleEngine On|Off|DetectionOnly — value stores the mode string.
+     * Bridges to OLS modsecurity-ls via the per-request env contract. */
+    DIR_SEC_RULE_ENGINE,               /* 89 */
 } directive_type_t;
 
 /**
