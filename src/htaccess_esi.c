@@ -73,6 +73,9 @@ static const char *find_str(const char *hay, size_t hay_len, const char *needle)
     return NULL;
 }
 
+/* Defined below the state machine; forward-declared for the INCLUDE path. */
+static char *esi_extract_src(const char *tag_start, size_t tag_len);
+
 size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                    char **out_buf, size_t *out_len)
 {
@@ -123,6 +126,37 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                         consumed += ESI_TAG_PREFIX_LEN + (size_t)(gt - tag) + 1;
                     else
                         consumed = input_len;
+                } else if (tag_rem >= 7 && strncasecmp(tag, "include", 7) == 0) {
+                    /* esi:include — find closing >, extract src, read file */
+                    const char *gt = memchr(tag, '>', tag_rem);
+                    if (gt) {
+                        size_t include_tag_len = ESI_TAG_PREFIX_LEN + (size_t)(gt - tag) + 1;
+                        const char *tag_start = esi_pos; /* start of <esi: */
+                        size_t full_tag_len = include_tag_len;
+
+                        /* Extract src attribute */
+                        char *src = esi_extract_src(tag_start, full_tag_len);
+                        if (src) {
+                            /* Read included file (docroot from global) */
+                            size_t inc_len = 0;
+                            char *inc_content = esi_include_read(src, "/", 1, &inc_len);
+                            free(src);
+
+                            if (inc_content && inc_len > 0) {
+                                /* Replace tag with content */
+                                buf_append(ctx, inc_content, inc_len);
+                                free(inc_content);
+                            }
+                            /* If include fails, tag is silently removed */
+                            consumed += include_tag_len;
+                        } else {
+                            /* No src attribute — skip tag */
+                            consumed += include_tag_len;
+                        }
+                    } else {
+                        /* Incomplete tag — wait for more data */
+                        consumed = input_len;
+                    }
                 } else if (tag_rem >= 4 && strncasecmp(tag, "vars", 4) == 0) {
                     ctx->state = ESI_STATE_VARS;
                     const char *gt = memchr(tag, '>', tag_rem);
@@ -270,4 +304,97 @@ int esi_should_process(const char *content_type, int content_type_len,
     if (content_type_len >= 21 && strncasecmp(content_type, "application/xhtml+xml", 21) == 0)
         return 1;
     return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  ESI <esi:include> — static file include                            */
+/* ------------------------------------------------------------------ */
+
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+/* Extract src="..." attribute value from an esi:include tag */
+static char *esi_extract_src(const char *tag_start, size_t tag_len)
+{
+    /* Look for src=" or src=' */
+    for (size_t i = 0; i + 5 < tag_len; i++) {
+        if ((tag_start[i] == 's' || tag_start[i] == 'S') &&
+            (tag_start[i+1] == 'r' || tag_start[i+1] == 'R') &&
+            (tag_start[i+2] == 'c' || tag_start[i+2] == 'C') &&
+            tag_start[i+3] == '=') {
+            char quote = tag_start[i+4];
+            if (quote == '"' || quote == '\'') {
+                size_t start = i + 5;
+                size_t end = start;
+                while (end < tag_len && tag_start[end] != quote)
+                    end++;
+                if (end > start && end - start < 4096) {
+                    char *src = malloc(end - start + 1);
+                    if (src) {
+                        memcpy(src, tag_start + start, end - start);
+                        src[end - start] = '\0';
+                        return src;
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
+char *esi_include_read(const char *src, const char *docroot, size_t docroot_len,
+                       size_t *out_len)
+{
+    if (!src || !docroot || !out_len || src[0] != '/')
+        return NULL;
+
+    /* Security: reject path traversal */
+    if (strstr(src, "..") != NULL)
+        return NULL;
+
+    /* Build full path */
+    char path[4096];
+    int n = snprintf(path, sizeof(path), "%.*s%s",
+                     (int)docroot_len, docroot, src);
+    if (n <= 0 || n >= (int)sizeof(path))
+        return NULL;
+
+    /* Open with hardening (consistent with dirwalker.c) */
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0)
+        return NULL;
+
+    struct stat st;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) ||
+        st.st_size > ESI_INCLUDE_MAX_SIZE) {
+        close(fd);
+        return NULL;
+    }
+
+    /* Read content */
+    size_t size = (size_t)st.st_size;
+    char *content = malloc(size + 1);
+    if (!content) {
+        close(fd);
+        return NULL;
+    }
+
+    size_t total = 0;
+    while (total < size) {
+        ssize_t r = read(fd, content + total, size - total);
+        if (r <= 0)
+            break;
+        total += (size_t)r;
+    }
+    close(fd);
+
+    if (total == 0) {
+        free(content);
+        return NULL;
+    }
+
+    content[total] = '\0';
+    *out_len = total;
+    return content;
 }

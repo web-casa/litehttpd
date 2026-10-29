@@ -129,3 +129,30 @@ TEST(EsiGateTest, OtherBypassed) {
     EXPECT_EQ(esi_should_process("image/png", 9, NULL, 0), 0);
     EXPECT_EQ(esi_should_process(NULL, 0, NULL, 0), 0);
 }
+
+/* ---- ESI include tests ---- */
+TEST(EsiIncludeTest, ExtractSrc) {
+    /* Just test the extraction helper indirectly */
+    esi_ctx_t ctx;
+    esi_ctx_init(&ctx);
+    char *out;
+    size_t out_len;
+    /* Create a mock esi:include — no actual file to read, just verify no crash */
+    esi_process(&ctx, "<esi:include src=\"/nonexistent.html\"/>rest", 42, &out, &out_len);
+    /* Tag should be silently removed (file doesn't exist) */
+    EXPECT_NE(strstr(out, "rest"), nullptr);
+    EXPECT_EQ(strstr(out, "esi:include"), nullptr);
+    esi_ctx_free(&ctx);
+}
+
+TEST(EsiIncludeTest, MissingSrcAttr) {
+    esi_ctx_t ctx;
+    esi_ctx_init(&ctx);
+    char *out;
+    size_t out_len;
+    esi_process(&ctx, "A<esi:include/>B", 16, &out, &out_len);
+    /* Tag with no src should be removed */
+    EXPECT_NE(strstr(out, "A"), nullptr);
+    EXPECT_NE(strstr(out, "B"), nullptr);
+    esi_ctx_free(&ctx);
+}

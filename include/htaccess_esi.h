@@ -82,3 +82,13 @@ void esi_substitute_vars(const char *input, size_t input_len,
  */
 int esi_should_process(const char *content_type, int content_type_len,
                        const char *content_encoding, int content_encoding_len);
+
+/* ESI include configuration */
+#define ESI_INCLUDE_MAX_SIZE   (64 * 1024)  /* 64KB max per include */
+#define ESI_INCLUDE_MAX_DEPTH  3             /* max nesting depth */
+
+/* Resolve an ESI include src to a filesystem path and read it.
+ * Returns: malloc'd content (caller frees), or NULL on failure.
+ * out_len receives content length. */
+char *esi_include_read(const char *src, const char *docroot, size_t docroot_len,
+                       size_t *out_len);
