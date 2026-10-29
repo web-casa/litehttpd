@@ -140,6 +140,13 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
     size_t consumed = 0;
     /* Use ctx->buf as output accumulation too (simpler than separate buffer) */
     size_t out_start = 0; /* offset in ctx->buf where output starts */
+    /* Pending output parked by the caller (backpressure) must be drained
+     * before this call reuses the buffer — refuse rather than clobber. */
+    if (ctx->pend_len > 0) {
+        *out_buf = ctx->buf;
+        *out_len = ctx->pend_len;
+        return 0; /* caller: drain first, then re-invoke */
+    }
     ctx->buf_len = 0; /* clear for this chunk's output */
 
     while (consumed < data_len) {

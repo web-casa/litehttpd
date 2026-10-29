@@ -32,6 +32,9 @@ typedef struct {
     /* Chunk-boundary hold-back for split tags (see ESI docs). */
     size_t       hold_len;
     char         hold[8192];
+    /* Downstream backpressure: unwritten output parked at buf[0..pend_len].
+     * Kept separate from buf_len, which esi_process clears per call. */
+    size_t       pend_len;
 } esi_ctx_t;
 
 /* Initialize/reset context. Call once per response.

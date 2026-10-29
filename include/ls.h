@@ -210,6 +210,16 @@ struct lsi_serverhook_s {
 #define LSI_HOOK_END    {0, NULL, 0, 0}
 #define LSI_FLAG_ENABLED 8
 
+/* Stream-filter callback flags (LSI_CBFI_* on param->flag_in,
+ * LSI_CBFO_* on *param->flag_out) — values from OLS ls.h. A body filter
+ * must itself stream_write_next() everything it wants delivered; simply
+ * returning len1 does NOT forward the data. Returning 0 with
+ * LSI_CBFO_BUFFERED set means "I am holding data, re-invoke me". */
+#define LSI_CBFO_BUFFERED 1
+#define LSI_CBFI_FLUSH    1
+#define LSI_CBFI_EOF      2
+#define LSI_CBFI_STATIC   4
+
 /* Hook priorities at a shared hookpoint: lower value runs first
  * (LSI_HOOK_PRIORITY semantics in OLS's ls.h). The modsecurity-ls
  * module registers its URI_MAP hook at LSI_HOOK_NORMAL (10), so any
