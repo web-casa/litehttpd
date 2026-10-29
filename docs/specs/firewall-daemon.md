@@ -26,10 +26,19 @@
 - Saved on every mutation + every 30s
 - Restored on startup; blocks re-applied
 
+## Escalation trigger (module side)
+- The daemon is notified ONCE per attacker per detection window — on the
+  request that first crosses the threshold (`attempt_count ==
+  allowed_attempts`). Later blocked requests still get the application
+  403 but skip the UDS round-trip. Window reset re-arms escalation.
+- TTL passed to the daemon equals the detection window.
+
 ## Degradation (module side)
 When daemon is unavailable:
 - Module continues with per-worker SHM blocklist only (P4 infrastructure)
-- Reconnect attempt every 30s
+- Every escalation attempt is a fresh connection (bounded 100ms
+  connect/send/receive), so a wedged or absent daemon never delays a
+  request and never leaves stale fds
 - No HTTP request is ever delayed by daemon unavailability
 
 ## Security

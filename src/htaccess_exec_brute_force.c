@@ -286,14 +286,18 @@ int exec_brute_force(lsi_session_t *session,
                 shm_update_record(bf_key, &new_rec);
 
                 if (action == BF_ACTION_BLOCK) {
-                    /* Escalate to the kernel-level firewall daemon when it is
-                     * running. TTL mirrors the detection window so the rule
-                     * lapses with the application-level record; a repeat
-                     * offender that keeps probing re-triggers escalation.
-                     * Failure here is non-fatal and silent-by-design: the
-                     * application-level 403 below still applies, so sites
-                     * without the daemon see no behaviour change. */
-                    if (fw_client_block(effective_ip, window_sec) == 0)
+                    /* Escalate to the kernel-level firewall daemon on the
+                     * FIRST request that crosses the threshold — exactly one
+                     * UDS send per attacker per window (codex review: the
+                     * per-request send also fired for every later blocked
+                     * request). Later blocked requests still get the 403 but
+                     * skip the daemon round-trip; if the kernel rule somehow
+                     * lapses early, the window reset re-arms escalation.
+                     * TTL mirrors the detection window. Failure is silent:
+                     * the 403 below still applies, so sites without the
+                     * daemon see no behaviour change. */
+                    if (cur_count == allowed_attempts &&
+                        fw_client_block(effective_ip, window_sec) == 0)
                         lsi_log(session, LSI_LOG_INFO,
                                 "[htaccess] brute force: %s escalated to "
                                 "firewall daemon (ttl %ds)",
