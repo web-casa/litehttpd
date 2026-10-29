@@ -1834,10 +1834,16 @@ static int on_uri_map(lsi_session_t *session)
         }
     }
 
-    /* (f) Brute force protection — check-only (no counting).
-     * Counting only happens on auth failure (see a5 above). */
+    /* (f) Brute force protection.
+     * count=1: a POST counts as one attempt — form-login protection for
+     * apps (WordPress et al.) with no HTTP-level auth to fail; GETs are
+     * never counted (double-gated inside: count_attempt && is_post) and
+     * still get block-checked. HTTP-auth failures counted themselves at
+     * (a5) and returned before this point, so nothing is double-charged.
+     * Found in container e2e: without this call the POST-counting path
+     * had no caller outside the auth-fail branch and never blocked. */
     if (client_ip && ip_len > 0) {
-        int rc = exec_brute_force(session, directives, client_ip, 0);
+        int rc = exec_brute_force(session, directives, client_ip, 1);
         if (rc == LSI_ERROR) {
             lsi_log(session, LSI_LOG_DEBUG,
                     "mod_htaccess: request blocked by brute force protection");
