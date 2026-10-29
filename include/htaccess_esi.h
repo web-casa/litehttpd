@@ -29,6 +29,9 @@ typedef struct {
      * src into an absolute filesystem path, i.e. arbitrary file read. */
     const char  *docroot;
     size_t       docroot_len;
+    /* Chunk-boundary hold-back for split tags (see ESI docs). */
+    size_t       hold_len;
+    char         hold[8192];
 } esi_ctx_t;
 
 /* Initialize/reset context. Call once per response.
@@ -56,6 +59,7 @@ void esi_finish(esi_ctx_t *ctx, char **out_buf, size_t *out_len);
  * Returns 1 if "<esi:" found in first scan_len bytes.
  */
 int esi_content_has_tags(const char *content, size_t len);
+
 
 #ifdef __cplusplus
 }

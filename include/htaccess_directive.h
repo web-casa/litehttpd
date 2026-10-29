@@ -153,6 +153,11 @@ typedef enum {
     /** SecRuleEngine On|Off|DetectionOnly — value stores the mode string.
      * Bridges to OLS modsecurity-ls via the per-request env contract. */
     DIR_SEC_RULE_ENGINE,               /* 89 */
+
+    /** EsiEnable On|Off — per-directory opt-in for response-body ESI
+     * processing. Default Off: body filtering never runs unless the
+     * directory asked for it. */
+    DIR_ESI_ENABLE,                    /* 90 */
 } directive_type_t;
 
 /**

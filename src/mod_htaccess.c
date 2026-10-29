@@ -22,6 +22,7 @@
 #include "htaccess_exec_brute_force.h"
 #include "htaccess_exec_ratelimit.h"
 #include "htaccess_exec_modsec.h"
+#include "htaccess_esi.h"
 #include "htaccess_exec_cache.h"
 #include "htaccess_exec_header.h"
 #include "htaccess_exec_expires.h"
@@ -151,12 +152,127 @@ static int on_main_atexit_hook(lsi_param_t *param)
 }
 
 
-static int on_resp_body_esi_hook(lsi_param_t *param)
+/* ------------------------------------------------------------------ */
+/*  ESI stream filter (RECV_RESP_BODY per chunk + RCVD_RESP_BODY flush) */
+/* ------------------------------------------------------------------ */
+
+/* Thread-local per-request ESI state, mirroring req_cache: OLS workers
+ * are single-threaded event loops, so the body chunks of one request and
+ * its RCVD_RESP_BODY flush run in this thread sequentially. The seq guard
+ * recycles safely when a request aborts without a RCVD callback. */
+static __thread struct {
+    const lsi_session_t *session;
+    uint64_t seq;
+    esi_ctx_t *ctx; /* heap ESI context when the filter engaged */
+    int bypass;     /* 1 = gate failed, chunks pass through untouched */
+} esi_req = {NULL, 0, NULL, 0};
+
+static void esi_req_reset(void)
 {
-    /* ESI v1: only process if Content-Type is text/html and contains <esi: tags */
-    /* Full integration requires the ESI context in module data */
-    /* For now: passthrough (v1 limitation) */
-    (void)param;
+    if (esi_req.ctx) {
+        esi_ctx_free(esi_req.ctx);
+        free(esi_req.ctx);
+        esi_req.ctx = NULL;
+    }
+    esi_req.session = NULL;
+    esi_req.seq = 0;
+    esi_req.bypass = 0;
+}
+
+/* One-time gate per request: the directory opted in via EsiEnable AND the
+ * response is untransformed text/html (esi_should_process also rejects
+ * compressed bodies). Reading the response Content-Type here mirrors the
+ * SEND_RESP_HEADER pattern. */
+static int esi_gate_check(lsi_session_t *session)
+{
+    /* EsiEnable scan lives here (not in the ESI text processor) so the
+     * directive is interpreted by its owning executor. Last directive
+     * in the merged list wins — deepest directory override. */
+    const htaccess_directive_t *dirs = req_cache_get(session);
+    if (!dirs)
+        return 0;
+    int esi_on = 0;
+    for (const htaccess_directive_t *d = dirs; d; d = d->next) {
+        if (d->type == DIR_ESI_ENABLE && d->value)
+            esi_on = (strcmp(d->value, "on") == 0);
+    }
+    if (!esi_on)
+        return 0;
+
+    int ct_len = 0;
+    const char *ct = NULL;
+    static __thread char ct_buf[256];
+    if (g_api && g_api->get_resp_header) {
+        struct iovec iov[1];
+        int n = g_api->get_resp_header((const lsi_session_t *)session,
+                                       LSI_RSPHDR_CONTENT_TYPE, NULL, 0, iov, 1);
+        if (n > 0 && iov[0].iov_len > 0) {
+            ct_len = (int)iov[0].iov_len;
+            if (ct_len >= (int)sizeof(ct_buf))
+                ct_len = (int)sizeof(ct_buf) - 1;
+            memcpy(ct_buf, iov[0].iov_base, ct_len);
+            ct_buf[ct_len] = '\0';
+            ct = ct_buf;
+        }
+    }
+    if (!ct)
+        ct = lsi_session_get_resp_content_type(session, &ct_len);
+
+    int ce_len = 0;
+    const char *ce = lsi_session_get_resp_header_by_name(
+        session, "Content-Encoding", 16, &ce_len);
+
+    return esi_should_process(ct, ct_len, ce, ce_len);
+}
+
+static int on_recv_resp_body_esi_hook(lsi_param_t *param)
+{
+    lsi_session_t *session = (lsi_session_t *)param->session;
+
+    /* New request? Evaluate the gate once, then engage or bypass. */
+    if (esi_req.session != session || esi_req.seq != req_seq_counter) {
+        esi_req_reset();
+        esi_req.session = session;
+        esi_req.seq = req_seq_counter;
+        if (esi_gate_check(session)) {
+            int dr_len = 0;
+            const char *dr = lsi_session_get_doc_root(session, &dr_len);
+            esi_req.ctx = malloc(sizeof(esi_ctx_t));
+            if (esi_req.ctx) {
+                esi_ctx_init(esi_req.ctx, dr, (size_t)(dr_len > 0 ? dr_len : 0));
+                esi_req.bypass = 0;
+            } else {
+                esi_req.bypass = 1; /* OOM: pass through unchanged */
+            }
+        } else {
+            esi_req.bypass = 1;
+        }
+    }
+
+    if (esi_req.bypass || !esi_req.ctx)
+        return param->len1; /* consume unchanged */
+
+    char *out = NULL;
+    size_t out_len = 0;
+    esi_process(esi_req.ctx, (const char *)param->ptr1, (size_t)param->len1,
+                &out, &out_len);
+    if (out_len > 0 && g_api && g_api->stream_write_next)
+        g_api->stream_write_next(param, out, (int)out_len);
+    return param->len1;
+}
+
+static int on_rcvd_resp_body_esi_hook(lsi_param_t *param)
+{
+    if (!esi_req.bypass && esi_req.ctx &&
+        esi_req.session == param->session &&
+        esi_req.seq == req_seq_counter) {
+        char *out = NULL;
+        size_t out_len = 0;
+        esi_finish(esi_req.ctx, &out, &out_len);
+        if (out_len > 0 && g_api && g_api->stream_write_next)
+            g_api->stream_write_next(param, out, (int)out_len);
+    }
+    esi_req_reset();
     return LSI_OK;
 }
 
@@ -171,8 +287,10 @@ static lsi_serverhook_t server_hooks[] = {
     /* SEND_RESP_HEADER: response headers, expires, AddType/ForceType */
     {LSI_HKPT_SEND_RESP_HEADER, on_send_resp_header_hook, MOD_HTACCESS_HOOK_PRIORITY,
      LSI_FLAG_ENABLED},
-    /* ESI: response body processing */
-    {LSI_HKPT_RCVD_RESP_BODY, on_resp_body_esi_hook, MOD_HTACCESS_HOOK_PRIORITY,
+    /* ESI: response body stream filter — per-chunk transform + final flush */
+    {LSI_HKPT_RECV_RESP_BODY, on_recv_resp_body_esi_hook, MOD_HTACCESS_HOOK_PRIORITY,
+     LSI_FLAG_ENABLED},
+    {LSI_HKPT_RCVD_RESP_BODY, on_rcvd_resp_body_esi_hook, MOD_HTACCESS_HOOK_PRIORITY,
      LSI_FLAG_ENABLED},
     /* MAIN_ATEXIT: cleanup cache and SHM */
     {LSI_HKPT_MAIN_ATEXIT, on_main_atexit_hook, MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED},

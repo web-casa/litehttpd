@@ -48,3 +48,26 @@ In `esi_process()`, when state machine detects `<esi:include`:
 - W3C ESI Language Specification 1.0 §2.1
 - LSWS EsiParserSM (reverse engineering, behavioral reference)
 - Apache mod_include (SSI syntax similarity)
+
+
+## v1.1 hardening (post codex-review)
+- `src` resolves against the **session document root** carried in
+  `esi_ctx_t` (was a hardcoded `/` — arbitrary file read, found by codex
+  probe and self-review). Missing docroot refuses includes (fail closed).
+- realpath containment: the resolved path must stay under the resolved
+  docroot, closing intermediate-symlink escapes (e.g. an
+  attacker-writable `uploads/` symlinked at `/etc`). `O_NOFOLLOW` pins
+  the final component.
+- Chunk-boundary reassembly: any tag not terminated by `>` in the
+  current chunk is held (≤8KB) and re-presented next chunk; a partial
+  `<esi:` prefix tail is likewise held. Oversized partials fail open
+  (emitted literally). Stream end flushes held bytes literally.
+
+## Wiring (v1.1)
+- `EsiEnable On|Off` in .htaccess (default Off) gates the whole body
+  filter; Content-Type must be text/html (+xhtml) and the body
+  uncompressed (`esi_should_process`).
+- `LSI_HKPT_RECV_RESP_BODY` runs the state machine per chunk and writes
+  transformed output via `stream_write_next`; `LSI_HKPT_RCVD_RESP_BODY`
+  flushes leftovers. Per-request state is a thread-local keyed on the
+  session pointer + request sequence (same pattern as `req_cache`).

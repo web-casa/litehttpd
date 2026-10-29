@@ -687,6 +687,14 @@ static int print_directive(strbuf_t *sb, const htaccess_directive_t *d)
         }
         break;
 
+    /* --- ESI body processing opt-in --- */
+    case DIR_ESI_ENABLE:
+        if (strbuf_append(sb, "EsiEnable ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
     /* --- ModSecurity bridge --- */
     case DIR_SEC_RULE_ENGINE:
         if (strbuf_append(sb, "SecRuleEngine ") != 0) return -1;

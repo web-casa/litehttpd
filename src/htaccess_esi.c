@@ -82,11 +82,58 @@ static const char *find_str(const char *hay, size_t hay_len, const char *needle)
 /* Defined below the state machine; forward-declared for the INCLUDE path. */
 static char *esi_extract_src(const char *tag_start, size_t tag_len);
 
+/* Chunk-boundary hold-back: a tag split across body chunks must never leak
+ * to the client as literal text. The context retains a possible partial
+ * tag (<esi: prefix or an unterminated include) and re-presents it
+ * prepended to the next chunk. Longer partials fail open: emitted
+ * literally so a hostile page cannot make us buffer without bound. */
+#define ESI_HOLD_MAX 8192
+
+/* Longest k (1..4) such that the last k bytes of data are a proper prefix
+ * of "<esi:". 0 = no partial tag at the end. */
+static size_t partial_tag_tail(const char *data, size_t len)
+{
+    static const char pfx[] = "<esi:";
+    size_t max_k = (len < 4) ? len : 4;
+    for (size_t k = max_k; k >= 1; k--) {
+        if (memcmp(data + len - k, pfx, k) == 0)
+            return k;
+    }
+    return 0;
+}
+
+static void hold_bytes(esi_ctx_t *ctx, const char *data, size_t len)
+{
+    if (len > ESI_HOLD_MAX)
+        len = ESI_HOLD_MAX; /* caller checks; defensive */
+    memcpy(ctx->hold, data, len);
+    ctx->hold_len = len;
+}
+
 size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                    char **out_buf, size_t *out_len)
 {
     if (!ctx || !input || !out_buf || !out_len)
         return 0;
+
+    /* Prepend any held-back partial tag from the previous chunk so tags
+     * split across body chunks are seen whole. */
+    size_t prev_hold = ctx->hold_len;
+    char *work = NULL;
+    if (prev_hold > 0) {
+        work = malloc(prev_hold + input_len);
+        if (!work) {
+            /* OOM: drop the held bytes, process this chunk alone */
+            ctx->hold_len = 0;
+            prev_hold = 0;
+        } else {
+            memcpy(work, ctx->hold, prev_hold);
+            memcpy(work + prev_hold, input, input_len);
+            ctx->hold_len = 0;
+        }
+    }
+    const char *data = work ? work : input;
+    size_t data_len = work ? prev_hold + input_len : input_len;
 
     *out_len = 0;
     *out_buf = NULL;
@@ -95,20 +142,50 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
     size_t out_start = 0; /* offset in ctx->buf where output starts */
     ctx->buf_len = 0; /* clear for this chunk's output */
 
-    while (consumed < input_len) {
-        const char *chunk = input + consumed;
-        size_t remaining = input_len - consumed;
+    while (consumed < data_len) {
+        const char *chunk = data + consumed;
+        size_t remaining = data_len - consumed;
 
         switch (ctx->state) {
         case ESI_STATE_PASSTHROUGH: {
             const char *esi_pos = find_str(chunk, remaining, ESI_TAG_PREFIX);
             if (!esi_pos) {
-                /* No ESI tag in this chunk — pass through everything */
-                if (buf_append(ctx, chunk, remaining) != 0)
-                    fprintf(stderr, "[esi] WARN: buffer limit hit (%zu bytes), truncating\n", ctx->buf_cap);
-                consumed = input_len;
+                /* No complete tag prefix — check for a partial "<esi:"
+                 * tail split at the chunk boundary and hold it back. */
+                size_t k = partial_tag_tail(chunk, remaining);
+                if (k > 0) {
+                    /* Emit everything before the partial tail and retain
+                     * the tail in ctx. Consumed is FULL: retained bytes are
+                     * held internally, the caller must not re-send them. */
+                    if (k < remaining &&
+                        buf_append(ctx, chunk, remaining - k) != 0)
+                        fprintf(stderr, "[esi] WARN: buffer limit hit, truncating\n");
+                    hold_bytes(ctx, chunk + remaining - k, k);
+                } else {
+                    if (buf_append(ctx, chunk, remaining) != 0)
+                        fprintf(stderr, "[esi] WARN: buffer limit hit (%zu bytes), truncating\n", ctx->buf_cap);
+                }
+                consumed = data_len;
             } else {
                 size_t before = (size_t)(esi_pos - chunk);
+                /* Any ESI tag must be terminated by '>'. If none follows the
+                 * prefix in this chunk, the tag is split across chunks: hold
+                 * from the prefix start (bounded; fail open past the cap).
+                 * This precedes tag-name checks so a partial name like
+                 * "<esi:inc" cannot fall into the literal unknown-tag path. */
+                const char *gt = memchr(esi_pos, '>', remaining - before);
+                if (!gt) {
+                    size_t tail = remaining - before;
+                    if (before > 0 && buf_append(ctx, chunk, before) != 0)
+                        fprintf(stderr, "[esi] WARN: buffer limit hit, partial output\n");
+                    if (tail <= ESI_HOLD_MAX) {
+                        hold_bytes(ctx, esi_pos, tail);
+                    } else {
+                        buf_append(ctx, esi_pos, tail);
+                    }
+                    consumed = data_len;
+                    break;
+                }
                 if (before > 0 && buf_append(ctx, chunk, before) != 0)
                     fprintf(stderr, "[esi] WARN: buffer limit hit, partial output\n");
                 consumed += before;
@@ -123,7 +200,7 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                     if (gt)
                         consumed += ESI_TAG_PREFIX_LEN + (size_t)(gt - tag) + 1;
                     else
-                        consumed = input_len;
+                        consumed = data_len; /* strip continues next chunk */
                 } else if (tag_rem >= 7 && strncasecmp(tag, "comment", 7) == 0) {
                     ctx->state = ESI_STATE_STRIP;
                     ctx->strip_depth = 1;
@@ -131,7 +208,7 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                     if (gt)
                         consumed += ESI_TAG_PREFIX_LEN + (size_t)(gt - tag) + 1;
                     else
-                        consumed = input_len;
+                        consumed = data_len; /* strip continues next chunk */
                 } else if (tag_rem >= 7 && strncasecmp(tag, "include", 7) == 0) {
                     /* esi:include — find closing >, extract src, read file */
                     const char *gt = memchr(tag, '>', tag_rem);
@@ -162,8 +239,9 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                             consumed += include_tag_len;
                         }
                     } else {
-                        /* Incomplete tag — wait for more data */
-                        consumed = input_len;
+                        /* Unreachable: the universal incomplete-tag hold
+                         * above guarantees a '>' exists in-tag. */
+                        consumed = data_len;
                     }
                 } else if (tag_rem >= 4 && strncasecmp(tag, "vars", 4) == 0) {
                     ctx->state = ESI_STATE_VARS;
@@ -171,7 +249,7 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                     if (gt)
                         consumed += ESI_TAG_PREFIX_LEN + (size_t)(gt - tag) + 1;
                     else
-                        consumed = input_len;
+                        consumed = data_len; /* vars continue next chunk */
                 } else {
                     /* Unknown or include tag — passthrough in v1 */
                     buf_append(ctx, ESI_TAG_PREFIX, ESI_TAG_PREFIX_LEN);
@@ -192,7 +270,7 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                 consumed += (size_t)(close - chunk) + clen;
                 ctx->state = ESI_STATE_PASSTHROUGH;
             } else {
-                consumed = input_len;
+                consumed = data_len; /* strip to next chunk */
             }
             break;
         }
@@ -202,7 +280,7 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
             if (!close) {
                 /* Accumulate for variable substitution later */
                 buf_append(ctx, chunk, remaining);
-                consumed = input_len;
+                consumed = data_len;
             } else {
                 size_t before = (size_t)(close - chunk);
                 buf_append(ctx, chunk, before);
@@ -214,7 +292,7 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
         default:
             /* Shouldn't happen */
             buf_append(ctx, chunk, remaining);
-            consumed = input_len;
+            consumed = data_len;
             break;
         }
     }
@@ -222,6 +300,19 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
     (void)out_start;
     *out_buf = ctx->buf;
     *out_len = ctx->buf_len;
+    /* Hand-over clears the accumulator: the caller writes these bytes once,
+     * and a later esi_finish must not re-deliver them. */
+    ctx->buf_len = 0;
+    if (work)
+        free(work);
+    /* Translate consumption over the combined buffer back to the caller's
+     * chunk: the first prev_hold bytes were not part of this call. */
+    if (consumed > prev_hold)
+        consumed -= prev_hold;
+    else
+        consumed = 0;
+    if (consumed > input_len)
+        consumed = input_len;
     return consumed;
 }
 
@@ -229,9 +320,16 @@ void esi_finish(esi_ctx_t *ctx, char **out_buf, size_t *out_len)
 {
     if (!ctx || !out_buf || !out_len)
         return;
-    /* Any remaining buffer is the output */
+    /* A partial tag held at stream end never completed: emit it literally
+     * (fail open — the client sees the markup rather than losing bytes). */
+    if (ctx->hold_len > 0) {
+        buf_append(ctx, ctx->hold, ctx->hold_len);
+        ctx->hold_len = 0;
+    }
     *out_buf = ctx->buf;
     *out_len = ctx->buf_len;
+    /* Hand-over clears the accumulator so the same bytes can never be
+     * emitted twice (each esi_process call resets it too). */
     ctx->buf_len = 0;
 }
 

@@ -243,3 +243,80 @@ TEST_F(EsiTest, Process_IncludeWithoutDocrootSilentlyDropsTag)
     EXPECT_EQ(out_len, 2U);
     EXPECT_EQ(memcmp(out, "AB", 2), 0);
 }
+
+
+/* ==================================================================
+ *  Chunk-boundary reassembly (split-tag holdback)
+ * ================================================================== */
+
+static std::string process_all(esi_ctx_t &c, const char *in, size_t len,
+                               char **out, size_t *out_len)
+{
+    std::string acc;
+    size_t off = 0;
+    while (off < len) {
+        size_t got = esi_process(&c, in + off, len - off, out, out_len);
+        if (out && *out && *out_len)
+            acc.append(*out, *out_len);
+        if (got == 0)
+            break;
+        off += got;
+    }
+    return acc;
+}
+
+TEST_F(EsiTest, SplitIncludeTagReassemblesAcrossChunks)
+{
+    /* codex-probe regression: "<esi:inc" + "lude src=.../>" used to pass
+     * through literally and never resolve the include. */
+    const char *docroot = "/tmp";
+    FILE *f = fopen("/tmp/esi-split-frag.txt", "w");
+    ASSERT_NE(f, nullptr);
+    fputs("SPLITFRAG", f);
+    fclose(f);
+    esi_ctx_init(&ctx, docroot, strlen(docroot));
+
+    const char part1[] = "A<esi:inc";
+    const char part2[] = "lude src=\"/esi-split-frag.txt\"/>B";
+
+    std::string acc;
+    char *out = nullptr; size_t out_len = 0;
+    acc += process_all(ctx, part1, strlen(part1), &out, &out_len);
+    acc += process_all(ctx, part2, strlen(part2), &out, &out_len);
+    esi_finish(&ctx, &out, &out_len);
+    if (out_len) acc.append(out, out_len);
+
+    unlink("/tmp/esi-split-frag.txt");
+    EXPECT_EQ(acc, "ASPLITFRAGB");
+}
+
+TEST_F(EsiTest, PartialPrefixTailHeldAcrossChunks)
+{
+    /* Chunk ends mid "<esi:" — the tail must be held, not emitted. */
+    esi_ctx_init(&ctx, NULL, 0);
+    const char part1[] = "hello<es";
+    const char part2[] = "i:comment>x</esi:comment>bye";
+
+    char *out = nullptr; size_t out_len = 0;
+    std::string acc;
+    acc += process_all(ctx, part1, strlen(part1), &out, &out_len);
+    EXPECT_EQ(acc, "hello"); /* nothing past 'hello' may leak yet */
+    acc += process_all(ctx, part2, strlen(part2), &out, &out_len);
+    esi_finish(&ctx, &out, &out_len);
+    if (out_len) acc.append(out, out_len);
+    EXPECT_EQ(acc, "hellobye"); /* comment stripped across the boundary */
+}
+
+TEST_F(EsiTest, StreamEndFlushesHeldPartialLiterally)
+{
+    esi_ctx_init(&ctx, NULL, 0);
+    const char part1[] = "done<esi";
+
+    char *out = nullptr; size_t out_len = 0;
+    std::string acc;
+    acc += process_all(ctx, part1, strlen(part1), &out, &out_len);
+    esi_finish(&ctx, &out, &out_len);
+    if (out_len) acc.append(out, out_len);
+    /* Never-completed tag: fail open, bytes preserved for the client. */
+    EXPECT_EQ(acc, "done<esi");
+}

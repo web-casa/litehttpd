@@ -200,6 +200,12 @@ inline rc::Gen<TaggedLine> taggedDirectiveLine()
                 return {"CacheDefaultExpire " + std::to_string(n),
                         DIR_CACHE_DEFAULT_EXPIRE};
             }),
+        /* EsiEnable On|Off */
+        rc::gen::map(
+            rc::gen::element("On", "Off"),
+            [](const std::string &v) -> TaggedLine {
+                return {"EsiEnable " + v, DIR_ESI_ENABLE};
+            }),
         /* SecRuleEngine On|Off|DetectionOnly */
         rc::gen::map(
             rc::gen::element("On", "Off", "DetectionOnly"),
