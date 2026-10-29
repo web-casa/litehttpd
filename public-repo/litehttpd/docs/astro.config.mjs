@@ -3,7 +3,7 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 
 export default defineConfig({
-  site: "https://litehttpd.com",
+  site: "https://docs.litehttpd.com",
   integrations: [
     starlight({
       title: "LiteHTTPD",
@@ -44,9 +44,12 @@ export default defineConfig({
           items: [
             { slug: "getting-started/introduction" },
             { slug: "getting-started/editions" },
+            { slug: "getting-started/support-matrix" },
             { slug: "getting-started/installation" },
             { slug: "getting-started/configuration" },
             { slug: "getting-started/quick-start" },
+            { slug: "getting-started/troubleshooting" },
+            { slug: "getting-started/faq" },
           ],
         },
         {
@@ -136,6 +139,7 @@ export default defineConfig({
             { slug: "directives/redirects" },
             { slug: "directives/caching" },
             { slug: "directives/content-type" },
+            { slug: "directives/handlers" },
             { slug: "directives/environment" },
             { slug: "directives/containers" },
             { slug: "directives/conditionals" },
@@ -152,6 +156,9 @@ export default defineConfig({
             { slug: "migration/apache-to-ols" },
             { slug: "migration/ols-to-litehttpd" },
             { slug: "migration/lsws-to-litehttpd" },
+            { slug: "migration/cyberpanel" },
+            { slug: "migration/aapanel" },
+            { slug: "migration/docker" },
             { slug: "migration/confconv" },
             { slug: "migration/wordpress" },
             { slug: "migration/known-differences" },

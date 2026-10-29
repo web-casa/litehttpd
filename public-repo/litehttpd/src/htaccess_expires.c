@@ -6,6 +6,8 @@
 #include "htaccess_expires.h"
 
 #include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -107,9 +109,10 @@ long parse_expires_duration(const char *duration_str)
     if ((*p == 'A' || *p == 'a' || *p == 'M' || *p == 'm') &&
         isdigit((unsigned char)p[1])) {
         char *ep;
+        errno = 0;
         long secs = strtol(p + 1, &ep, 10);
         if (ep > p + 1 && (*ep == '\0' || isspace((unsigned char)*ep)) &&
-            secs >= 0)
+            secs >= 0 && errno != ERANGE)
             return secs;
     }
 
@@ -145,8 +148,9 @@ long parse_expires_duration(const char *duration_str)
         if (!isdigit((unsigned char)*p))
             return -1;
 
+        errno = 0;
         n = strtol(p, &ep, 10);
-        if (ep == p || n < 0)
+        if (ep == p || n < 0 || errno == ERANGE)
             return -1;
 
         p = skip_ws(ep);
@@ -164,7 +168,15 @@ long parse_expires_duration(const char *duration_str)
         if (multiplier < 0)
             return -1;
 
-        total += n * multiplier;
+        /* Guard against signed-integer overflow (UB) on inputs like
+         * "plus 99999999999 years". Use division/subtraction checks so the
+         * guard is correct regardless of long's width. */
+        if (multiplier > 0 && n > LONG_MAX / multiplier)
+            return -1;
+        long term = n * multiplier;
+        if (term > LONG_MAX - total)
+            return -1;
+        total += term;
         found_pair = 1;
 
         p = skip_ws(p);

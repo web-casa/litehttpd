@@ -159,7 +159,7 @@ Require all denied
 | | Full 模式 | Thin 模式 |
 |-|-----------|-----------|
 | **OLS 二进制** | 打补丁版（4 个 patch） | 原版（未修改） |
-| **指令数** | 80（全部功能） | 70+（无 RewriteRule 执行、无 php_value） |
+| **指令数** | 83 个已解析类型 | 83 个已解析类型；不执行 RewriteRule，也不透传 php_value |
 | **安装** | `dnf install openlitespeed-litehttpd` | 复制 `.so` 文件 |
 
 ### 应该安装什么 PHP？

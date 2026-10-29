@@ -29,7 +29,7 @@ LiteHTTPD comes in two editions. Both are free and open source.
 | AddType/ForceType/AddCharset/AddDefaultCharset | Yes | Yes |
 | SetEnv/SetEnvIf/BrowserMatch | Yes | Yes |
 | DirectoryIndex | Yes | Yes |
-| LSBruteForceProtection | Yes | Yes |
+| BruteForceProtection | Yes | Yes |
 | Options -Indexes (module-level) | Yes | Yes |
 | **RewriteRule execution** | Parsed only | **Full execution** |
 | **php_value / php_flag** | Parsed only | **Passed to lsphp** |

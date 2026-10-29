@@ -91,7 +91,7 @@ int exec_cache_bridge(lsi_session_t *session,
     char cache_header[256];
     cache_bridge_build_header(&cfg, cache_header, sizeof(cache_header));
 
-    lsi_session_add_resp_header(session, "X-LiteSpeed-Cache-Control",
+    lsi_session_add_resp_header(session, "X-LiteSpeed-Cache-Control", 24,
                                 cache_header, (int)strlen(cache_header));
 
     lsi_log(session, LSI_LOG_DEBUG,

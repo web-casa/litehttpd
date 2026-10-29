@@ -165,16 +165,16 @@ This blocks direct access (returns 403). Without LiteHTTPD, stock OLS **does not
 
 ### Does LiteHTTPD protect against brute force attacks?
 
-**Yes.** 8 built-in directives for progressive throttling:
+**Yes.** 9 built-in directives for progressive throttling:
 
 ```apache
-LSBruteForceProtection On
-LSBruteForceAllowedAttempts 5
-LSBruteForceWindow 300
-LSBruteForceAction throttle
+BruteForceProtection On
+BruteForceAllowedAttempts 5
+BruteForceWindow 300
+BruteForceAction throttle
 ```
 
-Features include IP detection through proxies (`LSBruteForceXForwardedFor`), CIDR whitelist (`LSBruteForceWhitelist`), and custom path protection (`LSBruteForceProtectPath`).
+Features include IP detection through trusted proxies (`BruteForceXForwardedFor` + `BruteForceTrustedProxy`), CIDR whitelist (`BruteForceWhitelist`), and custom path protection (`BruteForceProtectPath`).
 
 ---
 
@@ -185,7 +185,7 @@ Features include IP detection through proxies (`LSBruteForceXForwardedFor`), CID
 | | Full Mode | Thin Mode |
 |-|-----------|-----------|
 | **OLS binary** | Patched (4 patches) | Stock (unmodified) |
-| **Directives** | 80 (all features) | 70+ (no RewriteRule exec, no php_value) |
+| **Directives** | 83 parsed types | 83 parsed types; no RewriteRule execution or php_value passthrough |
 | **Install** | `dnf install openlitespeed-litehttpd` | Copy `.so` file |
 | **Best for** | Production, full Apache migration | Quick evaluation, Docker |
 
@@ -202,3 +202,11 @@ LiteHTTPD doesn't bundle PHP. You can use:
 - **lsphp from LiteSpeed repo** — `dnf install lsphp83` (recommended for OLS)
 - **php-litespeed from Remi** — `dnf install php-litespeed` (if you prefer Remi packages)
 - **Any LSAPI-compatible PHP** — configure the `extProcessor` path in `httpd_config.conf`
+
+### How do I switch from CyberPanel / aaPanel / Docker to LiteHTTPD?
+
+See the Migration section for detailed instructions:
+- [From Stock OLS](/migration/ols-to-litehttpd/)
+- [From CyberPanel](/migration/cyberpanel/)
+- [From aaPanel](/migration/aapanel/)
+- [Docker Environments](/migration/docker/)

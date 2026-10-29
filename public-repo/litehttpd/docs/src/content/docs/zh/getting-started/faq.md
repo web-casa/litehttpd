@@ -159,7 +159,7 @@ Require all denied
 | | Full 模式 | Thin 模式 |
 |-|-----------|-----------|
 | **OLS 二进制** | 打补丁版（4 个 patch） | 原版（未修改） |
-| **指令数** | 80（全部功能） | 70+（无 RewriteRule 执行、无 php_value） |
+| **指令数** | 83 个已解析类型 | 83 个已解析类型；不执行 RewriteRule，也不透传 php_value |
 | **安装** | `dnf install openlitespeed-litehttpd` | 复制 `.so` 文件 |
 
 ### 应该安装什么 PHP？
@@ -169,3 +169,11 @@ LiteHTTPD 不捆绑 PHP，你可以选择：
 - **lsphp（LiteSpeed 仓库）** — `dnf install lsphp83`（推荐）
 - **php-litespeed（Remi 仓库）** — `dnf install php-litespeed`
 - **任何 LSAPI 兼容的 PHP** — 配置 `httpd_config.conf` 中的 `extProcessor` 路径
+
+### 如何从 CyberPanel / aaPanel / Docker 切换到 LiteHTTPD？
+
+详见迁移指南：
+- [从原版 OLS 迁移](/zh/migration/ols-to-litehttpd/)
+- [从 CyberPanel 迁移](/zh/migration/cyberpanel/)
+- [从 aaPanel 迁移](/zh/migration/aapanel/)
+- [Docker 环境](/zh/migration/docker/)

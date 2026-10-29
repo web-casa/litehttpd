@@ -18,6 +18,7 @@ OLS_DOCROOT="${OLS_DOCROOT:-/var/www/vhosts/localhost/html}"
 OLS_CONTAINER="${OLS_CONTAINER:-ols-e2e}"
 PASS_COUNT=0
 FAIL_COUNT=0
+CURRENT_TEST_FAILED=0
 
 # Internal: store last curl response for diagnostics on failure
 _LAST_RESPONSE_HEADERS=""
@@ -27,6 +28,27 @@ _LAST_STATUS_CODE=""
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+# wait_for_ols_ready — Wait until the target OLS listener returns HTTP.
+# Usage: wait_for_ols_ready [timeout_seconds]
+wait_for_ols_ready() {
+    local timeout="${1:-${OLS_READY_TIMEOUT:-60}}"
+    local url="${OLS_HOST%/}/"
+    local status=""
+
+    local attempt=1
+    while [ "$attempt" -le "$timeout" ]; do
+        status=$(curl -sS --max-time 2 -o /dev/null -w '%{http_code}' "$url" 2>/dev/null || true)
+        if [[ "$status" =~ ^[0-9]{3}$ ]] && [[ "$status" != "000" ]]; then
+            return 0
+        fi
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+
+    echo "ERROR: OLS did not become ready at ${url} within ${timeout}s." >&2
+    return 1
+}
 
 # Fetch a URL and cache the full response (headers + body + status code).
 # Usage: _fetch <method> <path> [extra_curl_args...]
@@ -57,6 +79,7 @@ _fetch() {
 _print_failure() {
     local assertion_name="$1"
     local detail="$2"
+    CURRENT_TEST_FAILED=1
     echo "  FAIL: ${assertion_name} — ${detail}"
     echo "  --- Actual HTTP Response ---"
     echo "  Status: ${_LAST_STATUS_CODE}"
@@ -242,6 +265,9 @@ deploy_htaccess() {
 
     docker cp "$tmp_file" "${OLS_CONTAINER}:${target_dir}/.htaccess"
     rm -f "$tmp_file"
+    docker exec "${OLS_CONTAINER}" chown nobody:nogroup "${target_dir}/.htaccess" \
+        2>/dev/null || true
+    docker exec "${OLS_CONTAINER}" chmod 0644 "${target_dir}/.htaccess"
 
     # Brief pause to let OLS pick up the new .htaccess
     sleep 0.3
@@ -271,10 +297,13 @@ cleanup_htaccess() {
 run_test() {
     local test_name="$1"
     local test_fn="$2"
+    local rc=0
 
     echo -n "TEST: ${test_name} ... "
+    CURRENT_TEST_FAILED=0
 
-    if $test_fn; then
+    "$test_fn" || rc=$?
+    if [ "$rc" -eq 0 ] && [ "$CURRENT_TEST_FAILED" -eq 0 ]; then
         echo "PASS"
         PASS_COUNT=$((PASS_COUNT + 1))
     else

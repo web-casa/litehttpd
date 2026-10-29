@@ -55,13 +55,7 @@ is_release_scope() {
         .clang-tidy | \
         .gitignore | \
         CMakeLists.txt | \
-        .github/workflows/ci.yml | \
-        .github/workflows/apps-matrix-heavy.yml | \
-        .github/workflows/apps-matrix-do-release-gate.yml | \
-        .github/workflows/apps-matrix-runtime-images.yml | \
-        .github/workflows/codeql.yml | \
-        .github/workflows/nightly.yml | \
-        .github/workflows/release.yml | \
+        .github/workflows/*.yml | \
         DIGITALOCEAN_LA_REALITY_TEST_2026-07-02.md | \
         NETCUP_ARM_RUNTIME_TEST_2026-07-02.md | \
         docs/rpm-build-lessons.md | \

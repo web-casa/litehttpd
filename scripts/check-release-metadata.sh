@@ -91,9 +91,9 @@ grep -Fq "Apache .htaccess compatibility module for OpenLiteSpeed (${directive_c
     fail "release note template does not mention ${directive_count} directive types"
 grep -Fq "litehttpd v__VERSION__" .github/workflows/release.yml || \
     fail "release note template missing version placeholder"
-grep -Fq "openlitespeed-litehttpd-*.el8.<arch>.rpm" .github/workflows/release.yml || \
+grep -Fq "openlitespeed-litehttpd-*.el8.x86_64.rpm" .github/workflows/release.yml || \
     fail "release note template missing RPM section"
-grep -Fq "litehttpd-module-*-<arch>-linux.tgz" .github/workflows/release.yml || \
+grep -Fq "litehttpd-module-*-x86_64-linux.tgz" .github/workflows/release.yml || \
     fail "release note template missing module tarball section"
 
 if [ -n "$MANIFEST_DIR" ]; then

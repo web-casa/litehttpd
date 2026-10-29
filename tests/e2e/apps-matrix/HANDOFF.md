@@ -21,7 +21,7 @@ also includes module compatibility fixes that were exposed by real CMS runs.
 - per-result JSON structure validation
 - CI-safe fixture smoke runner
 - real fixture installer framework with pinned versions in `config/versions.env`
-- full matrix runner and nightly job for Apache / OLS module / OLS native
+- full matrix runner for Apache / OLS module / OLS native
 - heavy app install flows for WordPress, Laravel, Drupal, Nextcloud, Joomla,
   and MediaWiki behind `MATRIX_REAL_RUN_APP_INSTALL=1`
 - probe hardening for real/overlay fixtures:
@@ -29,7 +29,8 @@ also includes module compatibility fixes that were exposed by real CMS runs.
   and probe manifests
 - fixture-builder image entrypoint in `Dockerfile.fixture`
 - CI caches for downloaded app archives and Composer packages
-- full nightly coverage across all 12 apps-matrix scenarios via Actions matrix
+- manual heavy workflow coverage across all 12 apps-matrix scenarios via Actions
+  matrix
 - app-specific deep config manifests and validation through
   `.apps-matrix/app_config.json`
 - installer cache hit/miss reporting in `real-install-cache.csv`
@@ -73,7 +74,7 @@ also includes module compatibility fixes that were exposed by real CMS runs.
 - runtime-image workflow builds Apache and patched OLS images in parallel and
   skips rebuilding already-published GHCR tags by default through
   `reuse_existing=1`
-- nightly apps-matrix jobs consume shared runtime images with
+- manual heavy and DO release-gate jobs consume shared runtime images with
   `MATRIX_COMPOSE_BUILD=0` and expose `runtime_images_reuse_existing` for
   deliberate manual tag refreshes
 - DO release-gate workflow in `.github/workflows/apps-matrix-do-release-gate.yml`

@@ -37,6 +37,8 @@
 
 /* Maximum regex pattern length */
 #define EXPR_MAX_REGEX_LEN 512
+/* Max length of untrusted subject text matched against a regex (ReDoS guard). */
+#define EXPR_MAX_SUBJECT_LEN 8192
 
 /* ================================================================== */
 /*  Variable expansion: %{VAR} -> value                                */
@@ -553,6 +555,15 @@ static expr_node_t *parse_primary(tokenizer_t *t)
     if (t->current.type == TOK_FUNC_TOLOWER || t->current.type == TOK_FUNC_TOUPPER) {
         expr_node_type_t ntype = (t->current.type == TOK_FUNC_TOLOWER) ?
                                   NODE_FUNC_TOLOWER : NODE_FUNC_TOUPPER;
+        /* Guard recursion depth: the function argument recurses into parse_or,
+         * so nested calls like tolower(tolower(...)) must be bounded to prevent
+         * stack-exhaustion DoS from a crafted .htaccess (the paren/not/and/or
+         * paths are guarded the same way). */
+        t->depth++;
+        if (t->depth > EXPR_MAX_DEPTH) {
+            t->error = 1;
+            return NULL;
+        }
         tok_next(t);
         if (t->current.type != TOK_LPAREN) {
             t->error = 1;
@@ -570,6 +581,7 @@ static expr_node_t *parse_primary(tokenizer_t *t)
             return NULL;
         }
         tok_next(t);
+        t->depth--;
         return node_unary(ntype, arg);
     }
 
@@ -813,6 +825,17 @@ static int eval_regex_match(const char *subject, const char *pattern, int negate
         return 0;
     if (strlen(pattern) > EXPR_MAX_REGEX_LEN)
         return 0;
+
+    /* Bound the subject length. `subject` is fully-untrusted request data
+     * (URI/headers) and POSIX regexec() can exhibit catastrophic (exponential)
+     * backtracking on certain patterns against a long input. Capping the
+     * subject keeps a single match bounded and prevents a CPU-exhaustion DoS.
+     * EXPR_MAX_SUBJECT_LEN is far longer than any legitimate header/URI a
+     * condition would meaningfully test. */
+    if (subject && strlen(subject) > EXPR_MAX_SUBJECT_LEN) {
+        /* Treat an over-long subject as a non-match (negate flips it). */
+        return negate ? 1 : 0;
+    }
 
     static __thread struct {
         unsigned long hash;

@@ -142,11 +142,11 @@ typedef enum {
     DIR_BRUTE_FORCE_TRUSTED_PROXY,     /* 82 — BruteForceTrustedProxy <cidr-list> */
 
     /* Real-app front-controller fallback */
-    DIR_FALLBACK_RESOURCE,             /* 83
+    DIR_FALLBACK_RESOURCE,             /* 83 — FallbackResource */
     DIR_CACHE_ENABLE,                  /* 84 */
     DIR_CACHE_DISABLE,                 /* 85 */
     DIR_CACHE_MAX_EXPIRE,              /* 86 */
-    DIR_CACHE_DEFAULT_EXPIRE,          /* 87 */ — FallbackResource /index.php|disabled */
+    DIR_CACHE_DEFAULT_EXPIRE,          /* 87 */
 } directive_type_t;
 
 /**

@@ -99,7 +99,7 @@ LiteHTTPD 是一个 LSIAPI 模块（`litehttpd_htaccess.so`），在请求生命
 | `htaccess_exec_handler.c` | AddHandler, SetHandler（空操作） |
 | `htaccess_exec_forcetype.c` | ForceType |
 | `htaccess_exec_encoding.c` | AddType, AddEncoding, AddCharset |
-| `htaccess_exec_brute_force.c` | LSBruteForce* |
+| `htaccess_exec_brute_force.c` | BruteForce* |
 
 ## 缓存策略
 

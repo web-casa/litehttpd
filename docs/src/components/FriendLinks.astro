@@ -1,0 +1,151 @@
+---
+import linksData from '../data/link.json';
+
+type LinkSite = {
+  id: string;
+  name: string;
+  domain: string;
+  url: string;
+  category: string;
+  status: string;
+  dr?: number | null;
+  logo_svg?: string | null;
+  description_i18n?: Record<string, string>;
+};
+
+type Props = {
+  locale?: 'en-US' | 'zh-CN';
+};
+
+const { locale = 'en-US' } = Astro.props as Props;
+const isZh = locale === 'zh-CN';
+
+const directorySites = (linksData.footer_navigation_sites as LinkSite[])
+  .filter((site) => site.status !== 'archived');
+const authoritySites = (linksData.authority_documentation_sites as LinkSite[])
+  .filter((site) => site.status !== 'archived');
+
+function description(site: LinkSite) {
+  return site.description_i18n?.[locale] ?? site.description_i18n?.['en-US'] ?? site.domain;
+}
+
+function sectionLabel(kind: 'directory' | 'authority') {
+  if (kind === 'directory') return isZh ? '导航站' : 'Navigation Directories';
+  return isZh ? '权威文档站与资源站' : 'Authoritative Documentation and Resource Sites';
+}
+---
+
+<div class="friend-links">
+  <section>
+    <div class="section-heading">
+      <h2>{sectionLabel('directory')}</h2>
+      <span>{directorySites.length}</span>
+    </div>
+    <div class="links-grid">
+      {directorySites.map((site) => (
+        <a href={site.url} target="_blank" rel="noopener" class="link-card">
+          <span class="card-title">
+            {site.logo_svg && <img src={site.logo_svg} alt="" loading="lazy" />}
+            <strong>{site.name}</strong>
+          </span>
+          <span class="domain">{site.domain}</span>
+          <span class="description">{description(site)}</span>
+          {site.dr != null && <span class="meta">DR {site.dr}</span>}
+        </a>
+      ))}
+    </div>
+  </section>
+
+  <section>
+    <div class="section-heading">
+      <h2>{sectionLabel('authority')}</h2>
+      <span>{authoritySites.length}</span>
+    </div>
+    <div class="links-grid">
+      {authoritySites.map((site) => (
+        <a href={site.url} target="_blank" rel="noopener" class="link-card">
+          <span class="card-title">
+            {site.logo_svg && <img src={site.logo_svg} alt="" loading="lazy" />}
+            <strong>{site.name}</strong>
+          </span>
+          <span class="domain">{site.domain}</span>
+          <span class="description">{description(site)}</span>
+          {site.dr != null && <span class="meta">DR {site.dr}</span>}
+        </a>
+      ))}
+    </div>
+  </section>
+</div>
+
+<style>
+  .friend-links {
+    display: grid;
+    gap: 2.25rem;
+    margin-top: 1.5rem;
+  }
+  .section-heading {
+    align-items: baseline;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    margin-bottom: 0.9rem;
+  }
+  .section-heading h2 {
+    margin: 0;
+  }
+  .section-heading span {
+    color: var(--sl-color-gray-3);
+    font-size: 0.85rem;
+  }
+  .links-grid {
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  }
+  .link-card {
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 8px;
+    color: var(--sl-color-white);
+    display: grid;
+    gap: 0.35rem;
+    min-height: 9.5rem;
+    padding: 0.9rem;
+    text-decoration: none;
+    transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  }
+  .link-card:hover {
+    background: var(--sl-color-gray-6);
+    border-color: var(--sl-color-accent-high);
+    transform: translateY(-1px);
+  }
+  .card-title {
+    align-items: center;
+    display: flex;
+    gap: 0.55rem;
+    min-width: 0;
+  }
+  .card-title img {
+    flex: 0 0 auto;
+    height: 1.45rem;
+    object-fit: contain;
+    width: 1.45rem;
+  }
+  .card-title strong {
+    overflow-wrap: anywhere;
+  }
+  .domain {
+    color: var(--sl-color-accent-high);
+    font-size: 0.8rem;
+    overflow-wrap: anywhere;
+  }
+  .description {
+    color: var(--sl-color-gray-2);
+    font-size: 0.86rem;
+    line-height: 1.45;
+  }
+  .meta {
+    align-self: end;
+    color: var(--sl-color-gray-3);
+    font-size: 0.74rem;
+  }
+</style>

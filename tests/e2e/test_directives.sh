@@ -14,6 +14,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/lib/assertions.sh"
 
+wait_for_ols_ready
+
 # =============================================================================
 # Task 3.1 — Header Directive Tests (Requirements: 4.1, 4.2, 4.3, 4.4, 9.1)
 # =============================================================================
