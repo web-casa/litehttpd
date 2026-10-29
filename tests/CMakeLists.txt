@@ -111,6 +111,14 @@ target_include_directories(test_modsec_bridge PRIVATE ../include)
 target_link_libraries(test_modsec_bridge gtest_main)
 gtest_discover_tests(test_modsec_bridge)
 
+add_executable(test_esi_stream_hook test_esi_stream_hook.cpp
+                                    ${MODULE_SOURCES} ${MOCK_SOURCES})
+target_compile_definitions(test_esi_stream_hook PRIVATE MNAME=litehttpd_htaccess HTACCESS_UNIT_TEST)
+target_include_directories(test_esi_stream_hook PRIVATE ../include)
+litehttpd_link_pcre2(test_esi_stream_hook)
+target_link_libraries(test_esi_stream_hook gtest_main pthread rt crypt)
+gtest_discover_tests(test_esi_stream_hook)
+
 add_executable(test_firewall_client test_firewall_client.cpp)
 target_sources(test_firewall_client PRIVATE ../src/htaccess_firewall_client.c)
 target_include_directories(test_firewall_client PRIVATE ../include)

@@ -23,6 +23,7 @@
 #include "htaccess_exec_ratelimit.h"
 #include "htaccess_exec_modsec.h"
 #include "htaccess_esi.h"
+#include "htaccess_stream.h"
 #include "htaccess_exec_cache.h"
 #include "htaccess_exec_header.h"
 #include "htaccess_exec_expires.h"
@@ -167,6 +168,8 @@ static __thread struct {
     int bypass;     /* 1 = gate failed, chunks pass through untouched */
 } esi_req = {NULL, 0, NULL, 0};
 
+static int esi_flush_parked(lsi_param_t *param);
+
 static void esi_req_reset(void)
 {
     if (esi_req.ctx) {
@@ -225,7 +228,7 @@ static int esi_gate_check(lsi_session_t *session)
     return esi_should_process(ct, ct_len, ce, ce_len);
 }
 
-static int on_recv_resp_body_esi_hook(lsi_param_t *param)
+int on_recv_resp_body_esi_hook(lsi_param_t *param)
 {
     lsi_session_t *session = (lsi_session_t *)param->session;
 
@@ -250,118 +253,128 @@ static int on_recv_resp_body_esi_hook(lsi_param_t *param)
     }
 
     /* Stream-filter contract (per OLS modgzip): consumed input is NOT
-     * auto-forwarded — every byte we want delivered must go out through
-     * stream_write_next ourselves, including on the bypass path. */
+     * auto-forwarded — every byte we want delivered goes out through
+     * ht_stream_write, including on the bypass path. On partial accept we
+     * park the undelivered OUTPUT, set LSI_CBFO_BUFFERED, and still report
+     * the input consumed: the input was transformed once; returning 0
+     * would make OLS re-deliver it and double the output. */
 
-    if (esi_req.bypass || !esi_req.ctx || !g_api || !g_api->stream_write_next)
-        return g_api && g_api->stream_write_next
-                   ? g_api->stream_write_next(param, (const char *)param->ptr1,
-                                              param->len1)
-                   : param->len1;
+    if (esi_req.bypass || !esi_req.ctx)
+        return ht_stream_write(param, (const char *)param->ptr1, param->len1);
 
-    /* EOF chunk: drain any parked output, process the final chunk, emit
-     * the tail, and signal end-of-stream. */
     if (param->flag_in & LSI_CBFI_EOF) {
+        /* Final chunk: drain parked output, process, emit the finish tail,
+         * and end the stream. Partial accept at EOF parks for the RCVD
+         * safety net. */
+        if (!esi_flush_parked(param))
+            return param->len1; /* still blocked; RCVD net will retry */
+
         char *out = NULL;
         size_t out_len = 0;
-        size_t total_out = 0;
-        /* pend + final chunk + finish tail are concatenated by draining
-         * pend into the shared buffer first via esi_process's refusal. */
-        if (esi_req.ctx->pend_len > 0) {
-            int flushed = g_api->stream_write_next(param, esi_req.ctx->buf,
-                                                   (int)esi_req.ctx->pend_len);
-            if (flushed >= 0 && (size_t)flushed < esi_req.ctx->pend_len) {
-                /* Still blocked at EOF: park, signal, wait for re-invocation */
-                size_t rest = esi_req.ctx->pend_len - (size_t)flushed;
-                memmove(esi_req.ctx->buf, esi_req.ctx->buf + flushed, rest);
-                esi_req.ctx->pend_len = rest;
-                if (param->flag_out)
-                    *param->flag_out |= LSI_CBFO_BUFFERED;
-                return 0;
-            }
-            esi_req.ctx->pend_len = 0;
-        }
         esi_process(esi_req.ctx, (const char *)param->ptr1,
                     (size_t)param->len1, &out, &out_len);
-        esi_finish(esi_req.ctx, &out, &out_len);
         int written = 0;
-        if (out_len > 0) {
-            written = g_api->stream_write_next(param, out, (int)out_len);
-            total_out = (written > 0) ? (size_t)written : 0;
+        if (out_len > 0)
+            written = ht_stream_write(param, out, (int)out_len);
+        if (written >= 0 && (size_t)written == out_len) {
+            esi_finish(esi_req.ctx, &out, &out_len);
+            if (out_len > 0)
+                written = ht_stream_write(param, out, (int)out_len);
+            else
+                written = 0;
+            if (written >= 0 && (size_t)written == out_len) {
+                ht_stream_write(param, NULL, 0); /* end of stream */
+                esi_req_reset();
+                return param->len1;
+            }
         }
-        if ((size_t)written == out_len)
-            g_api->stream_write_next(param, NULL, 0); /* end of stream */
-        else if (out_len > 0) {
-            /* Blocked even at EOF: park the tail; the RCVD safety net or a
-             * later re-invocation will retry. */
-            size_t rest = out_len - total_out;
-            memmove(esi_req.ctx->buf, out + total_out, rest);
+        if (written >= 0 && out_len > (size_t)(written > 0 ? written : 0)) {
+            size_t off = (written > 0) ? (size_t)written : 0;
+            size_t rest = out_len - off;
+            memmove(esi_req.ctx->buf, out + off, rest);
             esi_req.ctx->pend_len = rest;
             if (param->flag_out)
                 *param->flag_out |= LSI_CBFO_BUFFERED;
-            return 0;
         }
-        esi_req_reset();
         return param->len1;
     }
 
-    /* Flush-first: anything parked by an earlier backpressure event goes
-     * out before this chunk is processed. */
-    if (esi_req.ctx->pend_len > 0) {
-        int flushed = g_api->stream_write_next(param, esi_req.ctx->buf,
-                                               (int)esi_req.ctx->pend_len);
-        if (flushed < 0)
-            return 0;
-        if ((size_t)flushed < esi_req.ctx->pend_len) {
-            size_t rest = esi_req.ctx->pend_len - (size_t)flushed;
-            memmove(esi_req.ctx->buf, esi_req.ctx->buf + flushed, rest);
-            esi_req.ctx->pend_len = rest;
-            if (param->flag_out)
-                *param->flag_out |= LSI_CBFO_BUFFERED;
-            return 0; /* still blocked: consume nothing yet */
-        }
-        esi_req.ctx->pend_len = 0;
-    }
+    if (!esi_flush_parked(param))
+        return param->len1; /* parked output still blocked */
 
     char *out = NULL;
     size_t out_len = 0;
-    size_t consumed = esi_process(esi_req.ctx, (const char *)param->ptr1,
-                                   (size_t)param->len1, &out, &out_len);
-    (void)consumed;
+    esi_process(esi_req.ctx, (const char *)param->ptr1, (size_t)param->len1,
+                &out, &out_len);
     if (out_len == 0)
         return param->len1; /* nothing to emit yet (held back) */
 
-    int written = g_api->stream_write_next(param, out, (int)out_len);
+    int written = ht_stream_write(param, out, (int)out_len);
     if (written < 0)
-        return 0; /* downstream error: drop, do not loop */
+        return param->len1; /* downstream error: input consumed, output lost */
     if ((size_t)written < out_len) {
-        /* Downstream backpressure: park the unwritten remainder and report
-         * zero consumption so OLS re-invokes us with the same input. */
+        /* Downstream backpressure: park the undelivered remainder and
+         * signal BUFFERED, but report the input consumed (see contract
+         * note above). */
         size_t rest = out_len - (size_t)written;
         memmove(esi_req.ctx->buf, out + written, rest);
         esi_req.ctx->pend_len = rest;
         if (param->flag_out)
             *param->flag_out |= LSI_CBFO_BUFFERED;
-        return 0;
     }
     return param->len1;
 }
 
-/* Safety net: if EOF never arrived through the RECV hook (aborted
- * response), flush what we can and always release the context. */
-static int on_rcvd_resp_body_esi_hook(lsi_param_t *param)
+/* Flush parked (backpressured) output. Returns 1 when everything parked
+ * has been delivered, 0 when the downstream is still blocked (BUFFERED
+ * set, remainder re-parked). */
+static int esi_flush_parked(lsi_param_t *param)
+{
+    if (!esi_req.ctx || esi_req.ctx->pend_len == 0)
+        return 1;
+    int flushed = ht_stream_write(param, esi_req.ctx->buf,
+                                  (int)esi_req.ctx->pend_len);
+    if (flushed < 0)
+        return 1; /* treat as gone; do not wedge the stream */
+    if ((size_t)flushed < esi_req.ctx->pend_len) {
+        size_t rest = esi_req.ctx->pend_len - (size_t)flushed;
+        memmove(esi_req.ctx->buf, esi_req.ctx->buf + flushed, rest);
+        esi_req.ctx->pend_len = rest;
+        if (param->flag_out)
+            *param->flag_out |= LSI_CBFO_BUFFERED;
+        return 0;
+    }
+    esi_req.ctx->pend_len = 0;
+    return 1;
+}
+
+/* Safety net: EOF chunks normally finish the document in the RECV hook.
+ * If a response aborts (or an EOF write was backpressured), flush parked
+ * output plus any held partial tag literally, end the stream, release. */
+int on_rcvd_resp_body_esi_hook(lsi_param_t *param)
 {
     if (!esi_req.bypass && esi_req.ctx &&
         esi_req.session == param->session &&
         esi_req.seq == req_seq_counter) {
+        (void)esi_flush_parked(param);
         char *out = NULL;
         size_t out_len = 0;
         esi_finish(esi_req.ctx, &out, &out_len);
-        if (out_len > 0 && g_api && g_api->stream_write_next)
-            g_api->stream_write_next(param, out, (int)out_len);
+        if (out_len > 0)
+            ht_stream_write(param, out, (int)out_len);
+        ht_stream_write(param, NULL, 0); /* end of stream */
     }
     esi_req_reset();
     return LSI_OK;
+}
+
+/* Test seam: install a merged directive list for this session exactly as
+ * on_uri_map would, so gate-dependent hooks can be exercised in unit
+ * tests. Takes ownership of dirs. */
+void mod_htaccess_test_prime(lsi_session_t *session, htaccess_directive_t *dirs)
+{
+    req_seq_counter++;
+    req_cache_store(session, dirs);
 }
 
 static lsi_serverhook_t server_hooks[] = {
