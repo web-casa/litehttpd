@@ -1503,16 +1503,20 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
         return parse_fallback_resource(after, line_num);
 
     /* ExpiresActive */
-    if (strncasecmp(line, "CacheEnable", 11) == 0) {
+    if (strncasecmp(line, "CacheEnable", 11) == 0 && \
+        (line[11] == 0 || isspace((unsigned char)line[11]))) {
         return parse_cache_directive(st, line, DIR_CACHE_ENABLE);
     }
-    if (strncasecmp(line, "CacheDisable", 12) == 0) {
+    if (strncasecmp(line, "CacheDisable", 12) == 0 && \
+        (line[12] == 0 || isspace((unsigned char)line[12]))) {
         return parse_cache_directive(st, line, DIR_CACHE_DISABLE);
     }
-    if (strncasecmp(line, "CacheMaxExpire", 14) == 0) {
+    if (strncasecmp(line, "CacheMaxExpire", 14) == 0 && \
+        (line[14] == 0 || isspace((unsigned char)line[14]))) {
         return parse_cache_directive(st, line, DIR_CACHE_MAX_EXPIRE);
     }
-    if (strncasecmp(line, "CacheDefaultExpire", 18) == 0) {
+    if (strncasecmp(line, "CacheDefaultExpire", 18) == 0 && \
+        (line[18] == 0 || isspace((unsigned char)line[18]))) {
         return parse_cache_directive(st, line, DIR_CACHE_DEFAULT_EXPIRE);
     }
     if (strncasecmp(line, "RateLimit", 9) == 0) {

@@ -35,7 +35,12 @@ void cache_bridge_build_header(const cache_bridge_config_t *cfg,
     }
 
     const char *visibility = (cfg->enabled == 2) ? "private" : "public";
-    int max_age = cfg->max_expire > 0 ? cfg->max_expire : cfg->default_expire;
+    /* Default to 1 hour if no expire specified (max-age=0 would disable caching) */
+    int max_age = 3600;
+    if (cfg->max_expire > 0)
+        max_age = cfg->max_expire;
+    else if (cfg->default_expire > 0)
+        max_age = cfg->default_expire;
 
     snprintf(buf, buf_size, "%s,max-age=%d", visibility, max_age);
 }

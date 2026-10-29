@@ -32,6 +32,15 @@ TEST(CacheBridge, BuildHeaderPublic) {
     EXPECT_STREQ(buf, "public,max-age=3600");
 }
 
+TEST(CacheBridge, BuildHeaderDefaultAge) {
+    /* No expire specified → default 3600 */
+    cache_bridge_config_t cfg = {};
+    cfg.enabled = 1;
+    char buf[128];
+    cache_bridge_build_header(&cfg, buf, sizeof(buf));
+    EXPECT_STREQ(buf, "public,max-age=3600");
+}
+
 TEST(CacheBridge, BuildHeaderPrivate) {
     cache_bridge_config_t cfg = {};
     cfg.enabled = 2;
