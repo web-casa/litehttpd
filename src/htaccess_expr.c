@@ -22,7 +22,7 @@
 
 #include <ctype.h>
 #include <errno.h>
-#include <regex.h>
+#include "htaccess_regex.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -827,7 +827,7 @@ static int eval_regex_match(const char *subject, const char *pattern, int negate
         return 0;
 
     /* Bound the subject length. `subject` is fully-untrusted request data
-     * (URI/headers) and POSIX regexec() can exhibit catastrophic (exponential)
+     * (URI/headers) and unbounded regex engines can exhibit catastrophic (exponential)
      * backtracking on certain patterns against a long input. Capping the
      * subject keeps a single match bounded and prevents a CPU-exhaustion DoS.
      * EXPR_MAX_SUBJECT_LEN is far longer than any legitimate header/URI a
@@ -837,52 +837,20 @@ static int eval_regex_match(const char *subject, const char *pattern, int negate
         return negate ? 1 : 0;
     }
 
-    static __thread struct {
-        unsigned long hash;
-        char *pat;
-        regex_t re;
-        int valid;
-    } re_cache[4];
+    /* Unified resource-limited PCRE2 wrapper (deny-class caller):
+     * a limit hit must evaluate to FALSE on the *permissive* side is unsafe —
+     * instead it evaluates FALSE for the match itself, and since If-blocks
+     * gate access, the executor treats an evaluation error conservatively
+     * upstream. Spec: docs/specs/regex-engine.md §3. */
+#define EXPR_REGEX_TAG 3
+    htre_regex_t *rep = htre_get_cached(EXPR_REGEX_TAG, pattern, 0, NULL, 0);
+    if (!rep)
+        return 0;
 
-    unsigned long h = 5381;
-    for (const char *p = pattern; *p; p++)
-        h = ((h << 5) + h) + (unsigned char)*p;
-
-    regex_t *rep = NULL;
-    for (int i = 0; i < 4; i++) {
-        if (re_cache[i].valid && re_cache[i].hash == h &&
-            strcmp(re_cache[i].pat, pattern) == 0) {
-            rep = &re_cache[i].re;
-            break;
-        }
-    }
-
-    if (!rep) {
-        int slot = -1;
-        for (int i = 0; i < 4; i++) {
-            if (!re_cache[i].valid) { slot = i; break; }
-        }
-        if (slot < 0) {
-            regfree(&re_cache[0].re);
-            free(re_cache[0].pat);
-            for (int i = 0; i < 3; i++)
-                re_cache[i] = re_cache[i + 1];
-            slot = 3;
-            re_cache[slot].valid = 0;
-        }
-        if (regcomp(&re_cache[slot].re, pattern, REG_EXTENDED | REG_NOSUB) != 0)
-            return 0;
-        re_cache[slot].hash = h;
-        re_cache[slot].pat = strdup(pattern);
-        if (!re_cache[slot].pat) {
-            regfree(&re_cache[slot].re);
-            return 0;
-        }
-        re_cache[slot].valid = 1;
-        rep = &re_cache[slot].re;
-    }
-
-    int match = (regexec(rep, subject, 0, NULL, 0) == 0);
+    int rc = htre_exec(rep, subject, 0, NULL);
+    if (rc == HTRE_HIT_LIMIT || rc == HTRE_ERROR)
+        return negate ? 1 : 0; /* same fail-closed shape as over-long subject */
+    int match = (rc == HTRE_MATCH);
     return negate ? !match : match;
 }
 

@@ -9,7 +9,7 @@
  */
 #include "htaccess_exec_header.h"
 #include <string.h>
-#include <regex.h>
+#include "htaccess_regex.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -94,52 +94,8 @@ void exec_header_reset_shadow(void)
     hdr_shadow_count = 0;
 }
 
-static __thread struct {
-    unsigned long hash;
-    char         *pat;    /* owned copy of pattern string */
-    regex_t     re;
-    int         valid;
-} hdr_regex_cache[HDR_REGEX_CACHE_SLOTS];
-
-static unsigned long hdr_djb2(const char *str)
-{
-    unsigned long h = 5381;
-    while (*str)
-        h = ((h << 5) + h) + (unsigned char)*str++;
-    return h;
-}
-
-static regex_t *hdr_get_cached_regex(const char *pattern)
-{
-    unsigned long h = hdr_djb2(pattern);
-    for (int i = 0; i < HDR_REGEX_CACHE_SLOTS; i++) {
-        if (hdr_regex_cache[i].valid && hdr_regex_cache[i].hash == h
-            && strcmp(hdr_regex_cache[i].pat, pattern) == 0)
-            return &hdr_regex_cache[i].re;
-    }
-    int slot = -1;
-    for (int i = 0; i < HDR_REGEX_CACHE_SLOTS; i++) {
-        if (!hdr_regex_cache[i].valid) { slot = i; break; }
-    }
-    if (slot < 0) {
-        regfree(&hdr_regex_cache[0].re);
-        free(hdr_regex_cache[0].pat);
-        for (int i = 0; i < HDR_REGEX_CACHE_SLOTS - 1; i++)
-            hdr_regex_cache[i] = hdr_regex_cache[i + 1];
-        slot = HDR_REGEX_CACHE_SLOTS - 1;
-        hdr_regex_cache[slot].valid = 0;
-    }
-    if (regcomp(&hdr_regex_cache[slot].re, pattern, REG_EXTENDED) != 0)
-        return NULL;
-    hdr_regex_cache[slot].hash = h;
-    hdr_regex_cache[slot].pat = strdup(pattern);
-    if (!hdr_regex_cache[slot].pat) {
-        regfree(&hdr_regex_cache[slot].re);
-        return NULL;
-    }
-    hdr_regex_cache[slot].valid = 1;
-    return &hdr_regex_cache[slot].re;
-}
+/* Regex via unified wrapper. */
+#define HDR_REGEX_TAG 2
 
 /**
  * Expand Apache-style %{VAR}e environment variable references in a value.
@@ -295,7 +251,9 @@ static int exec_header_edit(lsi_session_t *session,
     /* Compile regex (cached) */
     if (strlen(dir->data.header_ext.edit_pattern) > 512)
         return LSI_ERROR; /* ReDoS prevention */
-    regex_t *rep = hdr_get_cached_regex(dir->data.header_ext.edit_pattern);
+    htre_regex_t *rep = htre_get_cached(HDR_REGEX_TAG,
+                                         dir->data.header_ext.edit_pattern,
+                                         0, NULL, 0);
     if (!rep)
         return LSI_ERROR;
 
@@ -315,14 +273,16 @@ static int exec_header_edit(lsi_session_t *session,
     size_t result_len = 0;
     const char *src = cur_val;
     int src_len = cur_len;
-    regmatch_t matches[10]; /* $0..$9 */
+    htre_match_t matches[10]; /* $0..$9 */
 
-    while (src_len > 0 && regexec(rep, src, 10, matches, 0) == 0) {
-        if (matches[0].rm_so < 0 || matches[0].rm_eo < 0)
+    int hrc;
+    while (src_len > 0 &&
+           (hrc = htre_exec(rep, src, 10, matches)) == HTRE_MATCH) {
+        if (matches[0].so < 0 || matches[0].eo < 0)
             break;
 
         /* Copy text before match */
-        size_t before_len = (size_t)matches[0].rm_so;
+        size_t before_len = (size_t)matches[0].so;
         if (result_len + before_len >= sizeof(result) - 1) {
             overflow = 1;
             break;
@@ -336,11 +296,11 @@ static int exec_header_edit(lsi_session_t *session,
             if (*rp == '$' && rp[1] >= '0' && rp[1] <= '9') {
                 int idx = rp[1] - '0';
                 rp += 2;
-                if (idx < 10 && matches[idx].rm_so >= 0 &&
-                    matches[idx].rm_eo > matches[idx].rm_so) {
-                    size_t cap_len = (size_t)(matches[idx].rm_eo - matches[idx].rm_so);
+                if (idx < 10 && matches[idx].so >= 0 &&
+                    matches[idx].eo > matches[idx].so) {
+                    size_t cap_len = (size_t)(matches[idx].eo - matches[idx].so);
                     if (result_len + cap_len < sizeof(result) - 1) {
-                        memcpy(result + result_len, src + matches[idx].rm_so, cap_len);
+                        memcpy(result + result_len, src + matches[idx].so, cap_len);
                         result_len += cap_len;
                     } else {
                         overflow = 1;
@@ -353,11 +313,11 @@ static int exec_header_edit(lsi_session_t *session,
         if (*rp) overflow = 1; /* replacement not fully consumed */
 
         /* Advance past match */
-        src += matches[0].rm_eo;
-        src_len -= matches[0].rm_eo;
+        src += matches[0].eo;
+        src_len -= matches[0].eo;
 
         /* Prevent infinite loop on zero-length match */
-        if (matches[0].rm_so == matches[0].rm_eo) {
+        if (matches[0].so == matches[0].eo) {
             if (src_len > 0) {
                 if (result_len < sizeof(result) - 1)
                     result[result_len++] = *src;
@@ -368,6 +328,14 @@ static int exec_header_edit(lsi_session_t *session,
 
         if (!global)
             break; /* edit: first match only */
+    }
+
+    if (hrc == HTRE_HIT_LIMIT || hrc == HTRE_ERROR) {
+        /* Enable-class rule: log and leave header unedited. */
+        lsi_log(session, LSI_LOG_WARN,
+                "[htaccess] Header edit: regex limit hit for %s, header left unedited",
+                dir->data.header_ext.edit_pattern);
+        return LSI_OK;
     }
 
     /* Copy remaining text */

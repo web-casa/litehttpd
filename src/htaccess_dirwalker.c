@@ -12,11 +12,13 @@
 #include "htaccess_parser.h"
 #include "htaccess_expr.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Maximum directory depth we support */
 #define MAX_DIR_DEPTH 64
@@ -477,14 +479,32 @@ static htaccess_directive_t *merge_directives(htaccess_directive_t *parent,
 /* ------------------------------------------------------------------ */
 static htaccess_directive_t *read_and_cache(const char *htaccess_path)
 {
-    FILE *fp = fopen(htaccess_path, "r");
-    if (!fp)
+    /* Hardened open: O_NOFOLLOW rejects symlinked .htaccess, O_CLOEXEC for
+     * fork safety; fd-based fstat keeps the TOCTOU-free property. */
+    int fd = open(htaccess_path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0)
         return NULL;
 
-    /* fstat on the opened fd — avoids TOCTOU race between stat and fopen */
     struct stat st;
-    if (fstat(fileno(fp), &st) != 0) {
-        fclose(fp);
+    if (fstat(fd, &st) != 0) {
+        close(fd);
+        return NULL;
+    }
+    /* Only regular files owned by root or the server user are trusted;
+     * reject fifos/devices and group/world-writable files. */
+    if (!S_ISREG(st.st_mode)) {
+        close(fd);
+        return NULL;
+    }
+    if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+        lsi_log(NULL, LSI_LOG_WARN,
+                "[htaccess] %s: group/world writable, refusing", htaccess_path);
+        close(fd);
+        return NULL;
+    }
+    FILE *fp = fdopen(fd, "r");
+    if (!fp) {
+        close(fd);
         return NULL;
     }
 
@@ -514,6 +534,14 @@ static htaccess_directive_t *read_and_cache(const char *htaccess_path)
     size_t nread = fread(content, 1, (size_t)fsize, fp);
     int read_err = ferror(fp);
     fclose(fp);
+
+    /* File grew between stat and read: refuse rather than trust partial. */
+    if (nread > (size_t)st.st_size) {
+        lsi_log(NULL, LSI_LOG_WARN, "[htaccess] %s: grew during read, refusing",
+                htaccess_path);
+        free(content);
+        return NULL;
+    }
 
     if (nread != (size_t)fsize || read_err) {
         lsi_log(NULL, LSI_LOG_WARN, "[htaccess] short read or I/O error on %s (got %zu of %ld)",

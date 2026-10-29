@@ -7,60 +7,14 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
-#include <regex.h>
+#include "htaccess_regex.h"
 
 /* ------------------------------------------------------------------ */
 /*  Thread-local regex cache for SetEnvIf patterns                     */
 /* ------------------------------------------------------------------ */
 
-#define ENV_REGEX_CACHE_SLOTS 8
-
-static __thread struct {
-    unsigned long hash;   /* djb2 hash of pattern + flags */
-    char         *pat;    /* owned copy of pattern string */
-    regex_t       re;
-    int           valid;
-} env_regex_cache[ENV_REGEX_CACHE_SLOTS];
-
-static unsigned long env_djb2(const char *str, int flags)
-{
-    unsigned long h = 5381 + (unsigned)flags;
-    while (*str)
-        h = ((h << 5) + h) + (unsigned char)*str++;
-    return h;
-}
-
-static regex_t *env_get_cached_regex(const char *pattern, int flags)
-{
-    unsigned long h = env_djb2(pattern, flags);
-    for (int i = 0; i < ENV_REGEX_CACHE_SLOTS; i++) {
-        if (env_regex_cache[i].valid && env_regex_cache[i].hash == h
-            && strcmp(env_regex_cache[i].pat, pattern) == 0)
-            return &env_regex_cache[i].re;
-    }
-    int slot = -1;
-    for (int i = 0; i < ENV_REGEX_CACHE_SLOTS; i++) {
-        if (!env_regex_cache[i].valid) { slot = i; break; }
-    }
-    if (slot < 0) {
-        regfree(&env_regex_cache[0].re);
-        free(env_regex_cache[0].pat);
-        for (int i = 0; i < ENV_REGEX_CACHE_SLOTS - 1; i++)
-            env_regex_cache[i] = env_regex_cache[i + 1];
-        slot = ENV_REGEX_CACHE_SLOTS - 1;
-        env_regex_cache[slot].valid = 0;
-    }
-    if (regcomp(&env_regex_cache[slot].re, pattern, flags) != 0)
-        return NULL;
-    env_regex_cache[slot].hash = h;
-    env_regex_cache[slot].pat = strdup(pattern);
-    if (!env_regex_cache[slot].pat) {
-        regfree(&env_regex_cache[slot].re);
-        return NULL;
-    }
-    env_regex_cache[slot].valid = 1;
-    return &env_regex_cache[slot].re;
-}
+/* Regex via unified wrapper; HTRE flags: 0x1 = caseless. */
+#define ENV_REGEX_TAG 1
 
 /**
  * Check if an environment variable name is blacklisted.
@@ -120,18 +74,21 @@ static int match_and_set(lsi_session_t *session,
                          int nocase)
 {
     int rc;
-    int flags = REG_EXTENDED | REG_NOSUB;
-    if (nocase)
-        flags |= REG_ICASE;
     if (!dir->data.envif.pattern)
         return LSI_ERROR;
-    if (strlen(dir->data.envif.pattern) > 512)
-        return LSI_ERROR; /* ReDoS prevention */
-    regex_t *rep = env_get_cached_regex(dir->data.envif.pattern, flags);
+    htre_regex_t *rep = htre_get_cached(ENV_REGEX_TAG, dir->data.envif.pattern,
+                                        nocase ? 0x1 : 0, NULL, 0);
     if (!rep)
         return LSI_ERROR;
-    rc = regexec(rep, attr_value, 0, NULL, 0);
-    if (rc != 0)
+    rc = htre_exec(rep, attr_value, 0, NULL);
+    if (rc == HTRE_HIT_LIMIT || rc == HTRE_ERROR) {
+        /* Enable-class rule: warn and skip (spec regex-engine.md §3). */
+        lsi_log(session, LSI_LOG_WARN,
+                "[htaccess] SetEnvIf: regex resource limit hit for %s, rule skipped",
+                dir->data.envif.pattern);
+        return LSI_OK;
+    }
+    if (rc != HTRE_MATCH)
         return LSI_OK;
     if (!dir->name)
         return LSI_ERROR;

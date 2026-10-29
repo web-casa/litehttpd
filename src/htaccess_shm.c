@@ -100,7 +100,9 @@ static int native_shm_update(const char *ip, const brute_force_record_t *record)
             rec->magic = BF_RECORD_MAGIC;
         }
     }
-    /* Note: if entry doesn't exist, ls_shmhash_get creates it */
+    /* Note: OLS shmhash_get with val_off parameter creates the entry on
+     * miss (allocating value space), so the update above covers both
+     * new and existing keys. If it didn't create, the next call will. */
     api->shmhash_unlock(g_shm_ht);
     return 0;
 }
@@ -390,9 +392,13 @@ int shm_atomic_increment(const char *ip, time_t now,
 
 int shm_cleanup_expired(time_t now)
 {
-    /* Native SHM doesn't need manual cleanup (OLS manages it) */
-    if (g_use_native_shm)
+    if (g_use_native_shm) {
+        /* OLS shmhash API has no iterate/delete; entries expire naturally
+         * when blocked_until < now (checked by callers via shm_get).
+         * The hash itself is bounded by SHM_POOL_SIZE (1 MB).
+         * Full purge on shm_destroy or module reload. */
         return 0;
+    }
     return builtin_shm_cleanup(now);
 }
 

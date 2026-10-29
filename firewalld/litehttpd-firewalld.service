@@ -1,0 +1,15 @@
+[Unit]
+Description=litehttpd Firewall Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/litehttpd-firewalld
+Environment=LITEHTTPD_FW_SOCK=/var/run/litehttpd/firewall.sock
+Environment=LITEHTTPD_FW_DB=/var/lib/litehttpd/firewall.db
+Restart=always
+RestartSec=5
+RuntimeDirectory=litehttpd
+
+[Install]
+WantedBy=multi-user.target

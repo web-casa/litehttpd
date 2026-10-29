@@ -1,3 +1,4 @@
+#include <stdint.h>
 /**
  * lsiapi_shim.c - LSIAPI Shim Layer for OLS .htaccess Module
  *
@@ -79,28 +80,62 @@ static unsigned int response_header_id_for_name(const char *name, int len)
     return LSI_RSPHDR_UNKNOWN;
 }
 
+/* ABI-safe extension detection: validates magic, version, and struct size
+ * before allowing any extension field access. Spec: docs/specs/abi-handshake.md */
 int lsiapi_has_custom_extensions(void)
 {
     static int cached = -1;
     if (cached < 0) {
-        void *marker = dlsym(RTLD_DEFAULT, LITEHTTPD_LSIAPI_EXT_SYMBOL);
-        cached = marker ? 1 : 0;
+        cached = 0; /* fail-closed default */
+        /* Try the versioned ABI info first */
+        const litehttpd_abi_info_t **info_pp =
+            (const litehttpd_abi_info_t **)dlsym(RTLD_DEFAULT, "litehttpd_abi_info");
+        if (info_pp && *info_pp) {
+            const litehttpd_abi_info_t *info = *info_pp;
+            if (info->magic == LITEHTTPD_ABI_MAGIC &&
+                info->version >= LITEHTTPD_ABI_VERSION_1 &&
+                info->api_struct_size >= (uint32_t)sizeof(lsi_api_t)) {
+                cached = 1;
+            }
+        }
+        /* No legacy fallback: ABI info is the single source of truth. */
     }
     return cached;
 }
 
+/* Returns the feature bitmap (0 on stock OLS). */
+uint32_t lsiapi_feature_bitmap(void)
+{
+    const litehttpd_abi_info_t **info_pp =
+        (const litehttpd_abi_info_t **)dlsym(RTLD_DEFAULT, "litehttpd_abi_info");
+    if (info_pp && *info_pp &&
+        (*info_pp)->magic == LITEHTTPD_ABI_MAGIC &&
+        (*info_pp)->version >= LITEHTTPD_ABI_VERSION_1)
+        return (*info_pp)->feature_bitmap;
+    return 0;
+}
+
 int lsiapi_has_php_config_extensions(void)
 {
-    return g_api && lsiapi_has_custom_extensions() &&
-           g_api->set_php_config_value && g_api->set_php_config_flag;
+    if (!g_api || !lsiapi_has_custom_extensions())
+        return 0;
+    uint32_t bm = lsiapi_feature_bitmap();
+    if (bm & LITEHTTPD_FEAT_PHP_CONFIG)
+        return g_api->set_php_config_value && g_api->set_php_config_flag;
+    /* legacy: no bitmap, check NULL (pre-ABI-info builds) */
+    return g_api->set_php_config_value && g_api->set_php_config_flag;
 }
 
 int lsiapi_has_rewrite_extensions(void)
 {
-    return g_api && lsiapi_has_custom_extensions() &&
-           g_api->parse_rewrite_rules &&
-           g_api->exec_rewrite_rules &&
-           g_api->free_rewrite_rules;
+    if (!g_api || !lsiapi_has_custom_extensions())
+        return 0;
+    uint32_t bm = lsiapi_feature_bitmap();
+    if (bm & LITEHTTPD_FEAT_REWRITE)
+        return g_api->parse_rewrite_rules &&
+               g_api->exec_rewrite_rules &&
+               g_api->free_rewrite_rules;
+    return 0;
 }
 
 void *lsiapi_parse_rewrite_rules(const char *rules_text, int text_len)
@@ -522,28 +557,9 @@ int lsi_session_set_php_ini(lsi_session_t *session, const char *name, const char
  * We need to switch to using the serverhook array instead.
  * For now, provide a stub that stores the hooks for later use. */
 
-/* We'll store up to 8 hooks */
-#define MAX_SHIM_HOOKS 8
-static struct {
-    int hook_point;
-    lsi_callback_pf cb;
-    short priority;
-} s_shim_hooks[MAX_SHIM_HOOKS];
-static int s_shim_hook_count = 0;
-
-int lsi_register_hook(int hook_point, lsi_hook_cb cb, int priority)
-{
-    /* In the shim, we can't dynamically register hooks.
-     * Hooks must be registered via the serverhook array.
-     * This function is a no-op in production — we'll use serverhook instead. */
-    if (s_shim_hook_count < MAX_SHIM_HOOKS) {
-        s_shim_hooks[s_shim_hook_count].hook_point = hook_point;
-        s_shim_hooks[s_shim_hook_count].cb = (lsi_callback_pf)(void *)cb;
-        s_shim_hooks[s_shim_hook_count].priority = (short)priority;
-        s_shim_hook_count++;
-    }
-    return 0;
-}
+/* Hook registration is via the server_hooks[] static array in mod_htaccess.c.
+ * This dynamic registration stub was a no-op and has been removed.
+ * Spec: docs/specs/abi-handshake.md */
 
 /* ------------------------------------------------------------------ */
 /*  Logging                                                            */

@@ -62,8 +62,15 @@
  */
 static __thread struct {
     const lsi_session_t *session;     /* session identity */
+    uint64_t seq;                     /* request generation (pointer-reuse guard) */
     htaccess_directive_t *directives; /* cached merged result (owned) */
-} req_cache = {NULL, NULL};
+} req_cache = {NULL, 0, NULL};
+
+/* Monotonic per-thread request counter: bumped once at the start of each
+ * request's URI_MAP pass. OLS recycles lsi_session_t pointers, so pointer
+ * equality alone can match a *different* request that reused the object;
+ * the sequence number disambiguates. */
+static __thread uint64_t req_seq_counter = 0;
 
 static void req_cache_store(const lsi_session_t *session, htaccess_directive_t *dirs)
 {
@@ -71,12 +78,14 @@ static void req_cache_store(const lsi_session_t *session, htaccess_directive_t *
     if (req_cache.directives && req_cache.directives != dirs)
         htaccess_directives_free(req_cache.directives);
     req_cache.session = session;
+    req_cache.seq = req_seq_counter;
     req_cache.directives = dirs;
 }
 
 static htaccess_directive_t *req_cache_get(const lsi_session_t *session)
 {
-    if (req_cache.session == session && req_cache.directives)
+    if (req_cache.session == session && req_cache.directives &&
+        req_cache.seq == req_seq_counter)
         return req_cache.directives;
     return NULL;
 }
@@ -86,6 +95,7 @@ static void req_cache_clear(void)
     if (req_cache.directives)
         htaccess_directives_free(req_cache.directives);
     req_cache.session = NULL;
+    req_cache.seq = 0;
     req_cache.directives = NULL;
 }
 
@@ -1029,9 +1039,10 @@ static int exec_if_child_response(lsi_session_t *session, const htaccess_directi
  */
 static int on_uri_map(lsi_session_t *session)
 {
-    /* Clear any stale per-request cache from a previous request.
-     * OLS may recycle session pointers, so a stale entry keyed by the
-     * same pointer value could leak directives from a prior request. */
+    /* New request: bump the generation counter and clear any stale cache.
+     * OLS may recycle session pointers, so entries are validated by both
+     * pointer and sequence number (see req_cache_get). */
+    req_seq_counter++;
     req_cache_clear();
 
     /* Reset per-request state */
