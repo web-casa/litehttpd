@@ -141,7 +141,7 @@ jobs:
           docker exec "$CT" nft list set inet litehttpd blocked4 | grep -E 'elements = \{.*timeout'
           # after the 20s TTL the kernel timeout + daemon sweep lift the block
           sleep 25
-          code=$(curl -s -m 8 -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/t1/index.html)
+          code=$(curl -s -m 8 -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/esi-frag.html)
           echo "post-TTL: $code"; [ "$code" = "200" ]
 
       # ── Check 5: modsec bridge (SecRuleEngine Off per-dir) ─────────
