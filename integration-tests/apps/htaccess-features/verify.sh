@@ -10,6 +10,7 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=integration-tests/lib/assert.sh
 source "${SCRIPT_DIR}/../../lib/assert.sh"
 
 APP_PATH="/htfeatures"

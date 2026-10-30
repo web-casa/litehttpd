@@ -210,6 +210,26 @@ struct lsi_serverhook_s {
 #define LSI_HOOK_END    {0, NULL, 0, 0}
 #define LSI_FLAG_ENABLED 8
 
+/* Stream-filter callback flags (LSI_CBFI_* on param->flag_in,
+ * LSI_CBFO_* on *param->flag_out) — values from OLS ls.h. A body filter
+ * must itself stream_write_next() everything it wants delivered; simply
+ * returning len1 does NOT forward the data. Returning 0 with
+ * LSI_CBFO_BUFFERED set means "I am holding data, re-invoke me". */
+#define LSI_CBFO_BUFFERED 1
+#define LSI_CBFI_FLUSH    1
+#define LSI_CBFI_EOF      2
+#define LSI_CBFI_STATIC   4
+
+/* Hook priorities at a shared hookpoint: lower value runs first
+ * (LSI_HOOK_PRIORITY semantics in OLS's ls.h). The modsecurity-ls
+ * module registers its URI_MAP hook at LSI_HOOK_NORMAL (10), so any
+ * priority below 10 runs ahead of it. */
+#define LSI_HOOK_FIRST  (-10)
+#define LSI_HOOK_EARLY  (0)
+#define LSI_HOOK_NORMAL (10)
+#define LSI_HOOK_LATE   (20)
+#define LSI_HOOK_LAST   (30)
+
 /* ------------------------------------------------------------------ */
 /*  Module reserved size and descriptor                                */
 /* ------------------------------------------------------------------ */
@@ -408,6 +428,23 @@ struct lsi_api_s {
     void (*free_rewrite_rules)(void *handle);
 };
 
+/* litehttpd ABI version handshake */
+#define LITEHTTPD_ABI_MAGIC     0x4C485444  /* "LHTD" */
+#define LITEHTTPD_ABI_VERSION_1 1
+
+#define LITEHTTPD_FEAT_PHP_CONFIG   (1u << 0)
+#define LITEHTTPD_FEAT_REWRITE      (1u << 1)
+#define LITEHTTPD_FEAT_REQ_HEADER   (1u << 2)
+
+typedef struct {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t api_struct_size;
+    uint32_t feature_bitmap;
+} litehttpd_abi_info_t;
+
+extern const litehttpd_abi_info_t *litehttpd_get_abi_info(void);
+
 extern __thread const lsi_api_t *g_api;
 
 /* ------------------------------------------------------------------ */
@@ -518,6 +555,18 @@ const char *lsi_session_get_auth_header(lsi_session_t *session, int *len);
 const char *lsi_session_get_query_string(lsi_session_t *session, int *len);
 int         lsi_session_set_www_authenticate(lsi_session_t *session,
                                              const char *realm, int realm_len);
+
+/* litehttpd private LSIAPI extension helpers.
+ * These must be used instead of reading appended lsi_api_t fields directly:
+ * stock OLS exposes a shorter lsi_api_t, so direct reads past the public
+ * struct are undefined behavior. */
+int         lsiapi_has_custom_extensions(void);
+int         lsiapi_has_php_config_extensions(void);
+int         lsiapi_has_rewrite_extensions(void);
+void       *lsiapi_parse_rewrite_rules(const char *rules_text, int text_len);
+int         lsiapi_exec_rewrite_rules(lsi_session_t *session, void *handle,
+                                      const char *base, int base_len);
+void        lsiapi_free_rewrite_rules(void *handle);
 
 #ifdef __cplusplus
 } /* extern "C" */

@@ -8,9 +8,11 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=integration-tests/lib/assert.sh
 source "${SCRIPT_DIR}/../../lib/assert.sh"
 
 APP_PATH="/laravel/public"
+APP_FRONT_CONTROLLER="${APP_PATH}/index.php"
 APP_DIR="/var/www/vhosts/localhost/html/laravel"
 DB_NAME="laravel"
 DB_USER="appuser"
@@ -53,19 +55,9 @@ install_laravel() {
         sed -i 's|^.*DB_DATABASE=.*|DB_DATABASE=${DB_NAME}|' .env && \
         sed -i 's|^.*DB_USERNAME=.*|DB_USERNAME=${DB_USER}|' .env && \
         sed -i 's|^.*DB_PASSWORD=.*|DB_PASSWORD=${DB_PASS}|' .env && \
-        sed -i 's|^APP_URL=.*|APP_URL=http://localhost:8088/laravel/public|' .env && \
+        sed -i 's|^APP_URL=.*|APP_URL=http://localhost:8088/laravel/public/index.php|' .env && \
         php artisan migrate --force 2>/dev/null || true
     "
-
-    # Deploy .htaccess to laravel root (rewrite to public/)
-    # NOTE: RewriteEngine/Rule/Cond handled by OLS native rewrite, not litehttpd
-    deploy_htaccess "$(cat <<'HTEOF'
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteRule ^(.*)$ public/$1 [L]
-</IfModule>
-HTEOF
-)" "laravel"
 
     # Deploy .htaccess to laravel/public/
     deploy_htaccess "$(cat <<'HTEOF'
@@ -106,20 +98,20 @@ HTEOF
 # ---------------------------------------------------------------------------
 
 test_homepage() {
-    assert_http_status "${APP_PATH}/" 200 && \
-    assert_body_contains "${APP_PATH}/" "Laravel"
+    assert_http_status "${APP_FRONT_CONTROLLER}" 200 && \
+    assert_body_contains "${APP_FRONT_CONTROLLER}" "Laravel"
 }
 
 test_security_header() {
-    assert_header "${APP_PATH}/" "X-Content-Type-Options" "nosniff"
+    assert_header "${APP_FRONT_CONTROLLER}" "X-Content-Type-Options" "nosniff"
 }
 
 test_cors_header() {
-    assert_header "${APP_PATH}/" "Access-Control-Allow-Origin" "*"
+    assert_header "${APP_FRONT_CONTROLLER}" "Access-Control-Allow-Origin" "*"
 }
 
 test_referrer_policy() {
-    assert_header "${APP_PATH}/" "Referrer-Policy" "strict-origin-when-cross-origin"
+    assert_header "${APP_FRONT_CONTROLLER}" "Referrer-Policy" "strict-origin-when-cross-origin"
 }
 
 test_env_file_protected() {
@@ -131,7 +123,7 @@ test_env_file_protected() {
 
 test_404_routing() {
     # Laravel returns its own 404 page via routing
-    assert_http_status "${APP_PATH}/nonexistent-route-xyz" 404
+    assert_http_status "${APP_FRONT_CONTROLLER}/nonexistent-route-xyz" 404
 }
 
 # ---------------------------------------------------------------------------

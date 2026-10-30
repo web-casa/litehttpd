@@ -1,0 +1,5 @@
+if(EXISTS "/home/ivmm/ols-extra/build-sanitizer/tests/property_tests[1]_tests.cmake")
+  include("/home/ivmm/ols-extra/build-sanitizer/tests/property_tests[1]_tests.cmake")
+else()
+  add_test(property_tests_NOT_BUILT property_tests_NOT_BUILT)
+endif()

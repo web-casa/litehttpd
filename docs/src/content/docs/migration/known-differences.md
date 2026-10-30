@@ -26,7 +26,7 @@ LiteHTTPD adds defense-in-depth path traversal detection for percent-encoded byp
 
 ### Previously Ignored .htaccess Directives
 
-Stock OLS ignores most `.htaccess` directives. After adding LiteHTTPD, all 80 supported directives become active. If your existing `.htaccess` files contain rules that were previously inert, they now take effect:
+Stock OLS ignores most `.htaccess` directives. After adding LiteHTTPD, all 83 supported directive types become active. If your existing `.htaccess` files contain rules that were previously inert, they now take effect:
 
 - `Require all denied` → blocks access (403)
 - `Header set` → adds response headers
@@ -54,7 +54,7 @@ Stock OLS returns 404 for directories without an index file. With LiteHTTPD Full
 ### Fully Compatible (No Differences)
 
 The following features work identically to Apache:
-- All 80 supported directives
+- All 83 supported directive types
 - Directive merging across directory levels
 - AllowOverride category filtering
 - If/ElseIf/Else conditional expression evaluation

@@ -14,17 +14,16 @@ extern "C" {
 
 /* ---- Helper: allocate a directive with strdup'd name/value ---- */
 
-static htaccess_directive_t *make_directive(directive_type_t type,
-                                            const char *name,
-                                            const char *value,
-                                            int line)
+static htaccess_directive_t *make_directive(directive_type_t type, const char *name,
+                                            const char *value, int line)
 {
-    auto *d = static_cast<htaccess_directive_t *>(
-        calloc(1, sizeof(htaccess_directive_t)));
+    auto *d = static_cast<htaccess_directive_t *>(calloc(1, sizeof(htaccess_directive_t)));
     d->type = type;
     d->line_number = line;
-    if (name)  d->name  = strdup(name);
-    if (value) d->value = strdup(value);
+    if (name)
+        d->name = strdup(name);
+    if (value)
+        d->value = strdup(value);
     d->next = nullptr;
     return d;
 }
@@ -34,9 +33,15 @@ static htaccess_directive_t *make_directive(directive_type_t type,
  * ================================================================== */
 
 class CacheTest : public ::testing::Test {
-protected:
-    void SetUp() override    { ASSERT_EQ(htaccess_cache_init(16), 0); }
-    void TearDown() override { htaccess_cache_destroy(); }
+  protected:
+    void SetUp() override
+    {
+        ASSERT_EQ(htaccess_cache_init(16), 0);
+    }
+    void TearDown() override
+    {
+        htaccess_cache_destroy();
+    }
 };
 
 /* ==================================================================
@@ -56,14 +61,29 @@ TEST(CacheLifecycle, InitZeroBucketsUsesDefault)
     htaccess_cache_destroy();
 }
 
+TEST(CacheLifecycle, ReinitDestroysExistingCache)
+{
+    ASSERT_EQ(htaccess_cache_init(8), 0);
+
+    const char *path = "/var/www/.htaccess";
+    htaccess_directive_t *dirs = make_directive(DIR_HEADER_SET, "X-Old", "old-val", 1);
+    ASSERT_EQ(htaccess_cache_put(path, 1000, 0, 0, dirs), 0);
+
+    ASSERT_EQ(htaccess_cache_init(16), 0);
+
+    htaccess_directive_t *out = nullptr;
+    EXPECT_EQ(htaccess_cache_get(path, 1000, 0, 0, &out), -1);
+
+    htaccess_cache_destroy();
+}
+
 /* ==================================================================
  *  2. Put then get with matching mtime → hit
  * ================================================================== */
 
 TEST_F(CacheTest, PutThenGetMatchingMtime_ReturnsHit)
 {
-    htaccess_directive_t *dirs = make_directive(
-        DIR_HEADER_SET, "X-Test", "value1", 1);
+    htaccess_directive_t *dirs = make_directive(DIR_HEADER_SET, "X-Test", "value1", 1);
     time_t mtime = 1000;
 
     ASSERT_EQ(htaccess_cache_put("/var/www/.htaccess", mtime, 0, 0, dirs), 0);
@@ -81,8 +101,7 @@ TEST_F(CacheTest, PutThenGetMatchingMtime_ReturnsHit)
 
 TEST_F(CacheTest, GetWithDifferentMtime_ReturnsMiss)
 {
-    htaccess_directive_t *dirs = make_directive(
-        DIR_HEADER_SET, "X-Test", "value1", 1);
+    htaccess_directive_t *dirs = make_directive(DIR_HEADER_SET, "X-Test", "value1", 1);
 
     ASSERT_EQ(htaccess_cache_put("/var/www/.htaccess", 1000, 0, 0, dirs), 0);
 
@@ -106,10 +125,8 @@ TEST_F(CacheTest, GetNonExistentPath_ReturnsMiss)
 
 TEST_F(CacheTest, PutReplacesExistingEntry)
 {
-    htaccess_directive_t *dirs1 = make_directive(
-        DIR_HEADER_SET, "X-Old", "old-val", 1);
-    htaccess_directive_t *dirs2 = make_directive(
-        DIR_HEADER_SET, "X-New", "new-val", 2);
+    htaccess_directive_t *dirs1 = make_directive(DIR_HEADER_SET, "X-Old", "old-val", 1);
+    htaccess_directive_t *dirs2 = make_directive(DIR_HEADER_SET, "X-New", "new-val", 2);
 
     const char *path = "/var/www/.htaccess";
 
@@ -133,12 +150,9 @@ TEST_F(CacheTest, PutReplacesExistingEntry)
 
 TEST_F(CacheTest, MultipleEntriesCoexist)
 {
-    htaccess_directive_t *dirs_a = make_directive(
-        DIR_HEADER_SET, "X-A", "a-val", 1);
-    htaccess_directive_t *dirs_b = make_directive(
-        DIR_PHP_VALUE, "upload_max", "64M", 2);
-    htaccess_directive_t *dirs_c = make_directive(
-        DIR_SETENV, "APP_ENV", "production", 3);
+    htaccess_directive_t *dirs_a = make_directive(DIR_HEADER_SET, "X-A", "a-val", 1);
+    htaccess_directive_t *dirs_b = make_directive(DIR_PHP_VALUE, "upload_max", "64M", 2);
+    htaccess_directive_t *dirs_c = make_directive(DIR_SETENV, "APP_ENV", "production", 3);
 
     ASSERT_EQ(htaccess_cache_put("/site-a/.htaccess", 100, 0, 0, dirs_a), 0);
     ASSERT_EQ(htaccess_cache_put("/site-b/.htaccess", 200, 0, 0, dirs_b), 0);
@@ -199,8 +213,7 @@ TEST_F(CacheTest, GetNullOutDirectives_ReturnsMiss)
 
 TEST_F(CacheTest, PutNullFilepath_ReturnsError)
 {
-    htaccess_directive_t *dirs = make_directive(
-        DIR_HEADER_SET, "X-Test", "val", 1);
+    htaccess_directive_t *dirs = make_directive(DIR_HEADER_SET, "X-Test", "val", 1);
     EXPECT_EQ(htaccess_cache_put(nullptr, 1000, 0, 0, dirs), -1);
     /* We must free dirs ourselves since put didn't take ownership */
     htaccess_directives_free(dirs);

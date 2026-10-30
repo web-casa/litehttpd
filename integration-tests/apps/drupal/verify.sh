@@ -8,6 +8,7 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=integration-tests/lib/assert.sh
 source "${SCRIPT_DIR}/../../lib/assert.sh"
 
 APP_PATH="/drupal/web"
@@ -16,6 +17,8 @@ DB_NAME="drupal"
 DB_USER="appuser"
 DB_PASS="apppass"
 DB_HOST="db"
+DRUPAL_PROJECT_VERSION="${DRUPAL_PROJECT_VERSION:-^10.6}"
+DRUSH_VERSION="${DRUSH_VERSION:-^12.5}"
 
 # ---------------------------------------------------------------------------
 # Install Drupal if not already present
@@ -39,9 +42,9 @@ install_drupal() {
     docker_exec bash -c "
         cd /var/www/vhosts/localhost/html && \
         rm -rf drupal && \
-        COMPOSER_ALLOW_SUPERUSER=1 composer create-project drupal/recommended-project drupal --no-interaction && \
+        COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_MEMORY_LIMIT=-1 composer create-project 'drupal/recommended-project:${DRUPAL_PROJECT_VERSION}' drupal --no-interaction --no-progress --prefer-dist && \
         cd drupal && \
-        COMPOSER_ALLOW_SUPERUSER=1 composer require drush/drush --no-interaction
+        COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_MEMORY_LIMIT=-1 composer require 'drush/drush:${DRUSH_VERSION}' --no-interaction --no-progress --prefer-dist
     "
 
     # Install Drupal via Drush

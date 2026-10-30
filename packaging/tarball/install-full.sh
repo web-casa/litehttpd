@@ -26,6 +26,47 @@ if [ ! -d "$SRC" ]; then
     exit 1
 fi
 
+have_library() {
+    lib="$1"
+    if command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -q "$lib"; then
+        return 0
+    fi
+    for dir in /lib /lib64 /usr/lib /usr/lib64 \
+        /lib/aarch64-linux-gnu /usr/lib/aarch64-linux-gnu \
+        /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu
+    do
+        [ -e "$dir/$lib" ] && return 0
+    done
+    return 1
+}
+
+ensure_runtime_deps() {
+    # EL10 no longer ships libcrypt.so.1 by default, but the EL8-built OLS
+    # binary and bundled WebAdmin PHP still need that compatibility library.
+    have_library libcrypt.so.1 && return 0
+
+    echo "Installing runtime compatibility dependency: libcrypt.so.1"
+    if command -v dnf >/dev/null 2>&1; then
+        dnf -y install libxcrypt-compat
+    elif command -v yum >/dev/null 2>&1; then
+        yum -y install libxcrypt-compat
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update
+        apt-get install -y libcrypt1
+    else
+        echo "ERROR: libcrypt.so.1 is missing and no supported package manager was found." >&2
+        echo "Install libxcrypt-compat (EL) or libcrypt1 (Debian/Ubuntu), then re-run." >&2
+        exit 1
+    fi
+
+    have_library libcrypt.so.1 || {
+        echo "ERROR: libcrypt.so.1 is still missing after dependency installation." >&2
+        exit 1
+    }
+}
+
+ensure_runtime_deps
+
 # This package installs a COMPLETE patched OpenLiteSpeed. If one is already
 # installed, prefer the overlay package (it preserves your config). Only
 # overwrite when FORCE=1, and back up the existing tree first.
@@ -51,7 +92,11 @@ getent group nogroup >/dev/null 2>&1 || groupadd -r nogroup || true
 
 # ── Copy the install tree ──
 mkdir -p "$PREFIX"
-cp -a "$SRC/." "$PREFIX/"
+if cp --help 2>/dev/null | grep -q -- '--no-preserve'; then
+    cp -a --no-preserve=context "$SRC/." "$PREFIX/"
+else
+    cp -a "$SRC/." "$PREFIX/"
+fi
 echo TGZ > "$PREFIX/PLAT"
 
 # ── Enable litehttpd module + rewrite + index.php (matches RPM %post) ──
@@ -76,7 +121,7 @@ After=network.target
 
 [Service]
 Type=forking
-PIDFile=$PREFIX/logs/lshttpd.pid
+PIDFile=/tmp/lshttpd/lshttpd.pid
 ExecStart=$PREFIX/bin/lswsctrl start
 ExecStop=$PREFIX/bin/lswsctrl stop
 ExecReload=$PREFIX/bin/lswsctrl restart
@@ -85,6 +130,9 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 UNIT
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon -RF "$PREFIX" /etc/systemd/system/lshttpd.service 2>/dev/null || true
+    fi
     systemctl daemon-reload || true
     echo "systemd unit installed: systemctl enable --now lshttpd"
 fi

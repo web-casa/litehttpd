@@ -8,6 +8,7 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=integration-tests/lib/assert.sh
 source "${SCRIPT_DIR}/../../lib/assert.sh"
 
 APP_PATH="/nextcloud"
@@ -97,10 +98,12 @@ HTEOF
 # Tests
 # ---------------------------------------------------------------------------
 
-test_login_page() {
-    # Nextcloud redirects / to /login on fresh install
-    _fetch GET "${APP_PATH}/"
-    [[ "$_LAST_STATUS_CODE" == "200" || "$_LAST_STATUS_CODE" == "302" ]]
+test_protected_route_requires_login() {
+    # Check an authenticated route without relying on the login page render.
+    # status.php below verifies direct PHP mapping and response headers.
+    _fetch GET "${APP_PATH}/index.php/apps/files/"
+    [[ "$_LAST_STATUS_CODE" == "401" ]] && \
+    grep -qF "Current user is not logged in" <<< "$_LAST_RESPONSE_BODY"
 }
 
 test_security_header_nosniff() {
@@ -133,7 +136,7 @@ echo "========================================"
 
 install_nextcloud
 
-run_test "Login page accessible"      test_login_page
+run_test "Protected route requires login" test_protected_route_requires_login
 run_test "X-Content-Type-Options set" test_security_header_nosniff
 run_test "X-Robots-Tag set"           test_security_header_robots
 run_test "X-Frame-Options set"        test_security_header_frame

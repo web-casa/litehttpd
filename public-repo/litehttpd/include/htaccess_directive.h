@@ -133,6 +133,13 @@ typedef enum {
     DIR_REMOVE_TYPE,                   /* 77 — RemoveType .ext1 .ext2 */
     DIR_REMOVE_HANDLER,                /* 78 — RemoveHandler .ext1 .ext2 */
     DIR_ACTION,                        /* 79 — Action media-type cgi-script */
+
+    /* Phase 10: explicit user/group Require (previously dropped → fail-open) */
+    DIR_REQUIRE_USER,                  /* 80 — Require user u1 u2 ... (value=list) */
+    DIR_REQUIRE_GROUP,                 /* 81 — Require group g1 ... (unsupported → deny) */
+
+    /* Phase 10: trusted-proxy gate for brute-force X-Forwarded-For parsing */
+    DIR_BRUTE_FORCE_TRUSTED_PROXY,     /* 82 — BruteForceTrustedProxy <cidr-list> */
 } directive_type_t;
 
 /**

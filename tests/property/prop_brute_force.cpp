@@ -183,7 +183,7 @@ RC_GTEST_FIXTURE_PROP(BruteForcePropertyFixture,
     }
 
     /* Manually expire the record by setting first_attempt to the past */
-    brute_force_record_t *rec = shm_get_record(ip.c_str());
+    brute_force_record_t *rec = shm_get_record(("b:" + ip).c_str());
     RC_ASSERT(rec != nullptr);
     rec->first_attempt = time(NULL) - window - 1;
 
@@ -197,7 +197,7 @@ RC_GTEST_FIXTURE_PROP(BruteForcePropertyFixture,
     RC_ASSERT(session_.get_status_code() == 200);
 
     /* Verify the record was reset to count=1 */
-    rec = shm_get_record(ip.c_str());
+    rec = shm_get_record(("b:" + ip).c_str());
     RC_ASSERT(rec != nullptr);
     RC_ASSERT(rec->attempt_count == 1);
 

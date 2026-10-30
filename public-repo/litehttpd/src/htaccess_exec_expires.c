@@ -6,9 +6,18 @@
 #include "htaccess_exec_expires.h"
 #include "htaccess_expires.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+
+/* Cap applied ONLY to the addend used to compute the Expires date, so that
+ * `time(NULL) + addend` cannot overflow time_t (signed-overflow UB / garbage
+ * date) on a crafted huge value such as "ExpiresDefault A9223372036854775807".
+ * ~10 years is far beyond any real cache lifetime and stays within time_t
+ * range regardless of its width. The Cache-Control max-age still carries the
+ * full requested duration (HTTP permits large max-age values). */
+#define EXPIRES_DATE_CAP (10L * 365L * 24L * 3600L)
 
 int exec_expires(lsi_session_t *session, const htaccess_directive_t *directives,
                  const char *content_type)
@@ -69,8 +78,11 @@ int exec_expires(lsi_session_t *session, const htaccess_directive_t *directives,
                                         cache_control_val, cc_len);
         }
 
-        /* Set Expires header to an HTTP-date (current time + duration) */
-        time_t expire_time = time(NULL) + duration_sec;
+        /* Set Expires header to an HTTP-date (current time + duration).
+         * Cap the addend so the time_t addition cannot overflow. */
+        long expire_add = (duration_sec > EXPIRES_DATE_CAP)
+                              ? EXPIRES_DATE_CAP : duration_sec;
+        time_t expire_time = time(NULL) + expire_add;
         struct tm tm_buf;
         char expires_val[64];
         if (gmtime_r(&expire_time, &tm_buf)) {
@@ -108,7 +120,10 @@ int exec_expires(lsi_session_t *session, const htaccess_directive_t *directives,
                                         cache_control_val, cc_len);
         }
 
-        time_t expire_time = time(NULL) + duration_sec;
+        /* Cap the addend so the time_t addition cannot overflow. */
+        long expire_add = (duration_sec > EXPIRES_DATE_CAP)
+                              ? EXPIRES_DATE_CAP : duration_sec;
+        time_t expire_time = time(NULL) + expire_add;
         struct tm tm_buf;
         char expires_val[64];
         if (gmtime_r(&expire_time, &tm_buf)) {

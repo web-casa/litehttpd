@@ -12,10 +12,10 @@ LiteHTTPD（完整版）是默认且推荐的版本。它包含打补丁的 OLS 
 ### 前提条件
 
 - OpenLiteSpeed 1.7.0 或更高版本
-- Linux x86_64 或 ARM64
+- Linux x86_64（当前未发布 ARM64 RPM）
 
 <Tabs>
-<TabItem label="RPM 仓库 (EL 9) -- 推荐">
+<TabItem label="RPM 仓库 (EL 8/9/10) -- 推荐">
 
 <Steps>
 1. 添加 LiteHTTPD RPM 仓库并安装：
@@ -68,7 +68,8 @@ LiteHTTPD（完整版）是默认且推荐的版本。它包含打补丁的 OLS 
    cd openlitespeed
    patch -p1 < /path/to/patches/0001-lsiapi-phpconfig.patch
    patch -p1 < /path/to/patches/0002-lsiapi-rewrite.patch
-   # 应用补丁 0003、0004
+   patch -p1 < /path/to/patches/0003-readapacheconf.patch
+   patch -p1 < /path/to/patches/0004-autoindex-403.patch
    bash build.sh
    ```
 

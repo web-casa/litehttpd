@@ -37,7 +37,7 @@ The `url` can be:
 
 ## .htaccess Configuration (LiteHTTPD Module)
 
-When using the LiteHTTPD module (`ols_htaccess.so`), you can use Apache-style `ErrorDocument` directives in `.htaccess` files:
+When using the LiteHTTPD module (`litehttpd_htaccess.so`), you can use Apache-style `ErrorDocument` directives in `.htaccess` files:
 
 ```apacheconf
 ErrorDocument 404 /errors/404.html

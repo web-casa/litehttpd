@@ -7,7 +7,7 @@ description: 将宝塔面板的 OLS 切换到 LiteHTTPD
 
 aaPanel（宝塔面板）通过应用商店安装 OLS。使用标准 OLS 路径（`/usr/local/lsws/`），但通过面板 UI 管理配置文件。宝塔面板的 OLS 默认**没有 .htaccess 支持**（仅有基本的 `RewriteFile` 处理）— 这就是很多宝塔 + OLS 用户发现 `.htaccess` 规则不生效的原因。
 
-LiteHTTPD 为宝塔面板的 OLS 添加完整的 `.htaccess` 支持（80 种指令）。
+LiteHTTPD 为宝塔面板的 OLS 添加完整的 `.htaccess` 支持（83 种指令类型）。
 
 ## 安装
 

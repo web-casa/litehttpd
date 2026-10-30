@@ -12,7 +12,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <regex.h>
+#include "htaccess_regex.h"
 
 /** Maximum number of regex capture groups supported. */
 #define MAX_CAPTURES 10
@@ -23,72 +23,24 @@
 /** Maximum regex pattern length to prevent ReDoS. */
 #define MAX_REGEX_LEN 512
 
-/* ------------------------------------------------------------------ */
-/*  Thread-local regex cache — avoids regcomp on every request          */
-/* ------------------------------------------------------------------ */
-
-#define REGEX_CACHE_SLOTS 8
-
-static __thread struct {
-    unsigned long hash;    /* djb2 hash of pattern + flags */
-    char         *pat;     /* owned copy of pattern string */
-    regex_t       re;      /* compiled regex */
-    int           valid;
-} regex_cache[REGEX_CACHE_SLOTS];
-
-static unsigned long redir_djb2(const char *str, int flags)
-{
-    unsigned long h = 5381 + (unsigned)flags;
-    while (*str)
-        h = ((h << 5) + h) + (unsigned char)*str++;
-    return h;
-}
-
-static regex_t *get_cached_regex(const char *pattern, int flags)
-{
-    unsigned long h = redir_djb2(pattern, flags);
-    for (int i = 0; i < REGEX_CACHE_SLOTS; i++) {
-        if (regex_cache[i].valid && regex_cache[i].hash == h
-            && strcmp(regex_cache[i].pat, pattern) == 0)
-            return &regex_cache[i].re;
-    }
-    int slot = -1;
-    for (int i = 0; i < REGEX_CACHE_SLOTS; i++) {
-        if (!regex_cache[i].valid) { slot = i; break; }
-    }
-    if (slot < 0) {
-        regfree(&regex_cache[0].re);
-        free(regex_cache[0].pat);
-        for (int i = 0; i < REGEX_CACHE_SLOTS - 1; i++)
-            regex_cache[i] = regex_cache[i + 1];
-        slot = REGEX_CACHE_SLOTS - 1;
-        regex_cache[slot].valid = 0;
-    }
-    if (regcomp(&regex_cache[slot].re, pattern, flags) != 0)
-        return NULL;
-    regex_cache[slot].hash = h;
-    regex_cache[slot].pat = strdup(pattern);
-    if (!regex_cache[slot].pat) {
-        regfree(&regex_cache[slot].re);
-        return NULL;
-    }
-    regex_cache[slot].valid = 1;
-    return &regex_cache[slot].re;
-}
+/* Regex operations migrated to the unified PCRE2 wrapper.
+ * Spec: docs/specs/regex-engine.md. HTRE_HIT_LIMIT is never silently
+ * treated as NO_MATCH here (fail-open defect fixed). */
+#define REDIR_REGEX_TAG 0
 
 /**
  * Substitute $N backreferences in a template string with captured values.
  *
  * @param tmpl      Template string containing $1, $2, etc.
  * @param uri       The original URI that was matched.
- * @param matches   Array of regmatch_t from regexec().
+ * @param matches   Array of htre_match_t from htre_exec().
  * @param nmatch    Number of valid entries in matches[].
  * @param out       Output buffer for the substituted string.
  * @param out_size  Size of the output buffer.
  * @return 0 on success, -1 if output would overflow.
  */
 static int substitute_backrefs(const char *tmpl, const char *uri,
-                               const regmatch_t *matches, size_t nmatch,
+                               const htre_match_t *matches, size_t nmatch,
                                char *out, size_t out_size)
 {
     size_t pos = 0;
@@ -99,15 +51,15 @@ static int substitute_backrefs(const char *tmpl, const char *uri,
             int idx = p[1] - '0';
             p += 2;
 
-            if ((size_t)idx < nmatch && matches[idx].rm_so >= 0) {
-                if (matches[idx].rm_eo < matches[idx].rm_so) {
+            if ((size_t)idx < nmatch && matches[idx].so >= 0) {
+                if (matches[idx].eo < matches[idx].so) {
                     /* Invalid capture group — skip */
                     continue;
                 }
-                size_t cap_len = (size_t)(matches[idx].rm_eo - matches[idx].rm_so);
+                size_t cap_len = (size_t)(matches[idx].eo - matches[idx].so);
                 if (pos + cap_len >= out_size)
                     return -1;
-                memcpy(out + pos, uri + matches[idx].rm_so, cap_len);
+                memcpy(out + pos, uri + matches[idx].so, cap_len);
                 pos += cap_len;
             }
             /* If index out of range, $N is simply removed */
@@ -223,7 +175,7 @@ int exec_redirect_match(lsi_session_t *session, const htaccess_directive_t *dir)
     int uri_len = 0;
     const char *uri;
     const char *pattern;
-    regmatch_t matches[MAX_CAPTURES];
+    htre_match_t matches[MAX_CAPTURES];
     int status;
     char url_buf[MAX_URL_LEN];
     int url_len;
@@ -252,14 +204,20 @@ int exec_redirect_match(lsi_session_t *session, const htaccess_directive_t *dir)
     if (!uri || uri_len <= 0)
         return 0;
 
-    /* Compile regex (cached) */
-    regex_t *rep = get_cached_regex(pattern, REG_EXTENDED);
+    /* Compile regex (cached, resource-limited PCRE2) */
+    htre_regex_t *rep = htre_get_cached(REDIR_REGEX_TAG, pattern, 0, NULL, 0);
     if (!rep)
         return -1; /* Invalid regex */
 
-    /* Match against URI */
-    rc = regexec(rep, uri, MAX_CAPTURES, matches, 0);
-    if (rc != 0) {
+    /* Match against URI; HIT_LIMIT/ERROR must not look like "no match". */
+    rc = htre_exec(rep, uri, MAX_CAPTURES, matches);
+    if (rc == HTRE_HIT_LIMIT || rc == HTRE_ERROR) {
+        lsi_log(session, LSI_LOG_WARN,
+                "[htaccess] RedirectMatch: regex resource limit hit for %s, "
+                "rule skipped", pattern);
+        return 0;
+    }
+    if (rc != HTRE_MATCH) {
         return 0; /* No match */
     }
 

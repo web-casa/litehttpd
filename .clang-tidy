@@ -1,0 +1,18 @@
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  performance-*,
+  portability-*,
+  security.insecureAPI.*,
+  misc-definitions-in-headers,
+  misc-misplaced-const,
+  readability-inconsistent-declaration-parameter-name
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(src|include|tools|tests)/.*'
+FormatStyle: file
+CheckOptions:
+  - key: bugprone-sizeof-expression.WarnOnSizeOfIntegerExpression
+    value: 'false'
+  - key: bugprone-easily-swappable-parameters.MinimumLength
+    value: '4'

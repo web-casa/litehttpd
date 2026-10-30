@@ -1,0 +1,18 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" fill="none" role="img" aria-label="GEO.Fan">
+  <style>
+    .g { stroke: #18181b; }
+    .dot { fill: #e11d48; }
+    @media (prefers-color-scheme: dark) {
+      .g { stroke: #fafafa; }
+      .dot { fill: #fb7185; }
+    }
+  </style>
+  <path
+    class="g"
+    d="M26 6 L6 6 L6 26 L26 26 L26 16 L16 16"
+    stroke-width="3.5"
+    stroke-linecap="square"
+    stroke-linejoin="miter"
+  />
+  <circle class="dot" cx="22" cy="11" r="2.6" />
+</svg>

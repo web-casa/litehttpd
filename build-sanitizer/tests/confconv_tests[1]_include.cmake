@@ -1,0 +1,5 @@
+if(EXISTS "/home/ivmm/ols-extra/build-sanitizer/tests/confconv_tests[1]_tests.cmake")
+  include("/home/ivmm/ols-extra/build-sanitizer/tests/confconv_tests[1]_tests.cmake")
+else()
+  add_test(confconv_tests_NOT_BUILT confconv_tests_NOT_BUILT)
+endif()

@@ -7,6 +7,7 @@ $keys = [
     'CUSTOM_VAR',
     'BROWSER_FLAG',
     'HTTPS',
+    'REQUEST_METHOD',
     'REQUEST_URI',
     'QUERY_STRING',
 ];

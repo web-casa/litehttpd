@@ -51,12 +51,26 @@ typedef void *ls_shmpool_t;        /* opaque SHM pool handle */
 typedef void *ls_shmhash_t;        /* opaque SHM hash table handle */
 typedef long  ls_shmoff_t;         /* SHM offset type */
 
-/* Function pointer types for dlsym */
-typedef ls_shmpool_t (*ls_shm_opengpool_fn)(const char *name, int size);
+/* Function pointer types — signatures MUST match OLS ls_shm.h exactly.
+ * The previous 4-arg shmhash_get mismatched the real 5-arg API: OLS
+ * writes the LSI_SHM_CREATED flag through arg 5 (int *pFlags), which we
+ * never passed — it dereferenced a garbage register and segfaulted the
+ * worker on every brute-force check (found in container e2e, OLS 1.9.4).
+ *
+ * get() semantics (ls_shm.h): finds the entry or CREATES it; the offset
+ * returned is the VALUE offset; *pvalLen in = value size to allocate for
+ * new entries, out = actual length; *pFlags out carries LSI_SHM_CREATED.
+ */
+#define OLS_LSI_SHM_INIT    0x0001u /* in: zero a newly created entry   */
+#define OLS_LSI_SHM_SETTOP  0x0002u /* in: move entry to list top       */
+#define OLS_LSI_SHM_CREATED 0x0001u /* out: a new entry was created     */
+
+typedef ls_shmpool_t (*ls_shm_opengpool_fn)(const char *name, size_t size);
 typedef ls_shmhash_t (*ls_shmhash_open_fn)(ls_shmpool_t pool, const char *name,
-                                            int init_size, int hash_size);
+                                            size_t init_size,
+                                            void *hash_pf, void *comp_pf);
 typedef ls_shmoff_t (*ls_shmhash_get_fn)(ls_shmhash_t ht, const void *key,
-                                          int key_len, ls_shmoff_t *val_off);
+                                          int key_len, int *val_len, int *flags);
 typedef void *(*ls_shmhash_off2ptr_fn)(ls_shmhash_t ht, ls_shmoff_t offset);
 typedef int (*ls_shmhash_lock_fn)(ls_shmhash_t ht);
 typedef int (*ls_shmhash_unlock_fn)(ls_shmhash_t ht);

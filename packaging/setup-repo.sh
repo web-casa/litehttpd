@@ -11,6 +11,7 @@ echo "=== LiteHTTPD RPM Repository Setup ==="
 
 # Detect EL version
 if [ -f /etc/os-release ]; then
+    # shellcheck source=/dev/null
     . /etc/os-release
     MAJOR=$(echo "$VERSION_ID" | cut -d. -f1)
 else
@@ -26,7 +27,7 @@ if [ "$MAJOR" != "8" ] && [ "$MAJOR" != "9" ] && [ "$MAJOR" != "10" ]; then
 fi
 
 if [ "$ARCH" != "x86_64" ]; then
-    echo "Error: Unsupported architecture: $ARCH (only x86_64 is currently supported)"
+    echo "Error: Unsupported architecture: $ARCH (supported: x86_64)"
     exit 1
 fi
 

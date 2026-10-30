@@ -2,6 +2,11 @@
 
 All notable changes to litehttpd will be documented in this file.
 
+## [2.1.5] - 2026-07-05
+
+### Changed
+- Release metadata and final release gates for v2.1.5.
+
 ## [2.1.4] - 2026-06-11
 
 Security hardening release. Audited with a multi-agent review plus external

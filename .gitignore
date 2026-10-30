@@ -6,7 +6,11 @@ out/
 output/
 bin/
 lib/
+!integration-tests/lib/
+!integration-tests/lib/**
 !tests/e2e/lib/
+!tests/e2e/apps-matrix/lib/
+!tests/e2e/apps-matrix/lib/**
 *.o
 *.so
 *.a
@@ -105,3 +109,4 @@ tests/e2e/compare/conf/lsws_docker_template.xml
 
 # Git history backup (local only)
 .git-history-backup.md
+firewalld/target/
