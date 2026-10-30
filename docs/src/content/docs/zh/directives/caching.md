@@ -47,3 +47,22 @@ ExpiresByType text/css "access plus 31536000 seconds"
 ExpiresByType application/x-javascript "access plus 31536000 seconds"
 ExpiresByType image/gif "access plus 31536000 seconds"
 ```
+
+## LSCache 桥接
+
+以下指令从 `.htaccess` 设置 `X-LiteSpeed-Cache-Control` 响应头，
+以应用侧相同的方式驱动 OLS 缓存模块。
+
+| 指令 | 语法 | 作用 |
+|------|------|------|
+| `CacheEnable` | `public\|private\|off` | 本目录树的缓存模式 |
+| `CacheDisable` | （无参数） | `CacheEnable off` 的简写 |
+| `CacheMaxExpire` | `秒` | 缓存 TTL 上限（响应头 `max-age`） |
+| `CacheDefaultExpire` | `秒` | 未指定时的默认 TTL（3600） |
+
+```apache
+CacheEnable public
+CacheMaxExpire 3600
+```
+
+即设置 `X-LiteSpeed-Cache-Control: public,max-age=3600`，无需改动应用代码即可让 OLS 公共缓存缓存该页面。
