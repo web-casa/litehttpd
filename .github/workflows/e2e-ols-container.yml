@@ -112,11 +112,11 @@ jobs:
       # ── Check 4: brute force -> daemon -> nftables kernel rule ──────
       - name: E2E-4 firewall full chain
         run: |
+          docker exec "$CT" mkdir -p /var/www/vhosts/localhost/html/wp
           printf '<?php echo "login"; ?>' > /tmp/wp-index.php
           docker cp /tmp/wp-index.php "$CT":/var/www/vhosts/localhost/html/wp/index.php
           docker exec "$CT" sh -c '
             D=/var/www/vhosts/localhost/html
-            mkdir -p $D/wp
             printf "BruteForceProtection On\nBruteForceAllowedAttempts 3\nBruteForceWindow 120\nBruteForceAction block\n" > $D/wp/.htaccess
             chmod 644 $D/wp/.htaccess
             rm -f /var/lib/litehttpd/firewall.db
