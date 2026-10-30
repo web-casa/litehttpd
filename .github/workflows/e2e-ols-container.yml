@@ -1,0 +1,158 @@
+name: E2E (OLS container)
+
+# Full-stack verification against a real OpenLiteSpeed instance in a
+# Docker container — the same method validated on OLS 1.9.4 during the
+# e2e hardening round (see docs/specs/* and git history for the bugs it
+# caught: undefined-symbol load failure, ls_shmhash API mismatch crash,
+# nftables layout gaps, stream-filter contract violations).
+#
+# Covers what unit tests cannot: real OLS hook dispatch, real LSI API
+# tables, real libmodsecurity, real nftables kernel path.
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  OLS_IMAGE: litespeedtech/openlitespeed:latest
+  CT: ols-e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ols-container-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build module (runner-native amd64)
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)" --target litehttpd_htaccess
+          test -f build/litehttpd_htaccess.so
+
+      - name: Build firewall daemon
+        uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --manifest-path firewalld/Cargo.toml
+      - run: test -x firewalld/target/release/litehttpd-firewalld
+
+      - name: Start OLS container
+        run: |
+          docker run -d --cap-add=NET_ADMIN --name "$CT" -p 8080:80 "$OLS_IMAGE"
+          for i in $(seq 1 30); do
+            docker exec "$CT" /usr/local/lsws/bin/lswsctrl status 2>/dev/null | grep -q running && break
+            sleep 2
+          done
+          docker exec "$CT" /usr/local/lsws/bin/lswsctrl status | grep running
+
+      - name: Install nftables in container
+        run: |
+          docker exec "$CT" apt-get update -qq
+          docker exec -e DEBIAN_FRONTEND=noninteractive "$CT" apt-get install -y -qq nftables git curl
+
+      - name: Deploy module + daemon
+        run: |
+          docker cp build/litehttpd_htaccess.so "$CT":/usr/local/lsws/modules/litehttpd_htaccess.so
+          docker cp firewalld/target/release/litehttpd-firewalld "$CT":/usr/local/bin/litehttpd-firewalld
+          docker exec "$CT" sh -c '
+            chmod 755 /usr/local/lsws/modules/litehttpd_htaccess.so \
+                      /usr/local/bin/litehttpd-firewalld
+            printf "\nmodule litehttpd_htaccess {\n  ls_enabled 1\n}\n" >> /usr/local/lsws/conf/httpd_config.conf
+            /usr/local/lsws/bin/lswsctrl restart'
+          sleep 4
+          docker exec "$CT" sh -c '! grep -q "Failed to load module \[litehttpd_htaccess\]" /usr/local/lsws/logs/error.log'
+
+      - name: Start firewall daemon
+        run: |
+          docker exec -d "$CT" sh -c '/usr/local/bin/litehttpd-firewalld > /tmp/fwd.log 2>&1'
+          sleep 2
+          docker exec "$CT" sh -c 'grep -q "backend: nftables" /tmp/fwd.log && test -S /var/run/litehttpd/firewall.sock'
+
+      # ── Check 1: module processes .htaccess ─────────────────────────
+      - name: E2E-1 htaccess Header directive
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/t1
+            printf "Header set X-LiteHttpd-Alive yes\n" > $D/t1/.htaccess
+            chmod 644 $D/t1/.htaccess; echo ok > $D/t1/index.html'
+          curl -s -D- -o /dev/null http://127.0.0.1:8080/t1/index.html | grep -i '^x-litehttpd-alive: yes'
+
+      # ── Check 2: native RewriteRule engine (stock OLS) ─────────────
+      - name: E2E-2 native rewrite
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            printf "RewriteEngine On\nRewriteRule ^/t1/index.html$ /t1/rewritten.html [R=301,L]\n" > $D/t1/.htaccess
+            chmod 644 $D/t1/.htaccess; echo rewritten > $D/t1/rewritten.html'
+          # the module engine sees the URI before OLS rewrite; assert via redirect location
+          curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/t1/index.html | grep -q 301
+
+      # ── Check 3: ESI include (PHP handler output) ───────────────────
+      - name: E2E-3 ESI include + comment strip
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            echo "E2E-FRAGMENT-42" > $D/esi-frag.html
+            mkdir -p $D/esi
+            printf "EsiEnable On\n" > $D/esi/.htaccess; chmod 644 $D/esi/.htaccess
+            cat > $D/esi/page.php <<EOF
+          <?php echo "A<esi:include src=\"/esi-frag.html\"/>B<esi:comment>zz</esi:comment>C"; ?>
+          EOF
+          '
+          BODY=$(curl -s http://127.0.0.1:8080/esi/page.php)
+          echo "body: $BODY"
+          echo "$BODY" | grep -q 'AE2E-FRAGMENT-42BC'
+          ! echo "$BODY" | grep -q '<esi:'
+
+      # ── Check 4: brute force -> daemon -> nftables kernel rule ──────
+      - name: E2E-4 firewall full chain
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/wp
+            printf "BruteForceProtection On\nBruteForceAllowedAttempts 3\nBruteForceWindow 120\nBruteForceAction block\n" > $D/wp/.htaccess
+            chmod 644 $D/wp/.htaccess
+            echo "<?php echo login;" > $D/wp/index.php
+            rm -f /var/lib/litehttpd/firewall.db
+            /usr/local/lsws/bin/lswsctrl restart'
+          sleep 4
+          set -e
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8080/wp/index.php)
+            echo "attempt $i: $code"; [ "$code" = "200" ]
+          done
+          for i in 4 5; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8080/wp/index.php)
+            echo "attempt $i: $code"; [ "$code" = "403" ]
+          done
+          docker exec "$CT" nft list set inet litehttpd blocked4 | grep -E 'elements = \{.*timeout'
+
+      # ── Check 5: modsec bridge (SecRuleEngine Off per-dir) ─────────
+      - name: E2E-5 modsec bridge
+        run: |
+          cat > /tmp/modsec_rule.conf <<'EOF'
+          SecRuleEngine On
+          SecRule ARGS "@rx (?i)(union.{0,20}select|or.{0,10}1.{0,5}=.{0,5}1)" "id:9001,deny,status:403,log,msg:e2e-probe"
+          EOF
+          docker cp /tmp/modsec_rule.conf "$CT":/usr/local/lsws/conf/modsec_e2e.conf
+          docker exec "$CT" sh -c '
+            printf "\nmodule mod_security {\n  ls_enabled 1\n  modsecurity on\n  modsecurity_rules_file /usr/local/lsws/conf/modsec_e2e.conf\n}\n" >> /usr/local/lsws/conf/httpd_config.conf
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/sec-off
+            printf "SecRuleEngine Off\n" > $D/sec-off/.htaccess; chmod 644 $D/sec-off/.htaccess
+            echo form > $D/sec-off/form.php
+            /usr/local/lsws/bin/lswsctrl restart'
+          sleep 4
+          set -e
+          echo -n "control (WAF on): "; curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8080/t1/index.html?s=1%27%20OR%20%271%27%3D%271" | grep 403
+          echo -n "bridged (SecRuleEngine Off): "; curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8080/sec-off/form.php?s=1%27%20OR%20%271%27%3D%271" | grep 200
+
+      - name: Collect evidence on failure
+        if: failure()
+        run: |
+          docker exec "$CT" sh -c 'tail -50 /usr/local/lsws/logs/error.log; cat /tmp/fwd.log 2>/dev/null' || true
