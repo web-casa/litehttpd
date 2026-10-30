@@ -112,9 +112,15 @@ jobs:
       # ── Check 3b: DYNAMIC ESI include (loopback PHP sub-request) ────
       - name: E2E-3b dynamic ESI (PHP fragment)
         run: |
-          printf '<?php $n = $_GET["n"] ?? "?"; echo "CI-FRAG[" . $n . "]"; ?>' > /tmp/frag.php
-          printf '<?php echo "A<esi:include src=\"/dyn/frag.php?n=7\"/>B<esi:comment>zz</esi:comment>C"; ?>' > /tmp/page.php
-          printf '<?php echo "X<esi:include src=\"/dyn/nothere.php\"/>Y"; ?>' > /tmp/miss.php
+          cat > /tmp/frag.php <<'PHPEOF'
+          <?php $n = $_GET["n"] ?? "?"; echo "CI-FRAG[" . $n . "]"; ?>
+          PHPEOF
+          cat > /tmp/page.php <<'PHPEOF'
+          <?php echo "A<esi:include src=\"/dyn/frag.php?n=7\"/>B<esi:comment>zz</esi:comment>C"; ?>
+          PHPEOF
+          cat > /tmp/miss.php <<'PHPEOF'
+          <?php echo "X<esi:include src=\"/dyn/nothere.php\"/>Y"; ?>
+          PHPEOF
           docker exec "$CT" mkdir -p /var/www/vhosts/localhost/html/dyn
           docker cp /tmp/frag.php "$CT":/var/www/vhosts/localhost/html/dyn/frag.php
           docker cp /tmp/page.php "$CT":/var/www/vhosts/localhost/html/dyn/page.php
