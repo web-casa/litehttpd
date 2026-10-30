@@ -71,6 +71,41 @@ client as visible text.
 
 ## Dynamic Includes
 
-`<esi:include>` resolves **static files** in v1. Includes pointing at PHP
-endpoints (sub-request rendering, per-fragment caching) are on the roadmap
-and not yet executed — such tags are currently removed from the output.
+An `src` that does not match a static file (or points at a handler such
+as `.php`) is resolved as a **loopback sub-request**: the fragment runs
+the full OLS pipeline — `.htaccess`, PHP/LSAPI, mod_security — and its
+response body is spliced into the page. This is the LSWS Enterprise
+dynamic-ESI behaviour.
+
+```apache
+EsiEnable On
+```
+
+```php
+<?php echo 'Hello <esi:include src="/cart-summary.php"/>!'; ?>
+```
+
+`/cart-summary.php` executes with the parent's **Cookie** and **Host**
+headers forwarded, so session-dependent fragments render correctly. Query
+strings pass through (`/frag.php?n=7`).
+
+Semantics and safeguards:
+
+- **Hold-and-join**: output is retained from the first dynamic include
+  and joined at response end — a page never streams out of order.
+- **Hard budgets**: 1s per fragment, 2.5s per page (env
+  `LITEHTTPD_ESI_DYN_TIMEOUT_MS` / `LITEHTTPD_ESI_DYN_TOTAL_MS`), 16
+  fragments per page, 64 KB per fragment body. Every overflow removes the
+  tag and completes the page (fail-open).
+- **Loop protection**: fragment requests carry
+  `X-LiteHttpd-Esi-Subrequest: 1` (visible to PHP in
+  `$_SERVER`); a marked request refuses further *dynamic* includes —
+  static ESI inside fragments still works.
+- **Handler files are never inlined as source**: `.php` and friends skip
+  the static fast path unconditionally.
+- **Workers**: the joiner blocks briefly while a *different* OLS worker
+  serves the fragment (with retries against connection-routing races).
+  Run OLS with **Children ≥ 2**; on a single-worker instance every
+  fragment times out and pages complete fail-open.
+- The loopback target defaults to `127.0.0.1:80`; override with
+  `LITEHTTPD_ESI_LOOPBACK=host:port`.

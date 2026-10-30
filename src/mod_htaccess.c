@@ -168,6 +168,9 @@ static __thread struct {
     int bypass;     /* 1 = gate failed, chunks pass through untouched */
 } esi_req = {NULL, 0, NULL, 0};
 
+/* Set by esi_gate_check when the subrequest marker is present. */
+static __thread int esi_req_subrequest = 0;
+
 static int esi_flush_parked(lsi_param_t *param);
 
 static void esi_req_reset(void)
@@ -225,7 +228,82 @@ static int esi_gate_check(lsi_session_t *session)
     const char *ce = lsi_session_get_resp_header_by_name(
         session, "Content-Encoding", 16, &ce_len);
 
-    return esi_should_process(ct, ct_len, ce, ce_len);
+    if (!esi_should_process(ct, ct_len, ce, ce_len))
+        return 0;
+
+    /* Loop protection: this request is itself an ESI fragment — dynamic
+     * includes inside it are dropped (static ESI still works). */
+    int mk_len = 0;
+    const char *mk = lsi_session_get_req_header_by_name(
+        session, ESI_SUBREQ_MARKER, 27, &mk_len);
+    if (mk && mk_len > 0)
+        esi_req_subrequest = 1;
+    return 1;
+}
+
+/* ── Dynamic-include EOF join ────────────────────────────────────────
+ * Fetch each pending fragment over the loopback (bounded by a shared
+ * page budget; the seam lets tests stub the fetch), splice it over its
+ * placeholder, then strip whatever did not resolve. Called only from the
+ * EOF chunk (and the RCVD safety net). */
+static void esi_dyn_join(lsi_param_t *param)
+{
+    esi_ctx_t *c = esi_req.ctx;
+    if (!c || c->dyn_count == 0)
+        return;
+
+    lsi_session_t *session = (lsi_session_t *)param->session;
+
+    long per = ESI_DYN_PER_MS_DFLT, total = ESI_DYN_TOTAL_MS_DFLT;
+    {
+        const char *e = getenv("LITEHTTPD_ESI_DYN_TIMEOUT_MS");
+        if (e && atoi(e) > 0)
+            per = atoi(e);
+        e = getenv("LITEHTTPD_ESI_DYN_TOTAL_MS");
+        if (e && atoi(e) > 0)
+            total = atoi(e);
+    }
+
+    /* Parent headers forwarded to the fragment (session-dependent frags) */
+    int hlen = 0;
+    const char *host = lsi_session_get_req_header_by_name(
+        session, "Host", 4, &hlen);
+    char host_buf[512];
+    if (host && hlen > 0) {
+        if (hlen > 511)
+            hlen = 511;
+        memcpy(host_buf, host, hlen);
+        host_buf[hlen] = '\0';
+        host = host_buf;
+    } else {
+        host = NULL;
+    }
+    int clen = 0;
+    const char *cookie = lsi_session_get_req_header_by_name(
+        session, "Cookie", 6, &clen);
+    char cookie_buf[2048];
+    if (cookie && clen > 0) {
+        if (clen > 2047)
+            clen = 2047;
+        memcpy(cookie_buf, cookie, clen);
+        cookie_buf[clen] = '\0';
+        cookie = cookie_buf;
+    } else {
+        cookie = NULL;
+    }
+
+    for (int i = 0; i < c->dyn_count; i++) {
+        int budget = (int)((long)per < total ? per : total);
+        if (budget <= 0)
+            break;
+        char *body = NULL;
+        if (esi_dyn_fetch_fn)
+            body = esi_dyn_fetch_fn(c->dyn_uri[i], host, cookie, budget);
+        esi_dyn_splice(c, i, body, body ? strlen(body) : 0);
+        free(body);
+        total -= budget; /* conservative: budget charged even on fast return */
+    }
+    esi_dyn_strip_remaining(c);
 }
 
 int on_recv_resp_body_esi_hook(lsi_param_t *param)
@@ -243,6 +321,7 @@ int on_recv_resp_body_esi_hook(lsi_param_t *param)
             esi_req.ctx = malloc(sizeof(esi_ctx_t));
             if (esi_req.ctx) {
                 esi_ctx_init(esi_req.ctx, dr, (size_t)(dr_len > 0 ? dr_len : 0));
+                esi_req.ctx->subrequest = esi_req_subrequest;
                 esi_req.bypass = 0;
             } else {
                 esi_req.bypass = 1; /* OOM: pass through unchanged */
@@ -263,9 +342,10 @@ int on_recv_resp_body_esi_hook(lsi_param_t *param)
         return ht_stream_write(param, (const char *)param->ptr1, param->len1);
 
     if (param->flag_in & LSI_CBFI_EOF) {
-        /* Final chunk: drain parked output, process, emit the finish tail,
-         * and end the stream. Partial accept at EOF parks for the RCVD
-         * safety net. */
+        /* Final chunk: drain parked output, process, then — if dynamic
+         * includes are pending — run the bounded EOF join (fetch each
+         * fragment over the loopback, splice over its placeholder), emit
+         * the finish tail, and end the stream. */
         if (!esi_flush_parked(param))
             return param->len1; /* still blocked; RCVD net will retry */
 
@@ -273,6 +353,70 @@ int on_recv_resp_body_esi_hook(lsi_param_t *param)
         size_t out_len = 0;
         esi_process(esi_req.ctx, (const char *)param->ptr1,
                     (size_t)param->len1, &out, &out_len);
+
+        /* Dynamic hold: collect this chunk's output, run the join, and
+         * emit the whole held buffer. Out-of-order streaming never
+         * happened, so ordering is trivially preserved. */
+        if (esi_req.ctx->dyn_holding) {
+            esi_ctx_t *c = esi_req.ctx;
+            if (out_len > 0 && c->dyn_hold_len + out_len <= ESI_MAX_BUFFER) {
+                if (!c->dyn_hold) {
+                    c->dyn_hold = malloc(65536);
+                    c->dyn_hold_cap = c->dyn_hold ? 65536 : 0;
+                }
+                if (c->dyn_hold &&
+                    c->dyn_hold_len + out_len + 1 > c->dyn_hold_cap) {
+                    size_t nc = c->dyn_hold_cap ? c->dyn_hold_cap : 65536;
+                    while (nc < c->dyn_hold_len + out_len + 1)
+                        nc *= 2;
+                    char *nb = realloc(c->dyn_hold, nc);
+                    if (nb) {
+                        c->dyn_hold = nb;
+                        c->dyn_hold_cap = nc;
+                    }
+                }
+                if (c->dyn_hold && c->dyn_hold_cap > c->dyn_hold_len) {
+                    size_t n = out_len;
+                    if (n > c->dyn_hold_cap - c->dyn_hold_len)
+                        n = c->dyn_hold_cap - c->dyn_hold_len;
+                    memcpy(c->dyn_hold + c->dyn_hold_len, out, n);
+                    c->dyn_hold_len += n;
+                }
+            }
+            esi_finish(c, &out, &out_len); /* flush held-back partial tags */
+            if (out_len > 0 && c->dyn_hold_len + out_len <= ESI_MAX_BUFFER) {
+                if (c->dyn_hold_len + out_len + 1 > c->dyn_hold_cap &&
+                    c->dyn_hold) {
+                    size_t nc = c->dyn_hold_cap;
+                    while (nc < c->dyn_hold_len + out_len + 1)
+                        nc *= 2;
+                    char *nb = realloc(c->dyn_hold, nc);
+                    if (nb) {
+                        c->dyn_hold = nb;
+                        c->dyn_hold_cap = nc;
+                    }
+                }
+                if (c->dyn_hold &&
+                    c->dyn_hold_cap >= c->dyn_hold_len + out_len) {
+                    memcpy(c->dyn_hold + c->dyn_hold_len, out, out_len);
+                    c->dyn_hold_len += out_len;
+                }
+            }
+
+            /* ── EOF join: bounded fetch + splice ── */
+            esi_dyn_join(param);
+
+            /* Emit the joined buffer (bounded retry via RCVD net on
+             * partial writes is unnecessary at this size — a single
+             * write; on failure the response ends short, same as any
+             * filter I/O failure). */
+            if (c->dyn_hold_len > 0)
+                ht_stream_write(param, c->dyn_hold, (int)c->dyn_hold_len);
+            ht_stream_write(param, NULL, 0); /* end of stream */
+            esi_req_reset();
+            return param->len1;
+        }
+
         int written = 0;
         if (out_len > 0)
             written = ht_stream_write(param, out, (int)out_len);
@@ -306,6 +450,42 @@ int on_recv_resp_body_esi_hook(lsi_param_t *param)
     size_t out_len = 0;
     esi_process(esi_req.ctx, (const char *)param->ptr1, (size_t)param->len1,
                 &out, &out_len);
+
+    /* Dynamic-include hold mode: from the chunk that produced the first
+     * placeholder, output is retained (static tags keep processing inside
+     * it) and joined at EOF — never streamed out of order. */
+    if (esi_req.ctx->dyn_holding) {
+        esi_ctx_t *c = esi_req.ctx;
+        if (out_len > 0 && c->dyn_hold_len + out_len <= ESI_MAX_BUFFER) {
+            if (!c->dyn_hold) {
+                c->dyn_hold = malloc(65536);
+                c->dyn_hold_cap = c->dyn_hold ? 65536 : 0;
+            }
+            if (c->dyn_hold &&
+                c->dyn_hold_len + out_len + 1 > c->dyn_hold_cap) {
+                size_t nc = c->dyn_hold_cap ? c->dyn_hold_cap : 65536;
+                while (nc < c->dyn_hold_len + out_len + 1)
+                    nc *= 2;
+                char *nb = realloc(c->dyn_hold, nc);
+                if (nb) {
+                    c->dyn_hold = nb;
+                    c->dyn_hold_cap = nc;
+                }
+            }
+            if (c->dyn_hold && c->dyn_hold_cap > c->dyn_hold_len) {
+                size_t n = out_len;
+                if (n > c->dyn_hold_cap - c->dyn_hold_len)
+                    n = c->dyn_hold_cap - c->dyn_hold_len;
+                memcpy(c->dyn_hold + c->dyn_hold_len, out, n);
+                c->dyn_hold_len += n;
+            }
+            return param->len1; /* held; joined at EOF */
+        }
+        /* budget exceeded: stop holding, stream onward (placeholders in
+         * the collected part are stripped fail-open at the join) */
+        c->dyn_holding = 0;
+    }
+
     if (out_len == 0)
         return param->len1; /* nothing to emit yet (held back) */
 
@@ -360,8 +540,21 @@ int on_rcvd_resp_body_esi_hook(lsi_param_t *param)
         char *out = NULL;
         size_t out_len = 0;
         esi_finish(esi_req.ctx, &out, &out_len);
-        if (out_len > 0)
+        if (esi_req.ctx->dyn_holding) {
+            /* EOF chunk never came (or was backpressured): collect the
+             * finish tail, join, and emit the held buffer whole. */
+            esi_ctx_t *c = esi_req.ctx;
+            if (out_len > 0 && c->dyn_hold_len + out_len <= ESI_MAX_BUFFER &&
+                c->dyn_hold && c->dyn_hold_cap >= c->dyn_hold_len + out_len) {
+                memcpy(c->dyn_hold + c->dyn_hold_len, out, out_len);
+                c->dyn_hold_len += out_len;
+            }
+            esi_dyn_join(param);
+            if (c->dyn_hold_len > 0)
+                ht_stream_write(param, c->dyn_hold, (int)c->dyn_hold_len);
+        } else if (out_len > 0) {
             ht_stream_write(param, out, (int)out_len);
+        }
         ht_stream_write(param, NULL, 0); /* end of stream */
     }
     esi_req_reset();

@@ -65,5 +65,35 @@ ESI 仅作用于 `text/html` 与 `application/xhtml+xml` 响应，且从不处�
 
 ## 动态 Include
 
-v1 的 `<esi:include>` 解析**静态文件**。指向 PHP 端点的 include（子请求
-渲染、片段级缓存）在路线图中，当前会被移除而不执行。
+`src` 不匹配静态文件（或指向 `.php` 等处理器）时按**回环子请求**解析：
+片段走完整 OLS 管线——`.htaccess`、PHP/LSAPI、mod_security——其响应体
+被拼接进页面。这正是 LSWS 企业版的动态 ESI 行为。
+
+```apache
+EsiEnable On
+```
+
+```php
+<?php echo 'Hello <esi:include src="/cart-summary.php"/>!'; ?>
+```
+
+`/cart-summary.php` 执行时会透传父请求的 **Cookie** 与 **Host** 头，
+因此依赖会话的片段能正确渲染。查询串原样传递（`/frag.php?n=7`）。
+
+语义与防护：
+
+- **持留-汇聚**：从首个动态 include 起输出被持留，在响应末尾统一拼接
+  ——页面绝不会乱序流出。
+- **硬预算**：每片段 1 秒、每页 2.5 秒（环境变量
+  `LITEHTTPD_ESI_DYN_TIMEOUT_MS` / `LITEHTTPD_ESI_DYN_TOTAL_MS`）、
+  每页 16 个片段、每片段响应体 64 KB。任何超限都移除标签并照常完成
+  页面（fail-open）。
+- **防递归**：片段请求携带 `X-LiteHttpd-Esi-Subrequest: 1`（PHP 可在
+  `$_SERVER` 中看到）；带标记的请求拒绝进一步的**动态** include——
+  片段内的静态 ESI 照常工作。
+- **处理器文件绝不作为源码内联**：`.php` 等后缀无条件跳过静态快径。
+- **Worker 数**：join 期间由**另一个** OLS worker 服务片段（带重试以
+  对抗连接路由竞态）。OLS 需 **Children ≥ 2**；单 worker 实例上所有
+  片段都会超时并按 fail-open 完成页面。
+- 回环目标默认 `127.0.0.1:80`；用 `LITEHTTPD_ESI_LOOPBACK=host:port`
+  覆盖。

@@ -109,6 +109,27 @@ jobs:
           echo "$BODY" | grep -q 'AE2E-FRAGMENT-42BC'
           ! echo "$BODY" | grep -q '<esi:'
 
+      # ── Check 3b: DYNAMIC ESI include (loopback PHP sub-request) ────
+      - name: E2E-3b dynamic ESI (PHP fragment)
+        run: |
+          printf '<?php $n = $_GET["n"] ?? "?"; echo "CI-FRAG[" . $n . "]"; ?>' > /tmp/frag.php
+          printf '<?php echo "A<esi:include src=\"/dyn/frag.php?n=7\"/>B<esi:comment>zz</esi:comment>C"; ?>' > /tmp/page.php
+          printf '<?php echo "X<esi:include src=\"/dyn/nothere.php\"/>Y"; ?>' > /tmp/miss.php
+          docker exec "$CT" mkdir -p /var/www/vhosts/localhost/html/dyn
+          docker cp /tmp/frag.php "$CT":/var/www/vhosts/localhost/html/dyn/frag.php
+          docker cp /tmp/page.php "$CT":/var/www/vhosts/localhost/html/dyn/page.php
+          docker cp /tmp/miss.php "$CT":/var/www/vhosts/localhost/html/dyn/miss.php
+          docker exec "$CT" sh -c 'printf "EsiEnable On\n" > /var/www/vhosts/localhost/html/dyn/.htaccess; chmod 644 /var/www/vhosts/localhost/html/dyn/.htaccess'
+          set -e
+          # soak 10x: the loopback sub-request must not race the joiner
+          for i in $(seq 1 10); do
+            BODY=$(curl -s -m 10 http://127.0.0.1:8080/dyn/page.php)
+            echo "$BODY" | grep -q '^ACI-FRAG\[7\]BC$' || { echo "attempt $i got: $BODY"; exit 1; }
+          done
+          echo "dynamic include: 10/10"
+          # fail-open on a missing fragment endpoint
+          curl -s -m 10 http://127.0.0.1:8080/dyn/miss.php | grep -q '^XY$'
+
       # ── Check 4: brute force -> daemon -> nftables kernel rule ──────
       - name: E2E-4 firewall full chain
         run: |

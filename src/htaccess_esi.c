@@ -81,6 +81,21 @@ static const char *find_str(const char *hay, size_t hay_len, const char *needle)
 
 /* Defined below the state machine; forward-declared for the INCLUDE path. */
 static char *esi_extract_src(const char *tag_start, size_t tag_len);
+static int esi_src_is_handler(const char *path);
+
+/* Dynamic-include placeholder: \x01LHE<i32le>\x02 — 8 bytes, collision-safe
+ * in text bodies; spliced at EOF by esi_dyn_splice. */
+#define ESI_PH_LEN 8
+static void emit_placeholder(esi_ctx_t *ctx, int idx)
+{
+    unsigned char ph[ESI_PH_LEN] = {0x01, 'L', 'H', 'E',
+                                     0, 0, 0, 0, };
+    ph[4] = (unsigned char)(idx & 0xff);
+    ph[5] = (unsigned char)((idx >> 8) & 0xff);
+    ph[6] = (unsigned char)((idx >> 16) & 0xff);
+    ph[7] = 0x02;
+    buf_append(ctx, (const char *)ph, ESI_PH_LEN);
+}
 
 /* Chunk-boundary hold-back: a tag split across body chunks must never leak
  * to the client as literal text. The context retains a possible partial
@@ -227,19 +242,42 @@ size_t esi_process(esi_ctx_t *ctx, const char *input, size_t input_len,
                         /* Extract src attribute */
                         char *src = esi_extract_src(tag_start, full_tag_len);
                         if (src) {
-                            /* Read included file, bounded by the ctx docroot.
-                             * NULL docroot refuses the include (fail closed). */
+                            /* Static-first: try the file read bounded by the
+                             * docroot (NULL docroot refuses, fail closed). */
                             size_t inc_len = 0;
-                            char *inc_content = esi_include_read(
-                                src, ctx->docroot, ctx->docroot_len, &inc_len);
-                            free(src);
+                            char *file_part = src;
+                            char *q = strchr(src, '?');
+                            if (q) {
+                                *q = '\0';
+                                file_part = src;
+                            }
+                            char *inc_content = NULL;
+                            if (!esi_src_is_handler(file_part))
+                                inc_content = esi_include_read(
+                                    file_part, ctx->docroot, ctx->docroot_len,
+                                    &inc_len);
+                            if (q)
+                                *q = '?';
 
                             if (inc_content && inc_len > 0) {
-                                /* Replace tag with content */
                                 buf_append(ctx, inc_content, inc_len);
                                 free(inc_content);
+                            } else if (!ctx->subrequest &&
+                                       ctx->dyn_count < ESI_DYN_MAX &&
+                                       esi_dyn_uri_valid(src)) {
+                                /* Dynamic include: record the URI and emit a
+                                 * placeholder; the hook holds output from now
+                                 * on and splices the fetched body at EOF. */
+                                ctx->dyn_uri[ctx->dyn_count] = strdup(src);
+                                if (ctx->dyn_uri[ctx->dyn_count]) {
+                                    emit_placeholder(ctx, ctx->dyn_count);
+                                    ctx->dyn_count++;
+                                    ctx->dyn_holding = 1;
+                                }
                             }
-                            /* If include fails, tag is silently removed */
+                            /* else: subrequest (loop guard), cap exceeded, or
+                             * invalid URI — tag silently removed (fail-open) */
+                            free(src);
                             consumed += include_tag_len;
                         } else {
                             /* No src attribute — skip tag */
@@ -417,6 +455,121 @@ int esi_should_process(const char *content_type, int content_type_len,
     if (content_type_len >= 21 && strncasecmp(content_type, "application/xhtml+xml", 21) == 0)
         return 1;
     return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Dynamic includes: URI validation + placeholder splice              */
+/* ------------------------------------------------------------------ */
+
+/* Handler-mapped suffixes must NEVER be served by the static fast path —
+ * inlining their source would leak code instead of executing it. These go
+ * through the loopback sub-request so the full pipeline (handlers, .htaccess
+ * ACLs, modsec) applies, exactly like an SSI include virtual. */
+static int esi_src_is_handler(const char *path)
+{
+    static const char *exts[] = {
+        ".php", ".php3", ".php4", ".php5", ".php7", ".php8",
+        ".phtml", ".phar", ".cgi", ".pl", ".py", ".rb", ".jsp",
+        ".asp", ".aspx", NULL,
+    };
+    size_t n = strlen(path);
+    for (int i = 0; exts[i]; i++) {
+        size_t el = strlen(exts[i]);
+        if (n >= el && strcasecmp(path + n - el, exts[i]) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+int esi_dyn_uri_valid(const char *uri)
+{
+    if (!uri || uri[0] != '/')
+        return 0;
+    if (uri[1] == '/') /* scheme-relative bypass */
+        return 0;
+    size_t n = 0;
+    for (const char *p = uri; *p; p++, n++) {
+        unsigned char c = (unsigned char)*p;
+        if (n >= 2048)
+            return 0;
+        if (c <= 0x20 || c == 0x7f) /* no space/CR/LF/control: the URI goes
+                                        verbatim into the request line */
+            return 0;
+    }
+    return 1;
+}
+
+static int ph_index_at(const char *at)
+{
+    /* placeholder body bytes 4..7 hold the LE index; byte 7 is the 0x02
+     * terminator — we store the index in bytes 4..6 only (24 bits) */
+    return (int)((unsigned char)at[4] |
+                 ((unsigned char)at[5] << 8) |
+                 ((unsigned char)at[6] << 16));
+}
+
+void esi_dyn_splice(esi_ctx_t *ctx, int idx, const char *body, size_t body_len)
+{
+    if (!ctx || !ctx->dyn_hold || idx < 0 || idx >= ctx->dyn_count)
+        return;
+    if (!body)
+        body_len = 0;
+
+    /* One pass over dyn_hold copying everything except placeholder `idx`,
+     * which is replaced by the fragment body. Bound the total to
+     * ESI_MAX_BUFFER — on overflow the fragment is truncated (page still
+     * completes; fail-open beats wedging). */
+    size_t cap = ESI_MAX_BUFFER;
+    char *out = malloc(ctx->dyn_hold_len + body_len + 1);
+    if (!out)
+        return; /* OOM: leave placeholder in place (it will be dropped by
+                   the final strip pass) */
+    size_t o = 0, i = 0;
+    while (i + ESI_PH_LEN <= ctx->dyn_hold_len) {
+        if (ctx->dyn_hold[i] == 0x01 && ctx->dyn_hold[i + 1] == 'L' &&
+            ctx->dyn_hold[i + 2] == 'H' && ctx->dyn_hold[i + 3] == 'E' &&
+            (unsigned char)ctx->dyn_hold[i + 7] == 0x02) {
+            if (ph_index_at(ctx->dyn_hold + i) == idx) {
+                if (body && body_len && o + body_len <= cap) {
+                    memcpy(out + o, body, body_len);
+                    o += body_len;
+                }
+                i += ESI_PH_LEN;
+                continue;
+            }
+        }
+        if (o < cap)
+            out[o++] = ctx->dyn_hold[i];
+        i++;
+    }
+    /* trailing bytes shorter than a placeholder */
+    while (i < ctx->dyn_hold_len && o < cap)
+        out[o++] = ctx->dyn_hold[i++];
+    free(ctx->dyn_hold);
+    ctx->dyn_hold = out;
+    ctx->dyn_hold_len = o;
+}
+
+/* Strip any remaining placeholders (unresolved fragments) from the hold
+ * buffer — fail-open final pass. */
+void esi_dyn_strip_remaining(esi_ctx_t *ctx)
+{
+    if (!ctx || !ctx->dyn_hold)
+        return;
+    esi_dyn_splice(ctx, -2, NULL, 0); /* no idx matches -2: copies only */
+    /* the copy pass above preserved other placeholders; remove them literally */
+    size_t o = 0;
+    for (size_t i = 0; i < ctx->dyn_hold_len; ) {
+        if (i + ESI_PH_LEN <= ctx->dyn_hold_len &&
+            ctx->dyn_hold[i] == 0x01 && ctx->dyn_hold[i + 1] == 'L' &&
+            ctx->dyn_hold[i + 2] == 'H' && ctx->dyn_hold[i + 3] == 'E' &&
+            (unsigned char)ctx->dyn_hold[i + 7] == 0x02) {
+            i += ESI_PH_LEN; /* drop any placeholder regardless of index */
+            continue;
+        }
+        ctx->dyn_hold[o++] = ctx->dyn_hold[i++];
+    }
+    ctx->dyn_hold_len = o;
 }
 
 /* ------------------------------------------------------------------ */

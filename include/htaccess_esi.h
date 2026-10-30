@@ -8,6 +8,26 @@ extern "C" {
 #endif
 
 #define ESI_MAX_BUFFER  (1024 * 1024)   /* 1 MB */
+
+/* ── dynamic includes (v2) ──────────────────────────────────────────
+ * An <esi:include> whose src does not resolve to a static file is fetched
+ * via a loopback sub-request (full OLS pipeline: .htaccess, PHP, modsec).
+ * Output is held from the first dynamic tag and joined at EOF under a
+ * hard page-level deadline; every failure removes the tag (fail-open).
+ * Loop protection: sub-requests carry X-LiteHttpd-Esi-Subrequest and the
+ * module refuses dynamic fetches for marked requests. */
+#define ESI_DYN_MAX           16
+#define ESI_DYN_PER_MS_DFLT   1000
+#define ESI_DYN_TOTAL_MS_DFLT 2500
+#define ESI_DYN_BODY_MAX      (64 * 1024)
+#define ESI_SUBREQ_MARKER     "X-LiteHttpd-Esi-Subrequest"
+
+/* Test seam: the loopback fetcher is a function pointer so unit tests can
+ * stub it. uri must be '/'-rooted and pre-validated. Returns a malloc'd
+ * body (NULL on any failure/timeout) and sets *out_len via splice caller. */
+typedef char *(*esi_dyn_fetch_fn_t)(const char *uri, const char *host_hdr,
+                                    const char *cookie_hdr, int deadline_ms);
+extern esi_dyn_fetch_fn_t esi_dyn_fetch_fn;
 #define ESI_SCAN_WINDOW 4096             /* first-N-bytes bypass check */
 
 typedef enum {
@@ -35,6 +55,15 @@ typedef struct {
     /* Downstream backpressure: unwritten output parked at buf[0..pend_len].
      * Kept separate from buf_len, which esi_process clears per call. */
     size_t       pend_len;
+
+    /* ── dynamic includes ── (names distinct from the chunk-reassembly
+     * hold/hold_len above) */
+    char        *dyn_uri[ESI_DYN_MAX]; /* owned URIs, indexed by placeholder */
+    int          dyn_count;
+    int          dyn_holding;           /* 1 once the first dynamic tag was seen */
+    char        *dyn_hold;              /* held output (malloc'd, ESI_MAX_BUFFER) */
+    size_t       dyn_hold_len, dyn_hold_cap;
+    int          subrequest;            /* loop guard: this request IS a fragment */
 } esi_ctx_t;
 
 /* Initialize/reset context. Call once per response.
@@ -95,6 +124,18 @@ void esi_substitute_vars(const char *input, size_t input_len,
  */
 int esi_should_process(const char *content_type, int content_type_len,
                        const char *content_encoding, int content_encoding_len);
+
+/* Splice a fragment body (or "" on failure) over placeholder idx in the
+ * dynamic hold buffer. Pure function on the ctx — unit-tested. */
+void esi_dyn_splice(esi_ctx_t *ctx, int idx, const char *body, size_t body_len);
+
+/* Validate a dynamic include URI for the loopback fetch: '/'-rooted, no
+ * whitespace/CR/LF (header-injection guard), no scheme-relative '//'. */
+int esi_dyn_uri_valid(const char *uri);
+
+/* Final fail-open pass: drop any unresolved placeholders left in the
+ * hold buffer after the join deadline. */
+void esi_dyn_strip_remaining(esi_ctx_t *ctx);
 
 /* ESI include configuration */
 #define ESI_INCLUDE_MAX_SIZE   (64 * 1024)  /* 64KB max per include */

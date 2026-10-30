@@ -136,16 +136,23 @@ TEST(EsiGateTest, OtherBypassed) {
 
 /* ---- ESI include tests ---- */
 TEST(EsiIncludeTest, ExtractSrc) {
-    /* Just test the extraction helper indirectly */
+    /* Missing static + valid URI -> dynamic path: an 8-byte placeholder is
+     * emitted (\x01LHE<idx>\x02) and the URI recorded for the EOF join. */
     esi_ctx_t ctx;
     esi_ctx_init(&ctx, NULL, 0);
     char *out;
     size_t out_len;
-    /* Create a mock esi:include — no actual file to read, just verify no crash */
     esi_process(&ctx, "<esi:include src=\"/nonexistent.html\"/>rest", 42, &out, &out_len);
-    /* Tag should be silently removed (file doesn't exist) */
-    EXPECT_NE(strstr(out, "rest"), nullptr);
-    EXPECT_EQ(strstr(out, "esi:include"), nullptr);
+    /* placeholder bytes contain NULs (LE index) — memcmp, not strstr */
+    EXPECT_EQ(ctx.dyn_count, 1);
+    EXPECT_EQ(out_len, 8U + strlen("rest")); /* placeholder + tail */
+    EXPECT_EQ((unsigned char)out[0], 0x01);
+    EXPECT_EQ(out[1], 'L'); EXPECT_EQ(out[2], 'H'); EXPECT_EQ(out[3], 'E');
+    EXPECT_EQ((unsigned char)out[7], 0x02);
+    EXPECT_EQ(memcmp(out + 8, "rest", 4), 0);
+    free(ctx.dyn_uri[0]);
+    ctx.dyn_uri[0] = NULL;
+    ctx.dyn_count = 0;
     esi_ctx_free(&ctx);
 }
 
@@ -232,16 +239,24 @@ TEST_F(EsiTest, Include_TraversalRefused)
     EXPECT_EQ(esi_include_read("/a/../..", "/tmp", 4, &len), nullptr);
 }
 
-TEST_F(EsiTest, Process_IncludeWithoutDocrootSilentlyDropsTag)
+TEST_F(EsiTest, Process_IncludeWithoutDocrootBecomesDynamicInclude)
 {
-    /* End-to-end through the state machine: no docroot -> tag removed,
-     * nothing inlined, no crash. */
+    /* Contract change (dynamic ESI): the docroot bounds STATIC file reads
+     * only. A missing static + valid URI records a dynamic include and
+     * emits a placeholder — the loopback fetch is a normal request,
+     * subject to the server's own ACLs, so no docroot requirement. */
     const char *in = "A<esi:include src=\"/etc/hostname\"/>B";
-    size_t consumed = esi_process(&ctx, in, strlen(in), &out, &out_len);
-    ASSERT_GT(consumed, 0U);
+    esi_process(&ctx, in, strlen(in), &out, &out_len);
     ASSERT_NE(out, nullptr);
-    EXPECT_EQ(out_len, 2U);
-    EXPECT_EQ(memcmp(out, "AB", 2), 0);
+    EXPECT_EQ(ctx.dyn_count, 1);
+    EXPECT_EQ(ctx.dyn_holding, 1);
+    EXPECT_STREQ(ctx.dyn_uri[0], "/etc/hostname");
+    EXPECT_EQ(out_len, 2U + 8U); /* A + placeholder + B */
+    EXPECT_EQ(out[0], 'A');
+    EXPECT_EQ(out[9], 'B');
+    free(ctx.dyn_uri[0]);
+    ctx.dyn_uri[0] = NULL;
+    ctx.dyn_count = 0;
 }
 
 
@@ -319,4 +334,100 @@ TEST_F(EsiTest, StreamEndFlushesHeldPartialLiterally)
     if (out_len) acc.append(out, out_len);
     /* Never-completed tag: fail open, bytes preserved for the client. */
     EXPECT_EQ(acc, "done<esi");
+}
+
+
+/* ==================================================================
+ *  Dynamic includes: URI validation + splice + strip + subrequest guard
+ * ================================================================== */
+
+TEST(EsiDynTest, UriValidation)
+{
+    EXPECT_EQ(esi_dyn_uri_valid("/index.php"), 1);
+    EXPECT_EQ(esi_dyn_uri_valid("/frag.php?x=1&y=2"), 1);
+    EXPECT_EQ(esi_dyn_uri_valid("//evil.example.com/x"), 0); /* scheme-relative */
+    EXPECT_EQ(esi_dyn_uri_valid("http://evil/"), 0);          /* not '/'-rooted */
+    EXPECT_EQ(esi_dyn_uri_valid("/a b"), 0);                  /* space */
+    EXPECT_EQ(esi_dyn_uri_valid("/a\rb"), 0);                 /* CR */
+    EXPECT_EQ(esi_dyn_uri_valid("/a\nb"), 0);                 /* LF */
+    EXPECT_EQ(esi_dyn_uri_valid(""), 0);
+    EXPECT_EQ(esi_dyn_uri_valid(nullptr), 0);
+}
+
+static int ph_find(const char *buf, size_t len)
+{
+    for (size_t i = 0; i + 8 <= len; i++)
+        if ((unsigned char)buf[i] == 0x01 && buf[i+1]=='L' && buf[i+2]=='H' &&
+            buf[i+3]=='E' && (unsigned char)buf[i+7] == 0x02)
+            return (int)i;
+    return -1;
+}
+
+TEST(EsiDynTest, SpliceReplacesOwnIndexOnly)
+{
+    esi_ctx_t ctx;
+    esi_ctx_init(&ctx, NULL, 0);
+    char *out; size_t out_len;
+    esi_process(&ctx, "A<esi:include src=\"/one.php\"/>M<esi:include src=\"/two.php\"/>Z",
+                strlen("A<esi:include src=\"/one.php\"/>M<esi:include src=\"/two.php\"/>Z"),
+                &out, &out_len);
+    ASSERT_EQ(ctx.dyn_count, 2);
+
+    /* build a dyn_hold manually mirroring the hook: hold the output */
+    ctx.dyn_hold = (char*)malloc(out_len + 1);
+    memcpy(ctx.dyn_hold, out, out_len);
+    ctx.dyn_hold_len = out_len; ctx.dyn_hold_cap = out_len + 1;
+
+    /* splice body into index 0 only */
+    esi_dyn_splice(&ctx, 0, "FRAG1", 5);
+    /* index-0 placeholder gone; index-1 still present */
+    int p1 = ph_find(ctx.dyn_hold, ctx.dyn_hold_len);
+    ASSERT_GE(p1, 0);
+    EXPECT_EQ(memcmp(ctx.dyn_hold, "A", 1), 0);
+    EXPECT_EQ(memcmp(ctx.dyn_hold + 1, "FRAG1", 5), 0);
+
+    esi_dyn_splice(&ctx, 1, NULL, 0); /* failed fetch -> removed */
+    EXPECT_EQ(ph_find(ctx.dyn_hold, ctx.dyn_hold_len), -1);
+
+    /* the trailing Z survived both splices */
+    EXPECT_EQ(ctx.dyn_hold[ctx.dyn_hold_len - 1], 'Z');
+
+    free(ctx.dyn_uri[0]); free(ctx.dyn_uri[1]);
+    ctx.dyn_uri[0] = ctx.dyn_uri[1] = NULL; ctx.dyn_count = 0;
+    free(ctx.dyn_hold); ctx.dyn_hold = NULL; ctx.dyn_hold_len = 0;
+    esi_ctx_free(&ctx);
+}
+
+TEST(EsiDynTest, SubrequestGuardDropsDynamicTag)
+{
+    esi_ctx_t ctx;
+    esi_ctx_init(&ctx, NULL, 0);
+    ctx.subrequest = 1; /* loop guard: fragment fetching a fragment */
+    char *out; size_t out_len;
+    const char *in = "x<esi:include src=\"/nested.php\"/>y";
+    esi_process(&ctx, in, strlen(in), &out, &out_len);
+    EXPECT_EQ(ctx.dyn_count, 0);       /* not recorded */
+    EXPECT_EQ(ctx.dyn_holding, 0);     /* no hold */
+    EXPECT_EQ(out_len, 2U);            /* tag removed, x + y */
+    esi_ctx_free(&ctx);
+}
+
+TEST(EsiDynTest, StripRemainingRemovesAllPlaceholders)
+{
+    esi_ctx_t ctx;
+    esi_ctx_init(&ctx, NULL, 0);
+    char *out; size_t out_len;
+    const char *in = "a<esi:include src=\"/slow.php\"/>b<esi:include src=\"/x.php\"/>c";
+    esi_process(&ctx, in, strlen(in), &out, &out_len);
+    ctx.dyn_hold = (char*)malloc(out_len + 1);
+    memcpy(ctx.dyn_hold, out, out_len);
+    ctx.dyn_hold_len = out_len; ctx.dyn_hold_cap = out_len + 1;
+
+    esi_dyn_strip_remaining(&ctx); /* join deadline passed: fail-open */
+    EXPECT_EQ(ctx.dyn_hold_len, 3U);
+    EXPECT_EQ(memcmp(ctx.dyn_hold, "abc", 3), 0);
+    for (int i = 0; i < ctx.dyn_count; i++) { free(ctx.dyn_uri[i]); ctx.dyn_uri[i] = NULL; }
+    ctx.dyn_count = 0;
+    free(ctx.dyn_hold); ctx.dyn_hold = NULL; ctx.dyn_hold_len = 0;
+    esi_ctx_free(&ctx);
 }

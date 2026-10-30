@@ -22,6 +22,7 @@
 extern "C" {
 #include "htaccess_directive.h"
 #include "htaccess_stream.h"
+#include "htaccess_esi.h"
 
 /* mod_htaccess.c internals exposed for tests */
 int on_recv_resp_body_esi_hook(lsi_param_t *param);
@@ -94,6 +95,7 @@ protected:
     }
     void TearDown() override
     {
+        esi_dyn_fetch_fn = NULL;
         ht_stream_write_test_fn = NULL;
         /* release any context the hooks created */
         lsi_param_t fin{};
@@ -237,4 +239,69 @@ TEST_F(EsiStreamHookTest, AbortedResponseFlushesOnceViaSafetyNet)
     size_t before = g_writes.size();
     on_rcvd_resp_body_esi_hook(&fin);
     EXPECT_EQ(g_writes.size(), before);
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Dynamic includes: EOF join through the real hook (stub fetcher)    */
+/* ------------------------------------------------------------------ */
+
+static int g_dyn_calls;
+static char *stub_fetch(const char *uri, const char *host,
+                        const char *cookie, int deadline_ms)
+{
+    (void)host; (void)cookie; (void)deadline_ms;
+    g_dyn_calls++;
+    if (strcmp(uri, "/frag.php?n=7") == 0)
+        return strdup("DYNAMIC-7");
+    return nullptr; /* everything else fails -> fail-open */
+}
+
+TEST_F(EsiStreamHookTest, DynamicIncludeJoinedAtEof)
+{
+    mod_htaccess_test_prime(session_.handle(), make_esi_enable("on"));
+    lsi_session_set_resp_content_type(session_.handle(), "text/html", 9);
+
+    esi_dyn_fetch_fn = stub_fetch;
+    g_dyn_calls = 0;
+
+    /* body chunk with a dynamic include + tail */
+    const char body[] = "A<esi:include src=\"/frag.php?n=7\"/>B";
+    auto p1 = make_param(body, (int)strlen(body));
+    int rc1 = on_recv_resp_body_esi_hook(&p1);
+    EXPECT_EQ(rc1, (int)strlen(body));
+    /* held — nothing written downstream yet */
+    EXPECT_EQ(all_data(), "");
+
+    /* EOF chunk: join runs, fragment spliced, whole buffer emitted */
+    const char tail[] = "";
+    auto p2 = make_param(tail, 0, LSI_CBFI_EOF);
+    on_recv_resp_body_esi_hook(&p2);
+
+    EXPECT_EQ(g_dyn_calls, 1);
+    EXPECT_EQ(all_data(), "ADYNAMIC-7B");
+    int markers = 0;
+    for (auto &w : g_writes)
+        if (!w.is_eof_marker)
+            markers++;
+    EXPECT_EQ(markers, 1); /* single write of the joined buffer */
+}
+
+TEST_F(EsiStreamHookTest, DynamicIncludeFetchFailureFailsOpen)
+{
+    mod_htaccess_test_prime(session_.handle(), make_esi_enable("on"));
+    lsi_session_set_resp_content_type(session_.handle(), "text/html", 9);
+
+    esi_dyn_fetch_fn = stub_fetch; /* /missing.php -> nullptr */
+    g_dyn_calls = 0;
+
+    const char body[] = "A<esi:include src=\"/missing.php\"/>B";
+    auto p1 = make_param(body, (int)strlen(body));
+    on_recv_resp_body_esi_hook(&p1);
+    const char tail[] = "";
+    auto p2 = make_param(tail, 0, LSI_CBFI_EOF);
+    on_recv_resp_body_esi_hook(&p2);
+
+    EXPECT_EQ(g_dyn_calls, 1);
+    EXPECT_EQ(all_data(), "AB"); /* tag removed, page completes */
 }
