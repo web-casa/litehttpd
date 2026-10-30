@@ -23,6 +23,7 @@ extern "C" {
 #define HTRE_HIT_LIMIT  (-2) /* resource limit hit — must NOT be ignored    */
 
 #define HTRE_MAX_GROUPS 10   /* $0..$9 */
+#define HTRE_ICASE       0x1  /* case-insensitive compile flag */
 
 typedef struct {
     int so;                     /* start offset, -1 if unset */
