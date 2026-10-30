@@ -117,7 +117,7 @@ jobs:
             mkdir -p $D/wp
             printf "BruteForceProtection On\nBruteForceAllowedAttempts 3\nBruteForceWindow 120\nBruteForceAction block\n" > $D/wp/.htaccess
             chmod 644 $D/wp/.htaccess
-            echo "<?php echo login;" > $D/wp/index.php
+            printf '<?php echo "login"; ?>' > $D/wp/index.php
             rm -f /var/lib/litehttpd/firewall.db
             /usr/local/lsws/bin/lswsctrl restart'
           sleep 4
