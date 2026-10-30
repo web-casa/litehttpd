@@ -12,10 +12,10 @@ LiteHTTPD（完整版）是默认且推荐的版本。它包含打补丁的 OLS 
 ### 前提条件
 
 - OpenLiteSpeed 1.7.0 或更高版本
-- Linux x86_64（当前未发布 ARM64 RPM）
+- Linux x86_64 或 ARM64
 
 <Tabs>
-<TabItem label="RPM 仓库 (EL 8/9/10) -- 推荐">
+<TabItem label="RPM 仓库 (EL 9) -- 推荐">
 
 <Steps>
 1. 添加 LiteHTTPD RPM 仓库并安装：
@@ -50,6 +50,38 @@ LiteHTTPD（完整版）是默认且推荐的版本。它包含打补丁的 OLS 
 </Steps>
 
 </TabItem>
+<TabItem label="二进制 tarball（任意发行版）">
+
+发行版无关的二进制包（glibc 2.28+，与官方 OLS tarball 一样——解压后运行 `install.sh`）。从 [rpms.litehttpd.com](https://rpms.litehttpd.com/) 或 GitHub Release 下载。
+
+<Steps>
+1. **全新安装**（尚未安装 OpenLiteSpeed）——安装完整的打补丁 OLS + 模块：
+   ```bash
+   curl -LO https://rpms.litehttpd.com/openlitespeed-litehttpd-1.8.5-x86_64-linux.tgz
+   tar xzf openlitespeed-litehttpd-1.8.5-x86_64-linux.tgz
+   cd openlitespeed-litehttpd-1.8.5 && sudo ./install.sh
+   ```
+
+2. **已安装官方 OpenLiteSpeed**——选择一种叠加包：
+
+   - **完整功能**（叠加打补丁的二进制——必须与已装 OLS 版本一致；会备份原二进制）：
+     ```bash
+     tar xzf litehttpd-ols-patch-1.8.5-x86_64-linux.tgz
+     cd litehttpd-ols-patch-1.8.5 && sudo ./install.sh
+     ```
+   - **仅模块**（适用于*任意* OLS 版本；不替换二进制——`RewriteRule`/`php_value` 解析但不执行）：
+     ```bash
+     tar xzf litehttpd-module-0.2.2-x86_64-linux.tgz
+     cd litehttpd-module-0.2.2 && sudo ./install.sh
+     ```
+
+3. 重启 OLS：
+   ```bash
+   /usr/local/lsws/bin/lswsctrl restart
+   ```
+</Steps>
+
+</TabItem>
 <TabItem label="从源码构建（完整版）">
 
 <Steps>
@@ -68,8 +100,7 @@ LiteHTTPD（完整版）是默认且推荐的版本。它包含打补丁的 OLS 
    cd openlitespeed
    patch -p1 < /path/to/patches/0001-lsiapi-phpconfig.patch
    patch -p1 < /path/to/patches/0002-lsiapi-rewrite.patch
-   patch -p1 < /path/to/patches/0003-readapacheconf.patch
-   patch -p1 < /path/to/patches/0004-autoindex-403.patch
+   # 应用补丁 0003、0004
    bash build.sh
    ```
 

@@ -17,10 +17,8 @@ module litehttpd_htaccess {
 
 ```
 allowOverride 255
-autoLoadHtaccess 0
+autoLoadHtaccess 1
 ```
-
-LiteHTTPD 会通过模块钩子自行读取 `.htaccess` 文件。加载 LiteHTTPD 时应保持 OLS 原生 `autoLoadHtaccess` 关闭，避免 `ErrorDocument`、`Options` 等指令被双重处理。
 
 ### AllowOverride 值
 

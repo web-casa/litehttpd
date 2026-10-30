@@ -3,7 +3,7 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 
 export default defineConfig({
-  site: "https://docs.litehttpd.com",
+  site: "https://litehttpd.com",
   integrations: [
     starlight({
       title: "LiteHTTPD",
@@ -44,12 +44,9 @@ export default defineConfig({
           items: [
             { slug: "getting-started/introduction" },
             { slug: "getting-started/editions" },
-            { slug: "getting-started/support-matrix" },
             { slug: "getting-started/installation" },
             { slug: "getting-started/configuration" },
             { slug: "getting-started/quick-start" },
-            { slug: "getting-started/troubleshooting" },
-            { slug: "getting-started/faq" },
           ],
         },
         {
@@ -139,7 +136,6 @@ export default defineConfig({
             { slug: "directives/redirects" },
             { slug: "directives/caching" },
             { slug: "directives/content-type" },
-            { slug: "directives/handlers" },
             { slug: "directives/environment" },
             { slug: "directives/containers" },
             { slug: "directives/conditionals" },

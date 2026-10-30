@@ -73,7 +73,7 @@ virtualhost example {
 
   rewrite {
     enable                1
-    autoLoadHtaccess      0
+    autoLoadHtaccess      1
   }
 }
 ```
