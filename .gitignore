@@ -110,3 +110,5 @@ tests/e2e/compare/conf/lsws_docker_template.xml
 # Git history backup (local only)
 .git-history-backup.md
 firewalld/target/
+build*/
+Testing/
