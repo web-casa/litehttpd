@@ -97,7 +97,7 @@ jobs:
         run: |
           docker exec "$CT" sh -c '
             D=/var/www/vhosts/localhost/html
-            echo "E2E-FRAGMENT-42" > $D/esi-frag.html
+            printf "E2E-FRAGMENT-42" > $D/esi-frag.html
             mkdir -p $D/esi
             printf "EsiEnable On\n" > $D/esi/.htaccess; chmod 644 $D/esi/.htaccess
             cat > $D/esi/page.php <<EOF
