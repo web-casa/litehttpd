@@ -55,7 +55,7 @@ ExpiresByType image/gif "access plus 31536000 seconds"
 
 | 指令 | 语法 | 作用 |
 |------|------|------|
-| `CacheEnable` | `public\|private\|off` | 本目录树的缓存模式 |
+| `CacheEnable` | `public[,esi=on]\|private[,esi=on]\|off` | 本目录树的缓存模式；`,esi=on` 启用片段感知缓存 |
 | `CacheDisable` | （无参数） | `CacheEnable off` 的简写 |
 | `CacheMaxExpire` | `秒` | 缓存 TTL 上限（响应头 `max-age`） |
 | `CacheDefaultExpire` | `秒` | 未指定时的默认 TTL（3600） |

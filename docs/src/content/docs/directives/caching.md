@@ -55,7 +55,7 @@ These directives set the `X-LiteSpeed-Cache-Control` response header from
 
 | Directive | Syntax | Effect |
 |-----------|--------|--------|
-| `CacheEnable` | `public\|private\|off` | Cache mode for this tree |
+| `CacheEnable` | `public[,esi=on]\|private[,esi=on]\|off` | Cache mode for this tree; `,esi=on` enables fragment-aware caching |
 | `CacheDisable` | (none) | Shorthand for `CacheEnable off` |
 | `CacheMaxExpire` | `seconds` | Cap on the cache TTL (header `max-age`) |
 | `CacheDefaultExpire` | `seconds` | TTL when none specified (default 3600) |

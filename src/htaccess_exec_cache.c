@@ -15,11 +15,27 @@ int cache_bridge_parse_enable(const char *value)
 {
     if (!value)
         return 0;
-    if (strcasecmp(value, "public") == 0)
+    /* bare word, or word followed by ",esi=on" (handled by caller) */
+    if (strncasecmp(value, "public", 6) == 0 &&
+        (value[6] == '\0' || value[6] == ','))
         return 1;
-    if (strcasecmp(value, "private") == 0)
+    if (strncasecmp(value, "private", 7) == 0 &&
+        (value[7] == '\0' || value[7] == ','))
         return 2;
     return 0; /* off */
+}
+
+/* LSWS syntax: CacheEnable public,esi=on — detect the esi modifier in the
+ * value token (any position, comma-separated). */
+static int value_has_esi(const char *value)
+{
+    if (!value)
+        return 0;
+    const char *p = strstr(value, "esi=on");
+    if (!p)
+        return 0;
+    /* must be at start or right after a comma */
+    return (p == value) || (p[-1] == ',');
 }
 
 void cache_bridge_build_header(const cache_bridge_config_t *cfg,
@@ -42,7 +58,10 @@ void cache_bridge_build_header(const cache_bridge_config_t *cfg,
     else if (cfg->default_expire > 0)
         max_age = cfg->default_expire;
 
-    snprintf(buf, buf_size, "%s,max-age=%d", visibility, max_age);
+    if (cfg->esi)
+        snprintf(buf, buf_size, "%s,max-age=%d,esi=on", visibility, max_age);
+    else
+        snprintf(buf, buf_size, "%s,max-age=%d", visibility, max_age);
 }
 
 int exec_cache_bridge(lsi_session_t *session,
@@ -56,6 +75,7 @@ int exec_cache_bridge(lsi_session_t *session,
         .enabled = -1,  /* -1 = not set in .htaccess, don't override */
         .max_expire = 0,
         .default_expire = 0,
+        .esi = 0,
         .ignore_no_last_mod = 0,
         .store_private = 0,
         .store_no_store = 0,
@@ -64,8 +84,11 @@ int exec_cache_bridge(lsi_session_t *session,
     for (const htaccess_directive_t *dir = directives; dir; dir = dir->next) {
         switch (dir->type) {
         case DIR_CACHE_ENABLE:
-            if (dir->value)
+            if (dir->value) {
                 cfg.enabled = cache_bridge_parse_enable(dir->value);
+                if (value_has_esi(dir->value))
+                    cfg.esi = 1;
+            }
             break;
         case DIR_CACHE_DISABLE:
             cfg.enabled = 0;

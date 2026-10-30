@@ -16,6 +16,7 @@ typedef struct {
     int ignore_no_last_mod;
     int store_private;
     int store_no_store;
+    int esi;              /* 1=append ",esi=on" (fragment-aware caching) */
 } cache_bridge_config_t;
 
 /* Parse CacheEnable/CacheDisable value */
