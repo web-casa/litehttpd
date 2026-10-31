@@ -137,6 +137,22 @@ UNIT
     echo "systemd unit installed: systemctl enable --now lshttpd"
 fi
 
+# ── BotChallenge runtime dir (matches RPM %post + tmpfiles.d) ──
+# The module creates the 0600 HMAC secret inside on first use; it only
+# needs a writable directory owned by the OLS worker user.
+BCDIR=/run/litehttpd
+BCUSER=$(awk '$1=="user"{print $2; exit}' "$PREFIX/conf/httpd_config.conf" 2>/dev/null)
+BCGROUP=$(awk '$1=="group"{print $2; exit}' "$PREFIX/conf/httpd_config.conf" 2>/dev/null)
+BCUSER=${BCUSER:-nobody}
+BCGROUP=${BCGROUP:-nogroup}
+[ -d "$BCDIR" ] || install -d -m 0770 "$BCDIR"
+chown "$BCUSER:$BCGROUP" "$BCDIR" 2>/dev/null || chown "$BCUSER" "$BCDIR" 2>/dev/null || true
+if [ -d /run/systemd/system ] && [ -d /usr/lib/tmpfiles.d ] || [ -d /etc/tmpfiles.d ]; then
+    cat > /etc/tmpfiles.d/litehttpd.conf <<TMPF 2>/dev/null || true
+d $BCDIR 0770 $BCUSER $BCGROUP -
+TMPF
+fi
+
 echo ""
 echo "=== LiteHTTPD-Full installed to $PREFIX ==="
 echo "Start now : $PREFIX/bin/lswsctrl start"
