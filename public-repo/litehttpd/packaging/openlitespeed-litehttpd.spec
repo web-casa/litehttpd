@@ -1,5 +1,5 @@
 %global ols_version  1.9.1
-%global litehttpd_version 2.2.0
+%global litehttpd_version 2.3.0
 %global install_dir  /usr/local/lsws
 %global third_party_commit 7297c534b844d808fce7ec42798ef2b1f3aa5259
 %global php_version 7.4.33
@@ -1048,6 +1048,18 @@ else
 fi
 chmod 644 %{buildroot}%{_unitdir}/lshttpd.service
 
+# tmpfiles.d — runtime dir for the BotChallenge shared secret. The module
+# (running as the OLS worker user) creates the 0600 secret file itself on
+# first use; it only needs a writable directory.
+mkdir -p %{buildroot}%{_tmpfilesdir}
+cat > %{buildroot}%{_tmpfilesdir}/litehttpd.conf <<'TMPF'
+# LiteHTTPD runtime dir — BotChallenge HMAC secret lives here (0600 file
+# created by the OLS worker user on first use). Owner matches the default
+# OLS worker user/group; adjust if httpd_config.conf sets a different one.
+d /run/litehttpd 0770 nobody nogroup -
+TMPF
+chmod 644 %{buildroot}%{_tmpfilesdir}/litehttpd.conf
+
 # Init script (compat)
 mkdir -p %{buildroot}/etc/init.d
 if [ -f %{buildroot}%{install_dir}/admin/misc/lsws.rc ]; then
@@ -1130,6 +1142,20 @@ exit 0
 %post
 %systemd_post lshttpd.service
 
+# ── BotChallenge runtime dir ──
+# Create /run/litehttpd now (tmpfiles.d covers reboots). Honor a custom
+# OLS worker user/group from httpd_config.conf, default nobody/nogroup.
+BCDIR=/run/litehttpd
+BCUSER=$(awk '$1=="user"{print $2; exit}' %{install_dir}/conf/httpd_config.conf 2>/dev/null)
+BCGROUP=$(awk '$1=="group"{print $2; exit}' %{install_dir}/conf/httpd_config.conf 2>/dev/null)
+BCUSER=${BCUSER:-nobody}
+BCGROUP=${BCGROUP:-nogroup}
+if [ -d /run/systemd/system ] && command -v systemd-tmpfiles >/dev/null 2>&1; then
+    systemd-tmpfiles --create %{_tmpfilesdir}/litehttpd.conf >/dev/null 2>&1 || true
+fi
+[ -d "$BCDIR" ] || install -d -m 0770 "$BCDIR"
+chown "$BCUSER:$BCGROUP" "$BCDIR" 2>/dev/null || chown "$BCUSER" "$BCDIR" 2>/dev/null || true
+
 # ── LiteHTTPD post-install tuning ──
 # Strategy: only run on fresh install ($1==1) with grep guards for idempotency.
 # On upgrade, user's config is preserved by %config(noreplace).
@@ -1174,6 +1200,7 @@ fi
 %{install_dir}/*
 /etc/init.d/lsws
 %{_unitdir}/lshttpd.service
+%{_tmpfilesdir}/litehttpd.conf
 
 %changelog
 * Thu Jul 02 2026 LiteHTTPD <noreply@web.casa> - 1.9.1-4.litehttpd

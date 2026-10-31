@@ -216,6 +216,30 @@ jobs:
           # the shared secret was created by the worker with mode 0600
           docker exec "$CT" sh -c 'test -s /var/run/litehttpd/botchallenge.secret && [ "$(stat -c %a /var/run/litehttpd/botchallenge.secret)" = 600 ]'
 
+          # ── v1.1: trusted-proxy XFF, conditional gate, custom template ──
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/xff $D/ifgate/gated $D/ifgate/free $D/tpl
+            echo xff-secret > $D/xff/index.html
+            echo gated-secret > $D/ifgate/gated/index.html
+            echo free-secret > $D/ifgate/free/index.html
+            echo tpl-secret > $D/tpl/index.html
+            printf "%s\n" "BotChallenge On" \
+              "BotChallengeTrustedProxy \"172.16.0.0/12 127.0.0.1\"" > $D/xff/.htaccess
+            printf "%s\n" "BotChallenge On" \
+              "BotChallengeIf \"%{REQUEST_URI} =~ /gated/\"" > $D/ifgate/.htaccess
+            printf "%s\n" "<h1>Brand Gate</h1>" "SALT=%{SALT} DIFF=%{DIFF} URI=%{URI}" > $D/tpl/challenge.html
+            printf "%s\n" "BotChallenge On" "BotChallengePage challenge.html" > $D/tpl/.htaccess
+            chmod 644 $D/xff/.htaccess $D/ifgate/.htaccess $D/tpl/.htaccess $D/tpl/challenge.html'
+          # conditional gate: gated URI challenged, free URI served untouched
+          curl -s -m 8 -A "curl/8" http://127.0.0.1:8080/ifgate/gated/index.html | grep -q "function fnv"
+          curl -s -m 8 -A "curl/8" http://127.0.0.1:8080/ifgate/free/index.html | grep -q "free-secret"
+          # custom template: operator page with tokens substituted
+          curl -s -m 8 -A "curl/8" http://127.0.0.1:8080/tpl/index.html | grep -q "Brand Gate"
+          curl -s -m 8 -A "curl/8" http://127.0.0.1:8080/tpl/index.html | grep -Eq "SALT=s[0-9]+ DIFF=16 URI=/tpl/index.html"
+          # XFF class binding through the trusted proxy
+          python3 tests/e2e/bot_solver.py --xff http://127.0.0.1:8080/xff/index.html
+
       # ── Check 7: regression — protection strictness under load ──────
       # Guards against two upstream OLS engine bug classes we must not
       # inherit with our own implementations:

@@ -2,6 +2,59 @@
 
 All notable changes to litehttpd will be documented in this file.
 
+## [2.3.0] - 2026-10-31
+
+The self-hosted bot-defense release: LSWS Enterprise "managed challenge"
+parity without any external service, plus CDN-correct identity binding.
+
+### Added — BotChallenge (JS proof-of-work gate)
+- **`BotChallenge On`** — clients without a valid credential cookie get an
+  inline HTML+JS challenge; the browser solves an FNV-1a proof-of-work
+  (daily salt, `BotChallengeDifficulty` bits, default 16, cap 24) and
+  receives an HMAC-SHA256 cookie (`exp|hexmac`, secret + client IP class,
+  constant-time verify, `BotChallengeTTL` seconds, floor 60). Stateless,
+  no storage; cookie is `HttpOnly; SameSite=Lax; Path=/`; challenge
+  responses are `Cache-Control: no-store`.
+- **`BotChallengeTrustedProxy "cidr-list"`** — behind Cloudflare/Nginx the
+  credential binds the RIGHTMOST `X-Forwarded-For` token when (and only
+  when) the direct peer is a listed proxy; spoofable XFF from unlisted
+  peers is ignored entirely. Fixes "every visitor shares the CDN's IP
+  class" behind a proxy.
+- **`BotChallengeIf "ap_expr"`** — per-request trigger condition (URI,
+  headers, env). Pairs with the GeoIP pathway for country-scoped gating;
+  unparsable expressions fail OPEN (gate off) with a WARN.
+- **`BotChallengeExempt "regex"`** — UA allowlist (verified crawlers).
+- **`BotChallengePage template.html`** — custom branded challenge page
+  with `%{SALT}` `%{DIFF}` `%{URI}` substitution, realpath-confined to
+  the .htaccess tree, O_NOFOLLOW; invalid/missing template falls back to
+  the built-in page.
+- **`tools/rotate-botsecret.sh`** — atomic HMAC-secret rotation (temp +
+  rename, worker-user ownership, graceful OLS restart). RPM %post and
+  tmpfiles.d provision `/run/litehttpd` for the OLS worker user.
+- **Dynamic ESI includes** — `<esi:include>` of PHP fragments via loopback
+  sub-requests with hold-and-join splicing (bounded, fail-open), plus
+  handler-suffix fast-path exclusion so handler sources are never inlined.
+
+### Fixed
+- **Challenge-page script injection (hardening):** the request URI was
+  embedded into the inline challenge script unescaped — a crafted request
+  line (quotes / `</script>`) could inject script into the served page.
+  All interpolations now go through a strict JS escaper (hex-escape
+  outside `[A-Za-z0-9/_?.=&%-~]`), pinned by breakout unit tests.
+- `RateLimit action=throttle` no longer sleeps inside the hook — a
+  sleeping hook parks the worker and one client could occupy every
+  worker (the trap behind upstream OLS issue #531). It now answers
+  **429 + `Retry-After: <seconds-to-window-reset>`**.
+
+### Testing
+- Suite 1158/1158; +8 BotChallenge unit tests (crypto vectors, cookie
+  matrix, XFF selection, JS-escape breakouts, template substitution).
+- CI `E2E-6` (full PoW loop incl. trusted-proxy XFF class binding,
+  conditional gate, custom template) and `E2E-7` — permanent regressions
+  for upstream OLS issues #533 (gate bypass while pending) and #531
+  (concurrent rate-limit batch release): 40-way concurrency must hit the
+  configured ceiling EXACTLY.
+
 ## [2.2.0] - 2026-10-31
 
 The Enterprise-parity feature release. Everything below is verified against
