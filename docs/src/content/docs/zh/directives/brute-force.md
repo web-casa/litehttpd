@@ -28,15 +28,21 @@ description: 暴力破解防护指令参考
 ### 保护 WordPress 登录
 
 ```apache
-BruteForceProtection On
-BruteForceAllowedAttempts 5
-BruteForceWindow 600
-BruteForceAction throttle
-BruteForceThrottleDuration 10000
-BruteForceXForwardedFor On
-BruteForceTrustedProxy 10.0.0.0/8
-BruteForceWhitelist 192.168.1.0/24 10.0.0.0/8
-BruteForceProtectPath /wp-login.php
+LSBruteForceProtection On
+LSBruteForceAllowedAttempts 5
+LSBruteForceWindow 600
+LSBruteForceAction throttle
+LSBruteForceThrottleDuration 10000
+LSBruteForceXForwardedFor On
+LSBruteForceWhitelist 192.168.1.0/24 10.0.0.0/8
+LSBruteForceProtectPath /wp-login.php
 ```
 
-此配置将登录尝试限制为每 10 分钟 5 次，被限流的请求之间有 10 秒的延迟。来自白名单子网的请求不受限制。因为设置了 `BruteForceTrustedProxy`，只有请求来自 `10.0.0.0/8` 时才信任 `X-Forwarded-For`。
+此配置将登录尝试限制为每 10 分钟 5 次，被限流的请求之间有 10 秒的延迟。来自白名单子网的请求不受限制。
+
+## 内核级升级（可选）
+
+当[防火墙守护进程](/zh/ols/firewall/)在运行时，越限还会升级为
+**nftables 内核丢包**——攻击者的数据包在到达 OpenLiteSpeed 之前即被
+丢弃。通知对每个攻击者每个窗口恰好发送一次；封禁以窗口为 TTL 自动
+过期。无守护进程时，上文的 403 就是完整行为。

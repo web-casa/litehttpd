@@ -32,6 +32,13 @@
     "risk_level": {
       "type": "string",
       "enum": ["low", "medium", "high"]
+    },
+    "failures": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
     }
   },
   "$defs": {
@@ -50,6 +57,22 @@
         "probe": {
           "type": "object",
           "additionalProperties": true
+        },
+        "artifacts": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "timings": {
+          "type": "object",
+          "properties": {
+            "duration_ms": { "type": "integer" },
+            "probe_duration_ms": { "type": "integer" },
+            "total_duration_ms": { "type": "integer" }
+          },
+          "additionalProperties": true
+        },
+        "skipped": {
+          "type": "boolean"
         }
       }
     }

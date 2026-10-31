@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <stdio.h>
 
 /* ------------------------------------------------------------------ */
 /*  Internal helpers                                                    */
@@ -228,7 +229,7 @@ static char *extract_env_condition(char *value)
 }
 
 /**
- * Parse: Header [always] set|unset|append|merge|add|edit|edit* <name> [<value>] [env=VAR]
+ * Parse: Header [always|onsuccess] set|unset|append|merge|add|edit|edit* <name> [<value>] [env=VAR]
  */
 static htaccess_directive_t *parse_header(const char *args, int line)
 {
@@ -237,10 +238,11 @@ static htaccess_directive_t *parse_header(const char *args, int line)
     if (!action)
         return NULL;
 
-    /* Check for "always" modifier */
+    /* Check for Apache's response-table condition token. "always" maps to
+     * the existing always variants; "onsuccess" is the default table. */
     int always = 0;
-    if (strcasecmp(action, "always") == 0) {
-        always = 1;
+    if (strcasecmp(action, "always") == 0 || strcasecmp(action, "onsuccess") == 0) {
+        always = (strcasecmp(action, "always") == 0);
         free(action);
         action = next_token(&p);
         if (!action)
@@ -739,6 +741,255 @@ static htaccess_directive_t *parse_error_document(const char *args, int line)
     d->value = value;
     d->data.error_doc.error_code = (int)code;
 
+    return d;
+}
+
+/**
+ * Parse: FallbackResource /local-uri | disabled
+ */
+static htaccess_directive_t *parse_fallback_resource(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *value = next_token(&p);
+    if (!value)
+        return NULL;
+
+    if (strcasecmp(value, "disabled") != 0 && value[0] != '/') {
+        free(value);
+        return NULL;
+    }
+
+    htaccess_directive_t *d = alloc_directive(DIR_FALLBACK_RESOURCE, line);
+    if (!d) {
+        free(value);
+        return NULL;
+    }
+    d->value = value;
+    return d;
+}
+
+
+/**
+ * Parse: CacheEnable public|private
+ */
+static htaccess_directive_t *parse_cache_enable(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    htaccess_directive_t *d = alloc_directive(DIR_CACHE_ENABLE, line);
+    if (!d) {
+        free(val);
+        return NULL;
+    }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: CacheDisable (no arguments needed)
+ */
+static htaccess_directive_t *parse_cache_disable(const char *args, int line)
+{
+    (void)args;
+    return alloc_directive(DIR_CACHE_DISABLE, line);
+}
+
+/**
+ * Parse: CacheMaxExpire N (seconds)
+ */
+static htaccess_directive_t *parse_cache_max_expire(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    htaccess_directive_t *d = alloc_directive(DIR_CACHE_MAX_EXPIRE, line);
+    if (!d) {
+        free(val);
+        return NULL;
+    }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: CacheDefaultExpire N (seconds)
+ */
+static htaccess_directive_t *parse_cache_default_expire(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    htaccess_directive_t *d = alloc_directive(DIR_CACHE_DEFAULT_EXPIRE, line);
+    if (!d) {
+        free(val);
+        return NULL;
+    }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: RateLimit N/M [burst=B] [action=deny|throttle|log]
+ */
+static htaccess_directive_t *parse_rate_limit(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    /* Reconstruct full value (may contain spaces for burst/action params) */
+    char full_val[256];
+    snprintf(full_val, sizeof(full_val), "%s", val);
+    free(val);
+
+    /* Look for additional parameters */
+    char *extra = next_token(&p);
+    while (extra) {
+        size_t cur_len = strlen(full_val);
+        size_t extra_len = strlen(extra);
+        if (cur_len + extra_len + 1 < sizeof(full_val)) {
+            snprintf(full_val + cur_len, sizeof(full_val) - cur_len, " %s", extra);
+        }
+        free(extra);
+        extra = next_token(&p);
+    }
+
+    char *stored = strdup(full_val);
+    if (!stored)
+        return NULL;
+
+    htaccess_directive_t *d = alloc_directive(DIR_RATE_LIMIT, line);
+    if (!d) {
+        free(stored);
+        return NULL;
+    }
+    d->value = stored;
+    return d;
+}
+
+/**
+ * Parse: SecRuleEngine On|Off|DetectionOnly
+ * Value is stored verbatim (lowercased) for the bridge executor; the
+ * mode string is validated here so bad configs die at parse time.
+ */
+static htaccess_directive_t *parse_sec_rule_engine(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    for (char *q = val; *q; q++)
+        *q = (char)tolower((unsigned char)*q);
+
+    if (strcmp(val, "on") != 0 && strcmp(val, "off") != 0 &&
+        strcmp(val, "detectiononly") != 0) {
+        free(val);
+        return NULL;
+    }
+
+    htaccess_directive_t *d = alloc_directive(DIR_SEC_RULE_ENGINE, line);
+    if (!d) {
+        free(val);
+        return NULL;
+    }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: EsiEnable On|Off
+ * Per-directory opt-in for ESI response-body processing. Stored
+ * lowercased; unknown values are rejected at parse time.
+ */
+static htaccess_directive_t *parse_esi_enable(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+
+    for (char *q = val; *q; q++)
+        *q = (char)tolower((unsigned char)*q);
+
+    if (strcmp(val, "on") != 0 && strcmp(val, "off") != 0) {
+        free(val);
+        return NULL;
+    }
+
+    htaccess_directive_t *d = alloc_directive(DIR_ESI_ENABLE, line);
+    if (!d) {
+        free(val);
+        return NULL;
+    }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: BotChallenge On|Off
+ */
+static htaccess_directive_t *parse_bot_challenge(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+    for (char *q = val; *q; q++)
+        *q = (char)tolower((unsigned char)*q);
+    if (strcmp(val, "on") != 0 && strcmp(val, "off") != 0) {
+        free(val);
+        return NULL;
+    }
+    htaccess_directive_t *d = alloc_directive(DIR_BOT_CHALLENGE, line);
+    if (!d) { free(val); return NULL; }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: BotChallengeTTL N / BotChallengeDifficulty N — plain ints.
+ */
+static htaccess_directive_t *parse_bot_challenge_int(directive_type_t t,
+                                                     const char *args,
+                                                     int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+    for (const char *q = val; *q; q++)
+        if (!isdigit((unsigned char)*q)) {
+            free(val);
+            return NULL;
+        }
+    htaccess_directive_t *d = alloc_directive(t, line);
+    if (!d) { free(val); return NULL; }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: BotChallengeExempt regex — validated at exec time.
+ */
+static htaccess_directive_t *parse_bot_challenge_exempt(const char *args,
+                                                        int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+    htaccess_directive_t *d = alloc_directive(DIR_BOT_CHALLENGE_EXEMPT, line);
+    if (!d) { free(val); return NULL; }
+    d->value = val;
     return d;
 }
 
@@ -1471,6 +1722,61 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
     after = match_kw(p, "ErrorDocument");
     if (after)
         return parse_error_document(after, line_num);
+
+    /* FallbackResource */
+    after = match_kw(p, "FallbackResource");
+    if (after)
+        return parse_fallback_resource(after, line_num);
+
+    /* CacheEnable */
+    after = match_kw(p, "CacheEnable");
+    if (after)
+        return parse_cache_enable(after, line_num);
+
+    /* CacheDisable */
+    after = match_kw(p, "CacheDisable");
+    if (after)
+        return parse_cache_disable(after, line_num);
+
+    /* CacheMaxExpire */
+    after = match_kw(p, "CacheMaxExpire");
+    if (after)
+        return parse_cache_max_expire(after, line_num);
+
+    /* CacheDefaultExpire */
+    after = match_kw(p, "CacheDefaultExpire");
+    if (after)
+        return parse_cache_default_expire(after, line_num);
+
+    /* RateLimit */
+    after = match_kw(p, "RateLimit");
+    if (after)
+        return parse_rate_limit(after, line_num);
+
+    /* SecRuleEngine */
+    after = match_kw(p, "SecRuleEngine");
+    if (after)
+        return parse_sec_rule_engine(after, line_num);
+
+    /* EsiEnable */
+    after = match_kw(p, "EsiEnable");
+    if (after)
+        return parse_esi_enable(after, line_num);
+
+    /* BotChallenge family */
+    after = match_kw(p, "BotChallenge");
+    if (after)
+        return parse_bot_challenge(after, line_num);
+    after = match_kw(p, "BotChallengeTTL");
+    if (after)
+        return parse_bot_challenge_int(DIR_BOT_CHALLENGE_TTL, after, line_num);
+    after = match_kw(p, "BotChallengeDifficulty");
+    if (after)
+        return parse_bot_challenge_int(DIR_BOT_CHALLENGE_DIFFICULTY, after,
+                                       line_num);
+    after = match_kw(p, "BotChallengeExempt");
+    if (after)
+        return parse_bot_challenge_exempt(after, line_num);
 
     /* ExpiresActive */
     after = match_kw(p, "ExpiresActive");
@@ -3224,3 +3530,5 @@ htaccess_directive_t *htaccess_parse(const char *content, size_t len,
     free(buf);
     return head;
 }
+
+

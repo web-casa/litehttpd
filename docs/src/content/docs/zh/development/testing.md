@@ -65,5 +65,5 @@ bash integration-tests/apps/wordpress/verify.sh
 ## CI 流水线
 
 - **PR 门禁** (ci.yml)：构建、单元/属性/兼容性测试、ASan/UBSan、Apache 对比、OLS E2E
-- **每夜构建** (nightly.yml)：模糊测试、冒烟测试、集成测试（4 个 PHP 应用）
+- **手动发布门禁**：runtime image 构建、heavy apps-matrix 和 DO VPS 验证只通过显式 workflow 运行
 - **发布** (release.yml)：x86_64 平台构建、RPM 打包和发布资产上传

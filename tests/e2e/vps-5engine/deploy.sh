@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016  # Remote SSH script bodies intentionally expand on the VPS.
 # =============================================================================
 # deploy.sh — One-click deployment for 5-engine WordPress comparison test
 #
@@ -32,7 +33,7 @@ $SSH 'dnf -y install epel-release 2>&1 | tail -1
 dnf -y install httpd mysql-server php php-mysqlnd php-fpm php-gd php-xml \
   php-mbstring php-zip php-intl php-curl php-json \
   cmake gcc gcc-c++ git-core libxcrypt-devel patch wget unzip \
-  pcre-devel openssl-devel expat-devel zlib-devel \
+  pcre-devel pcre2-devel openssl-devel expat-devel zlib-devel \
   2>&1 | tail -3'
 ok "Base packages installed"
 
@@ -59,7 +60,7 @@ ok "Apache on :80"
 step "Building Patched OLS (4 patches)... This takes ~5 minutes"
 $SSH 'cd /tmp
 if [ ! -d ols-patched ]; then
-  git clone --depth 1 --recurse-submodules --branch v1.8.5 \
+  git clone --depth 1 --recurse-submodules --branch v1.9.1 \
     https://github.com/litespeedtech/openlitespeed.git ols-patched 2>&1 | tail -2
 fi
 cd ols-patched
@@ -117,8 +118,8 @@ step "Installing Patched OLS on :8088..."
 $SSH 'cd /tmp
 # Install stock OLS first (creates directory structure)
 if [ ! -f /usr/local/lsws/bin/openlitespeed ]; then
-  wget -q https://openlitespeed.org/packages/openlitespeed-1.8.5.tgz
-  tar xzf openlitespeed-1.8.5.tgz
+  wget -q https://openlitespeed.org/packages/openlitespeed-1.9.1.tgz
+  tar xzf openlitespeed-1.9.1.tgz
   cd openlitespeed && bash install.sh 2>&1 | tail -3
 fi
 

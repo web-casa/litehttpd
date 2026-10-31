@@ -28,18 +28,24 @@ extern "C" {
 }
 
 /* Base64 encode */
-static std::string b64encode(const std::string &input) {
-    static const char t[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static std::string b64encode(const std::string &input)
+{
+    static const char t[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     std::string out;
-    int val = 0, valb = -6;
+    unsigned int val = 0;
+    int valb = -6;
     for (unsigned char c : input) {
         val = (val << 8) + c;
         valb += 8;
-        while (valb >= 0) { out.push_back(t[(val >> valb) & 0x3F]); valb -= 6; }
+        while (valb >= 0) {
+            out.push_back(t[(val >> valb) & 0x3F]);
+            valb -= 6;
+        }
     }
-    if (valb > -6) out.push_back(t[((val << 8) >> (valb + 8)) & 0x3F]);
-    while (out.size() % 4) out.push_back('=');
+    if (valb > -6)
+        out.push_back(t[((val << 8) >> (valb + 8)) & 0x3F]);
+    while (out.size() % 4)
+        out.push_back('=');
     return out;
 }
 
@@ -88,8 +94,9 @@ RC_GTEST_PROP(AuthBasicProp, HtpasswdCheckRejectsWrongPassword, ())
 
 /* Property 37: Auth flow — no credentials → 401 */
 class AuthBasicPropFixture : public ::testing::Test {
-public:
-    void SetUp() override {
+  public:
+    void SetUp() override
+    {
         mock_lsiapi::reset_global_state();
         session_.reset();
         /* htpasswd fixtures live under /tmp; exec_auth_basic() confines
@@ -97,7 +104,8 @@ public:
          * document root for these property tests. */
         session_.set_doc_root("/tmp");
     }
-protected:
+
+  protected:
     MockSession session_;
 };
 
@@ -122,14 +130,19 @@ RC_GTEST_FIXTURE_PROP(AuthBasicPropFixture, NoCredentialsReturns401, ())
 
     /* Build directive list */
     auto *d1 = (htaccess_directive_t *)calloc(1, sizeof(htaccess_directive_t));
-    d1->type = DIR_AUTH_TYPE; d1->value = strdup("Basic");
+    d1->type = DIR_AUTH_TYPE;
+    d1->value = strdup("Basic");
     auto *d2 = (htaccess_directive_t *)calloc(1, sizeof(htaccess_directive_t));
-    d2->type = DIR_AUTH_NAME; d2->value = strdup("Test");
+    d2->type = DIR_AUTH_NAME;
+    d2->value = strdup("Test");
     auto *d3 = (htaccess_directive_t *)calloc(1, sizeof(htaccess_directive_t));
-    d3->type = DIR_AUTH_USER_FILE; d3->value = strdup(tmppath);
+    d3->type = DIR_AUTH_USER_FILE;
+    d3->value = strdup(tmppath);
     auto *d4 = (htaccess_directive_t *)calloc(1, sizeof(htaccess_directive_t));
     d4->type = DIR_REQUIRE_VALID_USER;
-    d1->next = d2; d2->next = d3; d3->next = d4;
+    d1->next = d2;
+    d2->next = d3;
+    d3->next = d4;
 
     /* No auth header → should get 401 */
     int rc = exec_auth_basic(session_.handle(), d1);
@@ -159,14 +172,19 @@ RC_GTEST_FIXTURE_PROP(AuthBasicPropFixture, CorrectCredentialsPass, ())
     close(fd);
 
     auto *d1 = (htaccess_directive_t *)calloc(1, sizeof(htaccess_directive_t));
-    d1->type = DIR_AUTH_TYPE; d1->value = strdup("Basic");
+    d1->type = DIR_AUTH_TYPE;
+    d1->value = strdup("Basic");
     auto *d2 = (htaccess_directive_t *)calloc(1, sizeof(htaccess_directive_t));
-    d2->type = DIR_AUTH_NAME; d2->value = strdup("Test");
+    d2->type = DIR_AUTH_NAME;
+    d2->value = strdup("Test");
     auto *d3 = (htaccess_directive_t *)calloc(1, sizeof(htaccess_directive_t));
-    d3->type = DIR_AUTH_USER_FILE; d3->value = strdup(tmppath);
+    d3->type = DIR_AUTH_USER_FILE;
+    d3->value = strdup(tmppath);
     auto *d4 = (htaccess_directive_t *)calloc(1, sizeof(htaccess_directive_t));
     d4->type = DIR_REQUIRE_VALID_USER;
-    d1->next = d2; d2->next = d3; d3->next = d4;
+    d1->next = d2;
+    d2->next = d3;
+    d3->next = d4;
 
     std::string auth = "Basic " + b64encode(user + ":" + pass);
     session_.set_auth_header(auth);

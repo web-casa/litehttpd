@@ -29,7 +29,7 @@ LiteHTTPD 提供两个版本，均为免费开源。
 | AddType/ForceType/AddCharset | 支持 | 支持 |
 | SetEnv/SetEnvIf/BrowserMatch | 支持 | 支持 |
 | DirectoryIndex | 支持 | 支持 |
-| BruteForceProtection | 支持 | 支持 |
+| LSBruteForceProtection | 支持 | 支持 |
 | Options -Indexes（模块层面） | 支持 | 支持 |
 | **RewriteRule 执行** | 仅解析 | **完整执行** |
 | **php_value / php_flag** | 仅解析 | **传递给 lsphp** |

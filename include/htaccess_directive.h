@@ -140,6 +140,30 @@ typedef enum {
 
     /* Phase 10: trusted-proxy gate for brute-force X-Forwarded-For parsing */
     DIR_BRUTE_FORCE_TRUSTED_PROXY,     /* 82 — BruteForceTrustedProxy <cidr-list> */
+
+    /* Real-app front-controller fallback */
+    DIR_FALLBACK_RESOURCE,             /* 83 — FallbackResource */
+    DIR_CACHE_ENABLE,                  /* 84 */
+    DIR_CACHE_DISABLE,                 /* 85 */
+    DIR_CACHE_MAX_EXPIRE,              /* 86 */
+    DIR_CACHE_DEFAULT_EXPIRE,          /* 87 */
+    DIR_RATE_LIMIT,                    /* 88 */
+
+    /* === ModSecurity bridge (v3) === */
+    /** SecRuleEngine On|Off|DetectionOnly — value stores the mode string.
+     * Bridges to OLS modsecurity-ls via the per-request env contract. */
+    DIR_SEC_RULE_ENGINE,               /* 89 */
+
+    /** EsiEnable On|Off — per-directory opt-in for response-body ESI
+     * processing. Default Off: body filtering never runs unless the
+     * directory asked for it. */
+    DIR_ESI_ENABLE,                    /* 90 */
+
+    /** Bot challenge (v3): self-hosted JS PoW gate, default Off. */
+    DIR_BOT_CHALLENGE,                 /* 91 */
+    DIR_BOT_CHALLENGE_TTL,             /* 92 */
+    DIR_BOT_CHALLENGE_DIFFICULTY,      /* 93 */
+    DIR_BOT_CHALLENGE_EXEMPT,          /* 94 */
 } directive_type_t;
 
 /**

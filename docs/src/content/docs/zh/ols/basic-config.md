@@ -120,7 +120,7 @@ module cache {
 如需加载 LiteHTTPD 模块以支持 .htaccess：
 
 ```apacheconf
-module litehttpd_htaccess {
+module ols_htaccess {
     ls_enabled                1
 }
 ```

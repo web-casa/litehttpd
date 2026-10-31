@@ -76,6 +76,12 @@ typedef struct lsi_serverhook_s lsi_serverhook_t;
 typedef struct lsi_reqhdlr_s    lsi_reqhdlr_t;
 typedef struct lsi_confparser_s lsi_confparser_t;
 
+/* Stream-filter callback flags — mirrors ls.h */
+#define LSI_CBFO_BUFFERED 1
+#define LSI_CBFI_FLUSH    1
+#define LSI_CBFI_EOF      2
+#define LSI_CBFI_STATIC   4
+
 /* lsi_param_t — hook callback parameter (matches ls.h) */
 struct lsi_param_s {
     const lsi_session_t  *session;
@@ -238,6 +244,13 @@ int         lsi_session_get_dir_option(lsi_session_t *session,
 /* Internal URI redirect (v2: DirectoryIndex) */
 int         lsi_session_set_uri_internal(lsi_session_t *session,
                                          const char *uri, int uri_len);
+int         lsiapi_has_custom_extensions(void);
+int         lsiapi_has_php_config_extensions(void);
+int         lsiapi_has_rewrite_extensions(void);
+void       *lsiapi_parse_rewrite_rules(const char *rules_text, int text_len);
+int         lsiapi_exec_rewrite_rules(lsi_session_t *session, void *handle,
+                                      const char *base, int base_len);
+void        lsiapi_free_rewrite_rules(void *handle);
 
 /* File existence check (v2: DirectoryIndex) */
 int         lsi_session_file_exists(lsi_session_t *session,

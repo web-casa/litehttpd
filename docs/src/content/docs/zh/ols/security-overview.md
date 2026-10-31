@@ -103,7 +103,7 @@ HTTP 安全响应头指示浏览器启用 HSTS、CSP 和框架嵌入限制等保
 
 ## LiteHTTPD 模块安全功能
 
-安装 LiteHTTPD 模块（`litehttpd_htaccess.so`）后，可使用 Apache 管理员熟悉的基于 `.htaccess` 的安全控制：
+安装 LiteHTTPD 模块（`ols_htaccess.so`）后，可使用 Apache 管理员熟悉的基于 `.htaccess` 的安全控制：
 
 ### 认证与授权
 

@@ -99,7 +99,7 @@ Client Request
 | `htaccess_exec_handler.c` | AddHandler, SetHandler (no-op) |
 | `htaccess_exec_forcetype.c` | ForceType |
 | `htaccess_exec_encoding.c` | AddType, AddEncoding, AddCharset |
-| `htaccess_exec_brute_force.c` | BruteForce* |
+| `htaccess_exec_brute_force.c` | LSBruteForce* |
 
 ## Caching Strategy
 

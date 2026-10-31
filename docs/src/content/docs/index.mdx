@@ -6,7 +6,7 @@ hero:
   title: Make OLS Understand .htaccess
   tagline: |
     The missing .htaccess engine for OpenLiteSpeed.
-    83 directive types. 90%+ Apache compatible. 2x faster. Free and open source.
+    80 directives. 90%+ Apache compatible. 2x faster. Free and open source.
   image:
     html: |
       <div class="terminal" style="background:#0d1117;border-radius:8px;overflow:hidden;font-family:'SF Mono','Cascadia Code','Fira Code',Consolas,monospace;font-size:0.75rem;line-height:1.6;box-shadow:0 8px 32px rgba(0,0,0,0.4);border:1px solid #30363d;max-width:540px;width:100%">
@@ -17,8 +17,8 @@ hero:
           <span style="margin-left:0.5rem;color:#8b949e;font-size:0.7rem">terminal</span>
         </div>
         <div style="padding:0.75rem 1rem;color:#c9d1d9">
-          <div><span style="color:#22c55e;font-weight:700">$</span> <span>dnf install openlitespeed-litehttpd</span></div>
-          <div style="color:#8b949e;padding-left:1rem">Installed: openlitespeed-litehttpd</div>
+          <div><span style="color:#22c55e;font-weight:700">$</span> <span>dnf install openlitespeed-litehttpd litehttpd</span></div>
+          <div style="color:#8b949e;padding-left:1rem">Installed: openlitespeed-litehttpd-1.8.5, litehttpd-2.0</div>
           <div><span style="color:#22c55e;font-weight:700">$</span> <span>systemctl restart lsws</span></div>
           <div style="height:0.5rem"></div>
           <div><span style="color:#22c55e;font-weight:700">$</span> <span>curl -I localhost:8088/</span></div>
@@ -48,7 +48,7 @@ import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
 
 <CardGrid>
   <Card title="90%+ Compatible" icon="approve-check">
-    83 directive types: Require, Header, RewriteRule, ExpiresByType, FilesMatch,
+    80 directives: Require, Header, RewriteRule, ExpiresByType, FilesMatch,
     If/ElseIf/Else and more. WordPress plugins just work.
   </Card>
   <Card title="2x Faster" icon="rocket">

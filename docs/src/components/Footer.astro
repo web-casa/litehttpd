@@ -1,25 +1,13 @@
 ---
 /**
- * Custom site footer with navigation, directory links, and copyright.
+ * Custom site footer with navigation, badges, and copyright.
  */
+import type { Props } from '@astrojs/starlight/props';
 import Default from '@astrojs/starlight/components/Footer.astro';
-import linksData from '../data/link.json';
-
-type DirectorySite = {
-  name: string;
-  url: string;
-  domain: string;
-  logo_svg?: string | null;
-  status?: string;
-  dr?: number | null;
-  description_i18n?: Record<string, string>;
-};
 
 const isZh = Astro.url.pathname.startsWith('/zh');
 const prefix = isZh ? '/zh' : '';
 const year = new Date().getFullYear();
-const footerSites = (linksData.footer_navigation_sites as DirectorySite[])
-  .filter((site) => site.status !== 'archived');
 ---
 
 <Default {...Astro.props}><slot /></Default>
@@ -62,22 +50,11 @@ const footerSites = (linksData.footer_navigation_sites as DirectorySite[])
       </div>
     </div>
 
-    <div class="footer-directory-sites">
-      <h4>{isZh ? '导航站' : 'Directories'}</h4>
-      <div class="footer-directory-list">
-        {footerSites.map((site) => (
-          <a
-            href={site.url}
-            target="_blank"
-            rel="noopener"
-            title={site.description_i18n?.[isZh ? 'zh-CN' : 'en-US'] ?? site.domain}
-          >
-            {site.logo_svg && <img src={site.logo_svg} alt="" loading="lazy" />}
-            <span>{site.name}</span>
-            {site.dr != null && <small>DR {site.dr}</small>}
-          </a>
-        ))}
-      </div>
+    <div class="footer-badges">
+      <a href="https://hicyou.com/" target="_blank" rel="noopener"><img src="https://hicyou.com/badge/featured-light.svg" alt="Featured on Hicyou" loading="lazy" /></a>
+      <a href="https://www.aat.ee/" target="_blank" rel="noopener"><img src="https://www.aat.ee/images/badges/top1-light.svg" alt="Featured on AAT" loading="lazy" /></a>
+      <a href="https://www.mf8.biz" target="_blank" rel="noopener"><img src="https://www.mf8.biz/badge/badge_light.svg" alt="Featured on MF8" loading="lazy" /></a>
+      <a href="https://bigkr.com" target="_blank" rel="noopener"><img src="https://bigkr.com/badge/badge_light.svg" alt="Featured on BigKr" loading="lazy" /></a>
     </div>
 
     <div class="footer-bottom">
@@ -124,56 +101,28 @@ const footerSites = (linksData.footer_navigation_sites as DirectorySite[])
   .footer-col a:hover {
     color: var(--sl-color-accent-high);
   }
-  .footer-directory-sites {
+  .footer-badges {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
     padding: 1.5rem 0;
     border-top: 1px solid var(--sl-color-gray-5);
     border-bottom: 1px solid var(--sl-color-gray-5);
     margin-bottom: 1.5rem;
   }
-  .footer-directory-sites h4 {
-    color: var(--sl-color-white);
-    font-size: 0.78rem;
-    font-weight: 600;
-    margin: 0 0 0.75rem;
-    text-align: center;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  .footer-badges a {
+    display: inline-block;
+    opacity: 0.6;
+    transition: opacity 0.2s;
   }
-  .footer-directory-list {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 0.55rem;
-    flex-wrap: wrap;
+  .footer-badges a:hover {
+    opacity: 1;
   }
-  .footer-directory-list a {
-    display: inline-flex;
-    align-items: center;
-    min-height: 2rem;
-    gap: 0.4rem;
-    border: 1px solid var(--sl-color-gray-5);
-    border-radius: 6px;
-    color: var(--sl-color-gray-2);
-    font-size: 0.76rem;
-    line-height: 1;
-    padding: 0.34rem 0.5rem;
-    text-decoration: none;
-    transition: border-color 0.15s, color 0.15s, background 0.15s;
-  }
-  .footer-directory-list a:hover {
-    background: var(--sl-color-gray-7);
-    border-color: var(--sl-color-accent-high);
-    color: var(--sl-color-accent-high);
-  }
-  .footer-directory-list img {
-    flex: 0 0 auto;
-    height: 18px;
-    width: 18px;
-    object-fit: contain;
-  }
-  .footer-directory-list small {
-    color: var(--sl-color-gray-3);
-    font-size: 0.66rem;
+  .footer-badges img {
+    height: 24px;
+    width: auto;
   }
   .footer-bottom {
     text-align: center;

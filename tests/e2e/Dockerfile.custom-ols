@@ -1,67 +1,251 @@
-# Custom OLS Docker image with litehttpd LSIAPI patches
+# Custom OLS Docker image built through the private RPM/tgz release path.
 #
-# Multi-stage build:
-# 1. Download OLS source and apply patches (PHPConfig + Rewrite)
-# 2. Compile patched OLS from source
-# 3. Replace OLS binary in official image (keeps lsphp, configs, etc.)
+# The builder mirrors .github/workflows/release.yml:
+# 1. Create pinned Source10/13/11/12 caches for third-party deps, PHP, and LSAPI
+# 2. Create the OLS source tarball expected by packaging/openlitespeed-litehttpd.spec
+# 3. Create Source9 (litehttpd-module-src.tar.gz) from this checkout
+# 4. Run rpmbuild --noclean --with source_cache. By default the E2E runtime
+#    image stops after %build and copies the patched OLS binary/module from
+#    litehttpd-artifacts; set OLS_RPM_BUILD_MODE=package to exercise %install.
+# 5. Copy the patched OLS binary and module into the runtime image.
 #
 # Usage:
 #   docker build -f tests/e2e/Dockerfile.custom-ols -t ols-custom .
 
-# Stage 1: Compile patched OLS from source
-FROM ubuntu:22.04 AS ols-builder
+ARG RPM_BASE_IMAGE=almalinux:8
+ARG OLS_RUNTIME_IMAGE=litespeedtech/openlitespeed:1.9.1-lsphp82
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ cmake make wget ca-certificates patch \
-    libpcre3-dev libexpat1-dev zlib1g-dev libxml2-dev libaio-dev \
-    && rm -rf /var/lib/apt/lists/*
+FROM ${RPM_BASE_IMAGE} AS ols-builder
 
-# Download OLS 1.8.5 source
-ARG OLS_VERSION=1.8.5
-RUN wget -qO- "https://github.com/litespeedtech/openlitespeed/archive/v${OLS_VERSION}.tar.gz" \
-    | tar xz -C /tmp
+ARG OLS_VERSION=1.9.1
+ARG RPM_DIST=.el8
+ARG OLS_BUILD_JOBS=2
+ARG OLS_RPM_BUILD_MODE=build
+ARG ALMA_REPO_MIRROR=""
 
-WORKDIR /tmp/openlitespeed-${OLS_VERSION}
+WORKDIR /src/litehttpd
 
-# Apply litehttpd patches
-COPY patches/0001-lsiapi-phpconfig.patch /tmp/
-COPY patches/0002-lsiapi-rewrite.patch /tmp/
-RUN patch -p1 < /tmp/0001-lsiapi-phpconfig.patch && \
-    patch -p1 < /tmp/0002-lsiapi-rewrite.patch
+RUN set -eux; \
+    if [ -n "$ALMA_REPO_MIRROR" ]; then \
+      sed -i \
+        -e 's|^mirrorlist=|#mirrorlist=|g' \
+        -e "s|^# baseurl=https://repo.almalinux.org/almalinux|baseurl=${ALMA_REPO_MIRROR}|g" \
+        -e "s|^#baseurl=https://repo.almalinux.org/almalinux|baseurl=${ALMA_REPO_MIRROR}|g" \
+        /etc/yum.repos.d/*.repo; \
+    fi; \
+    if command -v dnf >/dev/null 2>&1; then \
+      dnf -y --setopt=install_weak_deps=False install \
+        rpm-build gcc gcc-c++ cmake make bison autoconf automake libtool \
+        systemd-rpm-macros which git wget ca-certificates clang patch perl \
+        golang tar gzip findutils binutils libcap-devel libaio-devel \
+        expat-devel libxml2-devel zlib-devel libstdc++-devel libxcrypt-devel; \
+      extra_repos=""; \
+      for repo in powertools crb; do \
+        if dnf repolist all | awk '{print $1}' | grep -qx "$repo"; then \
+          extra_repos="${extra_repos} --enablerepo=${repo}"; \
+        fi; \
+      done; \
+      # shellcheck disable=SC2086 \
+      dnf -y --setopt=install_weak_deps=False ${extra_repos} install libstdc++-static || true; \
+    else \
+      yum -y --setopt=install_weak_deps=False install \
+        rpm-build gcc gcc-c++ cmake3 make bison autoconf automake libtool \
+        systemd-rpm-macros which git wget ca-certificates clang patch perl \
+        tar gzip findutils binutils libcap-devel libaio-devel expat-devel \
+        libxml2-devel zlib-devel libstdc++-devel libxcrypt-devel; \
+      extra_repos=""; \
+      for repo in powertools crb; do \
+        if yum repolist all | awk '{print $1}' | grep -qx "$repo"; then \
+          extra_repos="${extra_repos} --enablerepo=${repo}"; \
+        fi; \
+      done; \
+      # shellcheck disable=SC2086 \
+      yum -y --setopt=install_weak_deps=False ${extra_repos} install libstdc++-static || true; \
+      yum -y --setopt=install_weak_deps=False install golang || true; \
+      command -v cmake >/dev/null 2>&1 || ln -sf /usr/bin/cmake3 /usr/bin/cmake; \
+    fi; \
+    rm -rf /var/cache/dnf /var/cache/yum
 
-# Build OLS (skip BoringSSL/QUIC — use system OpenSSL, sufficient for CI)
-RUN mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_INSTALL_PREFIX=/usr/local/lsws \
-          .. && \
-    make -j$(nproc) && \
-    make install DESTDIR=/opt/ols-install
+COPY scripts/ scripts/
 
-# Stage 2: Final runtime image
-FROM litespeedtech/openlitespeed:latest
+RUN set -eux; \
+    bash scripts/create-release-source-cache.sh /tmp
 
-# Replace OLS binary with patched version
+RUN set -eux; \
+    git config --global http.version HTTP/1.1 || true; \
+    git config --global http.lowSpeedLimit 32768 || true; \
+    git config --global http.lowSpeedTime 120 || true; \
+    git clone --depth 1 --recurse-submodules --shallow-submodules --branch "v${OLS_VERSION}" \
+      https://github.com/litespeedtech/openlitespeed.git /tmp/ols-src; \
+    cd /tmp/ols-src; \
+    tar czf "/tmp/v${OLS_VERSION}.tar.gz" \
+      --exclude=.git \
+      --transform="flags=r;s,^\.,openlitespeed-${OLS_VERSION}," \
+      .
+
+COPY CMakeLists.txt ./
+COPY include/ include/
+COPY src/ src/
+COPY tools/ tools/
+COPY patches/ patches/
+COPY packaging/ packaging/
+
+RUN set -eux; \
+    tar czf /tmp/litehttpd-module-src.tar.gz \
+      --transform="flags=r;s,^\.,litehttpd-module," \
+      --exclude=.git --exclude=build --exclude=node_modules \
+      -C /src/litehttpd .
+
+RUN set -eux; \
+    mkdir -p /root/rpmbuild/BUILD /root/rpmbuild/RPMS \
+             /root/rpmbuild/SOURCES /root/rpmbuild/SPECS /root/rpmbuild/SRPMS; \
+    cp "/tmp/v${OLS_VERSION}.tar.gz" /root/rpmbuild/SOURCES/; \
+    cp /src/litehttpd/patches/0001-lsiapi-phpconfig.patch /root/rpmbuild/SOURCES/; \
+    cp /src/litehttpd/patches/0002-lsiapi-rewrite.patch /root/rpmbuild/SOURCES/; \
+    cp /src/litehttpd/patches/0003-readapacheconf.patch /root/rpmbuild/SOURCES/; \
+    cp /src/litehttpd/patches/0004-autoindex-403.patch /root/rpmbuild/SOURCES/; \
+    cp /src/litehttpd/tools/apacheconf_parser.c /root/rpmbuild/SOURCES/; \
+    cp /src/litehttpd/tools/apacheconf_parser.h /root/rpmbuild/SOURCES/; \
+    cp /src/litehttpd/tools/ols_config_writer.c /root/rpmbuild/SOURCES/; \
+    cp /src/litehttpd/tools/ols_config_writer.h /root/rpmbuild/SOURCES/; \
+    cp /tmp/litehttpd-module-src.tar.gz /root/rpmbuild/SOURCES/; \
+    cp /tmp/third-party-src.tar.gz /root/rpmbuild/SOURCES/; \
+    cp /tmp/third-party-deps-src.tar.gz /root/rpmbuild/SOURCES/; \
+    cp /tmp/php-7.4.33.tar.gz /root/rpmbuild/SOURCES/; \
+    cp /tmp/php-litespeed-8.1.tgz /root/rpmbuild/SOURCES/; \
+    export LITEHTTPD_BUILD_JOBS="${OLS_BUILD_JOBS}"; \
+    case "${OLS_RPM_BUILD_MODE}" in \
+      build) rpm_build_action="-bc" ;; \
+      package) rpm_build_action="-bb" ;; \
+      *) echo "FATAL: OLS_RPM_BUILD_MODE must be build or package" >&2; exit 1 ;; \
+    esac; \
+    bash -o pipefail -c 'rpmbuild "$1" --noclean \
+      --with source_cache \
+      --define "_topdir /root/rpmbuild" \
+      --define "dist ${RPM_DIST}" \
+      /src/litehttpd/packaging/openlitespeed-litehttpd.spec 2>&1 \
+      | sed -u -E \
+          -e "s/(Your webAdmin password is )[^,]+/\\1<redacted>/" \
+          -e "s/(Admin:[^[:space:]]+[[:space:]]+Password:)[^[:space:]]+/\\1<redacted>/"' \
+      -- "$rpm_build_action"; \
+    ART_DIR="/root/rpmbuild/BUILD/litehttpd-artifacts"; \
+    if [ "${OLS_RPM_BUILD_MODE}" = package ]; then \
+      LSWS="$(find /root/rpmbuild/BUILDROOT -path '*/usr/local/lsws' -type d -print -quit)"; \
+      test -n "$LSWS"; \
+      test ! -e "$LSWS/adminpasswd"; \
+      test ! -e "$LSWS/phpbuild"; \
+      PB="$LSWS/bin/openlitespeed"; \
+      MOD="$LSWS/modules/litehttpd_htaccess.so"; \
+    else \
+      PB="$ART_DIR/openlitespeed-patched"; \
+      MOD="$ART_DIR/litehttpd_htaccess.so"; \
+    fi; \
+    test -x "$PB"; \
+    test -f "$MOD"; \
+    strings "$PB" | grep -q 'litehttpd_lsiapi_extensions_v1'; \
+    strings "$PB" | grep -q 'set_php_config_value'; \
+    strings "$PB" | grep -q 'parse_rewrite_rules'; \
+    strings "$PB" | grep -q 'readApacheConf'; \
+    strings "$PB" | grep -q 'indexes_disabled'; \
+    if [ "${OLS_RPM_BUILD_MODE}" = package ]; then \
+      ADMINPHP="$LSWS/admin/fcgi-bin/admin_php"; \
+      LSPHP5="$LSWS/fcgi-bin/lsphp5"; \
+      test -x "$ADMINPHP"; \
+      test -x "$LSPHP5"; \
+      "$ADMINPHP" -v 2>&1 | grep -q 'PHP 7.4.33 (litespeed)'; \
+      "$LSPHP5" -v >/dev/null 2>&1; \
+      ! readelf -V "$ADMINPHP" 2>/dev/null | grep -Eq 'GLIBC_2\.(29|[3-9][0-9])'; \
+    fi; \
+    mkdir -p /opt/ols-install/usr/local/lsws/bin \
+             /opt/ols-install/usr/local/lsws/modules; \
+    install -m 755 "$PB" /opt/ols-install/usr/local/lsws/bin/openlitespeed; \
+    install -m 755 "$MOD" /opt/ols-install/usr/local/lsws/modules/litehttpd_htaccess.so
+
+# Stage 2: final runtime image. The app-matrix runtime path intentionally uses
+# the LiteSpeed-provided lsphp packages from the runtime image repositories.
+# Full PHP/OLS source builds stay in the RPM builder and release packaging path.
+FROM ${OLS_RUNTIME_IMAGE}
+
+ARG APPS_MATRIX_LSPHP_VERSION=82
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates curl libpcre2-8-0 \
+      bzip2 unzip wget mariadb-client binutils; \
+    required_suffixes="-curl -intl -mysql"; \
+    optional_suffixes="-common -opcache"; \
+    has_candidate() { \
+      apt-cache policy "$1" | awk '/Candidate:/ { found=1; candidate=$2 } END { exit(found && candidate != "(none)" ? 0 : 1) }'; \
+    }; \
+    if [ "${APPS_MATRIX_LSPHP_VERSION}" = auto ]; then \
+      php_pkg=""; \
+      for candidate in $(apt-cache search --names-only '^lsphp[0-9]+$' | awk '{print $1}' | sort -Vr); do \
+        has_candidate "${candidate}" || continue; \
+        missing=""; \
+        for suffix in ${required_suffixes}; do \
+          has_candidate "${candidate}${suffix}" || missing=1; \
+        done; \
+        if [ -z "${missing}" ]; then \
+          php_pkg="${candidate}"; \
+          break; \
+        fi; \
+      done; \
+    else \
+      php_pkg="lsphp${APPS_MATRIX_LSPHP_VERSION}"; \
+      has_candidate "${php_pkg}"; \
+      for suffix in ${required_suffixes}; do \
+        has_candidate "${php_pkg}${suffix}"; \
+      done; \
+    fi; \
+    test -n "${php_pkg}"; \
+    packages="${php_pkg}"; \
+    for suffix in ${optional_suffixes} ${required_suffixes}; do \
+      if has_candidate "${php_pkg}${suffix}"; then \
+        packages="${packages} ${php_pkg}${suffix}"; \
+      fi; \
+    done; \
+    echo "Using ${php_pkg} with packages:${packages}"; \
+    apt-get install -y --no-install-recommends ${packages}; \
+    php_bin="/usr/local/lsws/${php_pkg}/bin/php"; \
+    lsphp_bin="/usr/local/lsws/${php_pkg}/bin/lsphp"; \
+    test -x "${php_bin}"; \
+    test -x "${lsphp_bin}"; \
+    ln -sf "${php_bin}" /usr/local/bin/php; \
+    ln -sf "${php_bin}" /usr/bin/php; \
+    ln -sf "${lsphp_bin}" /usr/local/lsws/fcgi-bin/lsphp; \
+    php -v; \
+    for ext in curl dom gd intl mbstring mysqli pdo_mysql SimpleXML xml xmlreader xmlwriter zip; do \
+      php -m | grep -Eix "${ext}"; \
+    done; \
+    rm -rf /var/lib/apt/lists/*
+
 COPY --from=ols-builder /opt/ols-install/usr/local/lsws/bin/openlitespeed \
                          /usr/local/lsws/bin/openlitespeed
+COPY --from=ols-builder /opt/ols-install/usr/local/lsws/modules/litehttpd_htaccess.so \
+                         /usr/local/lsws/modules/litehttpd_htaccess.so
 
-# Copy the litehttpd module
-COPY build/litehttpd_htaccess.so /usr/local/lsws/modules/litehttpd_htaccess.so
-
-# Create test document root
+# Create test document root.
 RUN mkdir -p /var/www/vhosts/localhost/html/subdir && \
     echo "<h1>OK</h1>" > /var/www/vhosts/localhost/html/index.html && \
     echo "img" > /var/www/vhosts/localhost/html/photo.jpg && \
     echo "custom" > /var/www/vhosts/localhost/html/subdir/custom.html && \
     chown -R nobody:nogroup /var/www/vhosts/localhost
 
-# Configure vhost for .htaccess support
-RUN VHCONF="/usr/local/lsws/conf/vhosts/localhost/vhconf.conf" && \
-    if [ -f "$VHCONF" ]; then \
-      sed -i 's/allowOverride.*/allowOverride             255/' "$VHCONF" || true; \
-      grep -q 'allowOverride' "$VHCONF" || echo 'allowOverride 255' >> "$VHCONF"; \
-    fi
+# Configure vhost for .htaccess support.
+RUN CONF="/usr/local/lsws/conf/httpd_config.conf" && \
+    sed -i 's|^[[:space:]]*vhRoot[[:space:]].*|    vhRoot                   /var/www/vhosts/localhost/|' "$CONF" || true; \
+    for VHCONF in /usr/local/lsws/conf/vhosts/Example/vhconf.conf \
+                  /usr/local/lsws/conf/vhosts/localhost/vhconf.conf; do \
+      if [ -f "$VHCONF" ]; then \
+        sed -i 's/^[[:space:]]*allowOverride.*/allowOverride             255/' "$VHCONF" || true; \
+        grep -q 'allowOverride' "$VHCONF" || echo 'allowOverride 255' >> "$VHCONF"; \
+        sed -i 's/^[[:space:]]*indexFiles[[:space:]].*/  indexFiles index.php, index.html/' "$VHCONF" || true; \
+        sed -i 's/^[[:space:]]*autoIndex[[:space:]].*/  autoIndex 0/' "$VHCONF" || true; \
+      fi; \
+    done
 
-# Load litehttpd module
+# Load litehttpd module.
 RUN CONF="/usr/local/lsws/conf/httpd_config.conf" && \
     if ! grep -q 'litehttpd_htaccess' "$CONF" 2>/dev/null; then \
       echo '' >> "$CONF"; \

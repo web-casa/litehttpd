@@ -3,19 +3,22 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "sync-links": "node scripts/sync-directories-links.mjs",
     "dev": "astro dev",
     "start": "astro dev",
-    "prebuild": "node scripts/sync-directories-links.mjs",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.38.2",
+    "@astrojs/starlight": "^0.38.5",
     "@astrojs/starlight-tailwind": "^5.0.0",
-    "astro": "^6.0.1",
-    "sharp": "^0.34.2",
+    "astro": "^6.4.8",
+    "sharp": "^0.34.5",
     "starlight-links-validator": "^0.21.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "0.28.1"
+    }
   }
 }

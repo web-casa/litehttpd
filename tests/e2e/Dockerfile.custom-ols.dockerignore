@@ -1,0 +1,14 @@
+*
+!CMakeLists.txt
+!include/
+!include/**
+!src/
+!src/**
+!patches/
+!patches/**
+!tools/
+!tools/**
+!packaging/
+!packaging/**
+!scripts/
+!scripts/**
