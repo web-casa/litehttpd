@@ -1,0 +1,251 @@
+name: Apps Matrix DO Release Gate
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  workflow_call:
+    inputs:
+      scenarios:
+        description: "Scenario list, heavy, wordpress, cms, framework, or a single scenario"
+        required: false
+        type: string
+        default: wordpress
+      engines:
+        description: "Engine list. Release gate should usually use apache,ols_module"
+        required: false
+        type: string
+        default: apache,ols_module
+      droplet_image:
+        description: "Optional DO image slug or snapshot ID. Empty uses ubuntu-24-04-x64"
+        required: false
+        type: string
+        default: ""
+      skip_dep_install:
+        description: "Set to 1 when droplet_image is a prepared apps-matrix snapshot"
+        required: false
+        type: string
+        default: "0"
+      droplet_size:
+        description: "DigitalOcean size slug"
+        required: false
+        type: string
+        default: s-4vcpu-8gb
+      region:
+        description: "DigitalOcean region"
+        required: false
+        type: string
+        default: sfo3
+      continue_on_failure:
+        description: "Set to 1 to keep running remaining scenarios after a failure"
+        required: false
+        type: string
+        default: "0"
+      artifact_mode:
+        description: "summary or full"
+        required: false
+        type: string
+        default: summary
+      enforce_budgets:
+        description: "Set to 1 only after enough p95 samples have been ratcheted"
+        required: false
+        type: string
+        default: "0"
+      image_tag:
+        description: "Runtime image tag. Defaults to the commit SHA"
+        required: false
+        type: string
+        default: ""
+      runtime_images_reuse_existing:
+        description: "Set to 0 to force-refresh apps-matrix runtime images"
+        required: false
+        type: string
+        default: "1"
+      apache_image:
+        description: "Optional prebuilt Apache runtime image. When set with ols_module_image, skips the runtime image build job."
+        required: false
+        type: string
+        default: ""
+      ols_module_image:
+        description: "Optional prebuilt patched OLS runtime image. When set with apache_image, skips the runtime image build job."
+        required: false
+        type: string
+        default: ""
+
+  workflow_dispatch:
+    inputs:
+      scenarios:
+        description: "Scenario list, heavy, wordpress, cms, framework, or a single scenario"
+        required: false
+        default: wordpress
+      engines:
+        description: "Engine list. Release gate should usually use apache,ols_module"
+        required: false
+        default: apache,ols_module
+      droplet_image:
+        description: "Optional DO image slug or snapshot ID. Empty uses ubuntu-24-04-x64"
+        required: false
+        default: ""
+      skip_dep_install:
+        description: "Set to 1 when droplet_image is a prepared apps-matrix snapshot"
+        required: false
+        default: "0"
+      droplet_size:
+        description: "DigitalOcean size slug"
+        required: false
+        default: s-4vcpu-8gb
+      region:
+        description: "DigitalOcean region"
+        required: false
+        default: sfo3
+      continue_on_failure:
+        description: "Set to 1 to keep running remaining scenarios after a failure"
+        required: false
+        default: "0"
+      artifact_mode:
+        description: "summary or full"
+        required: false
+        default: summary
+      enforce_budgets:
+        description: "Set to 1 only after enough p95 samples have been ratcheted"
+        required: false
+        default: "0"
+      image_tag:
+        description: "Runtime image tag. Defaults to the commit SHA"
+        required: false
+        default: ""
+      runtime_images_reuse_existing:
+        description: "Set to 0 to force-refresh apps-matrix runtime images"
+        required: false
+        default: "1"
+      apache_image:
+        description: "Optional prebuilt Apache runtime image. When set with ols_module_image, skips the runtime image build job."
+        required: false
+        default: ""
+      ols_module_image:
+        description: "Optional prebuilt patched OLS runtime image. When set with apache_image, skips the runtime image build job."
+        required: false
+        default: ""
+
+concurrency:
+  group: apps-matrix-do-release-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apps-matrix-runtime-images:
+    if: inputs.apache_image == '' || inputs.ols_module_image == ''
+    uses: ./.github/workflows/apps-matrix-runtime-images.yml
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+    with:
+      image_tag: ${{ inputs.image_tag || github.sha }}
+      extra_tag: release-gate
+      push_images: "1"
+      reuse_existing: ${{ inputs.runtime_images_reuse_existing }}
+
+  do-release-gate:
+    needs: apps-matrix-runtime-images
+    if: always() && !cancelled() && (inputs.apache_image != '' || needs.apps-matrix-runtime-images.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate inputs
+        env:
+          SCENARIOS: ${{ inputs.scenarios }}
+          ENGINES: ${{ inputs.engines }}
+          DROPLET_IMAGE: ${{ inputs.droplet_image }}
+          SKIP_DEP_INSTALL: ${{ inputs.skip_dep_install }}
+          DROPLET_SIZE: ${{ inputs.droplet_size }}
+          REGION: ${{ inputs.region }}
+          CONTINUE_ON_FAILURE: ${{ inputs.continue_on_failure }}
+          ARTIFACT_MODE: ${{ inputs.artifact_mode }}
+          ENFORCE_BUDGETS: ${{ inputs.enforce_budgets }}
+          APACHE_IMAGE: ${{ inputs.apache_image }}
+          OLS_MODULE_IMAGE: ${{ inputs.ols_module_image }}
+        run: |
+          printf '%s\n' "${SCENARIOS}" | tr ', ' '\n' | sed '/^$/d' | while read -r scenario; do
+            case "${scenario}" in
+              all|heavy|wordpress|cms|framework|wordpress-core|wordpress-redirection|wordpress-w3-total-cache|wordpress-litespeed-cache|wordpress-wordfence|wordpress-ewww|wordpress-wp-optimize|laravel|drupal|nextcloud|joomla|mediawiki) ;;
+              *) echo "Unsupported scenario: ${scenario}" >&2; exit 1 ;;
+            esac
+          done
+          case "${ENGINES}" in
+            apache,ols_module|apache,ols_module,ols_native) ;;
+            *) echo "Unsupported engines: ${ENGINES}" >&2; exit 1 ;;
+          esac
+          case "${SKIP_DEP_INSTALL}" in 0|1) ;; *) exit 1 ;; esac
+          case "${CONTINUE_ON_FAILURE}" in 0|1) ;; *) exit 1 ;; esac
+          case "${ARTIFACT_MODE}" in summary|full) ;; *) exit 1 ;; esac
+          case "${ENFORCE_BUDGETS}" in 0|1) ;; *) exit 1 ;; esac
+          APPS_MATRIX_BUDGET_ENFORCE_REQUESTED="${ENFORCE_BUDGETS}" \
+            bash scripts/check-apps-matrix-budget-policy.sh
+          if ! printf '%s' "${DROPLET_SIZE}" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+            echo "Unsupported droplet_size characters" >&2
+            exit 1
+          fi
+          if ! printf '%s' "${REGION}" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+            echo "Unsupported region characters" >&2
+            exit 1
+          fi
+          if [ -n "${DROPLET_IMAGE}" ] && ! printf '%s' "${DROPLET_IMAGE}" | grep -Eq '^[A-Za-z0-9._:-]+$'; then
+            echo "Unsupported droplet_image characters" >&2
+            exit 1
+          fi
+          if { [ -n "${APACHE_IMAGE}" ] && [ -z "${OLS_MODULE_IMAGE}" ]; } || { [ -z "${APACHE_IMAGE}" ] && [ -n "${OLS_MODULE_IMAGE}" ]; }; then
+            echo "apache_image and ols_module_image must be provided together" >&2
+            exit 1
+          fi
+          for image in "${APACHE_IMAGE}" "${OLS_MODULE_IMAGE}"; do
+            if [ -n "${image}" ] && ! printf '%s' "${image}" | grep -Eq '^[A-Za-z0-9._:@/-]+$'; then
+              echo "Unsupported runtime image characters: ${image}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Install local runner dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl openssh-client python3 rsync tar
+
+      - name: Run DO release gate without remote builds
+        env:
+          DIGITALOCEAN_ACCESS_TOKEN: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+          APPS_MATRIX_DO_SCENARIOS: ${{ inputs.scenarios }}
+          APPS_MATRIX_DO_ENGINES: ${{ inputs.engines }}
+          APPS_MATRIX_DO_REGION: ${{ inputs.region }}
+          APPS_MATRIX_DO_SIZE: ${{ inputs.droplet_size }}
+          APPS_MATRIX_DO_IMAGE: ${{ inputs.droplet_image }}
+          APPS_MATRIX_DO_SKIP_DEP_INSTALL: ${{ inputs.skip_dep_install }}
+          APPS_MATRIX_DO_CONTINUE_ON_FAILURE: ${{ inputs.continue_on_failure }}
+          APPS_MATRIX_DO_ARTIFACT_MODE: ${{ inputs.artifact_mode }}
+          APPS_MATRIX_DO_ENFORCE_BUDGETS: ${{ inputs.enforce_budgets }}
+          APPS_MATRIX_DO_COMPOSE_BUILD: "0"
+          APPS_MATRIX_DO_DOCKER_REGISTRY: ghcr.io
+          APPS_MATRIX_DO_DOCKER_USERNAME: ${{ github.actor }}
+          APPS_MATRIX_DO_DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          APPS_MATRIX_DO_APACHE_IMAGE: ${{ inputs.apache_image || needs.apps-matrix-runtime-images.outputs.apache_image }}
+          APPS_MATRIX_DO_OLS_MODULE_IMAGE: ${{ inputs.ols_module_image || needs.apps-matrix-runtime-images.outputs.ols_module_image }}
+          APPS_MATRIX_DO_NAME: apps-matrix-${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash scripts/apps-matrix-do-vps-test.sh
+
+      - name: Upload DO summary artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: apps-matrix-do-release-gate
+          path: |
+            tests/e2e/apps-matrix/out/do-vps/apps-matrix-out
+            tests/e2e/apps-matrix/out/do-vps/apps-matrix-run.log
+            tests/e2e/apps-matrix/out/do-vps/apps-matrix-out.tgz
+          if-no-files-found: ignore

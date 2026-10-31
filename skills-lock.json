@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "skills": {
+    "analyzing-cloud-storage-access-patterns": {
+      "source": "mukul975/Anthropic-Cybersecurity-Skills",
+      "sourceType": "github",
+      "computedHash": "4c68a2efbfea4be56f97d5d206d7c8aabdcea0865058ab0cb07bbc545a64a304"
+    },
+    "binary-analysis-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "f59bd6d2d34ffe42503dd2d33660d8a40a720f70a7bb0bca8d06aaca42db44a8"
+    },
+    "database-migration": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "535c07f27fc92339bd3e1c4c9eb1a3e1d129180358fb78915df5933ea361c383"
+    },
+    "e2e-testing-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "37ea37e42a81c926ebd81924691a15fb657df7c8a52b863c34967e5ab99cdc22"
+    },
+    "nextjs-app-router-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "d2f0a7065f7418fdb3ae88559f1f1426f40c26f2b5aebcd394797418d4bb3b04"
+    },
+    "nodejs-backend-patterns": {
+      "source": "wshobson/agents",
+      "sourceType": "github",
+      "computedHash": "c6a99966c2565acc388e574039127abc770bb9a3338be761e421e16f023f702b"
+    },
+    "reverse-engineering-malware-with-ghidra": {
+      "source": "mukul975/Anthropic-Cybersecurity-Skills",
+      "sourceType": "github",
+      "computedHash": "ce49022588d32aadc7b0aedb772458186e1a605c87b303b9e8884ba93d0acb53"
+    },
+    "scanning-docker-images-with-trivy": {
+      "source": "mukul975/Anthropic-Cybersecurity-Skills",
+      "sourceType": "github",
+      "computedHash": "7d4251b24e78fd3e3b0894b85dbb68a848626f74f479a18d7aa36df7e54f6018"
+    }
+  }
+}

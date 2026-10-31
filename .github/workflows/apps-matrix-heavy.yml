@@ -1,0 +1,715 @@
+name: Apps Matrix Heavy
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Scenario to run, all, or heavy for the configured heavy matrix"
+        required: false
+        default: all
+      keep_stack:
+        description: "Keep docker stack after failure for manual debugging"
+        required: false
+        default: "0"
+      phase:
+        description: "all, split, or install"
+        required: false
+        default: all
+      enforce_budgets:
+        description: "Set to 1 to fail on tuned scenario/per-engine budgets"
+        required: false
+        default: "0"
+      health_probes:
+        description: "Set to 1 to run app-native post-install health probes"
+        required: false
+        default: "1"
+      enforce_health_probes:
+        description: "Set to 1 to fail when app-native health probes fail"
+        required: false
+        default: "1"
+      strict_plugin_install:
+        description: "auto, 0, or 1 for WordPress plugin install checks"
+        required: false
+        default: auto
+      artifact_mode:
+        description: "summary or full artifact upload"
+        required: false
+        default: summary
+      family:
+        description: "all, wordpress, cms, or framework"
+        required: false
+        default: all
+      prewarm_cache:
+        description: "Set to 1 to prewarm app archives and Composer cache"
+        required: false
+        default: "0"
+      compose_build:
+        description: "Set to 0 to use prebuilt apache and ols_module images"
+        required: false
+        default: "1"
+      apache_image:
+        description: "Optional prebuilt Apache runtime image reference"
+        required: false
+        default: ""
+      ols_module_image:
+        description: "Optional prebuilt ols_module image reference"
+        required: false
+        default: ""
+      prebuild_apache_image:
+        description: "Set to 1 to build and reuse one GHCR Apache runtime image for this run"
+        required: false
+        default: "1"
+      prebuild_ols_module_image:
+        description: "Set to 1 to build and reuse one GHCR ols_module image for this run"
+        required: false
+        default: "1"
+      runtime_images_reuse_existing:
+        description: "Set to 0 to force-refresh one-shot prebuilt runtime images"
+        required: false
+        default: "1"
+
+jobs:
+  validate-inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate inputs
+        env:
+          REQUESTED_PHASE: ${{ inputs.phase }}
+          REQUESTED_SCENARIO: ${{ inputs.scenario }}
+          ENFORCE_BUDGETS: ${{ inputs.enforce_budgets }}
+          HEALTH_PROBES: ${{ inputs.health_probes }}
+          ENFORCE_HEALTH_PROBES: ${{ inputs.enforce_health_probes }}
+          STRICT_PLUGIN_INSTALL: ${{ inputs.strict_plugin_install }}
+          ARTIFACT_MODE: ${{ inputs.artifact_mode }}
+          FAMILY: ${{ inputs.family }}
+          PREWARM_CACHE: ${{ inputs.prewarm_cache }}
+          COMPOSE_BUILD: ${{ inputs.compose_build }}
+          APACHE_IMAGE: ${{ inputs.apache_image }}
+          OLS_MODULE_IMAGE: ${{ inputs.ols_module_image }}
+          PREBUILD_APACHE_IMAGE: ${{ inputs.prebuild_apache_image }}
+          PREBUILD_OLS_MODULE_IMAGE: ${{ inputs.prebuild_ols_module_image }}
+          RUNTIME_IMAGES_REUSE_EXISTING: ${{ inputs.runtime_images_reuse_existing }}
+        run: |
+          case "${REQUESTED_PHASE}" in
+            all|split|install) ;;
+            *) echo "Unsupported phase: ${REQUESTED_PHASE}" >&2; exit 1 ;;
+          esac
+
+          case "${REQUESTED_SCENARIO}" in
+            ""|all|heavy|wordpress-core|wordpress-redirection|wordpress-w3-total-cache|wordpress-litespeed-cache|wordpress-wordfence|wordpress-ewww|wordpress-wp-optimize|laravel|drupal|nextcloud|joomla|mediawiki) ;;
+            *) echo "Unsupported scenario: ${REQUESTED_SCENARIO}" >&2; exit 1 ;;
+          esac
+
+          case "${ENFORCE_BUDGETS}" in
+            0|1) ;;
+            *) echo "Unsupported enforce_budgets: ${ENFORCE_BUDGETS}" >&2; exit 1 ;;
+          esac
+          APPS_MATRIX_BUDGET_ENFORCE_REQUESTED="${ENFORCE_BUDGETS}" \
+            bash scripts/check-apps-matrix-budget-policy.sh
+          case "${HEALTH_PROBES}" in
+            0|1) ;;
+            *) echo "Unsupported health_probes: ${HEALTH_PROBES}" >&2; exit 1 ;;
+          esac
+          case "${ENFORCE_HEALTH_PROBES}" in
+            0|1) ;;
+            *) echo "Unsupported enforce_health_probes: ${ENFORCE_HEALTH_PROBES}" >&2; exit 1 ;;
+          esac
+          case "${STRICT_PLUGIN_INSTALL}" in
+            auto|0|1) ;;
+            *) echo "Unsupported strict_plugin_install: ${STRICT_PLUGIN_INSTALL}" >&2; exit 1 ;;
+          esac
+          case "${ARTIFACT_MODE}" in
+            summary|full) ;;
+            *) echo "Unsupported artifact_mode: ${ARTIFACT_MODE}" >&2; exit 1 ;;
+          esac
+          case "${FAMILY}" in
+            all|wordpress|cms|framework) ;;
+            *) echo "Unsupported family: ${FAMILY}" >&2; exit 1 ;;
+          esac
+          case "${PREWARM_CACHE}" in
+            0|1) ;;
+            *) echo "Unsupported prewarm_cache: ${PREWARM_CACHE}" >&2; exit 1 ;;
+          esac
+          case "${COMPOSE_BUILD}" in
+            0|1) ;;
+            *) echo "Unsupported compose_build: ${COMPOSE_BUILD}" >&2; exit 1 ;;
+          esac
+          case "${PREBUILD_APACHE_IMAGE}" in
+            0|1) ;;
+            *) echo "Unsupported prebuild_apache_image: ${PREBUILD_APACHE_IMAGE}" >&2; exit 1 ;;
+          esac
+          case "${PREBUILD_OLS_MODULE_IMAGE}" in
+            0|1) ;;
+            *) echo "Unsupported prebuild_ols_module_image: ${PREBUILD_OLS_MODULE_IMAGE}" >&2; exit 1 ;;
+          esac
+          case "${RUNTIME_IMAGES_REUSE_EXISTING}" in
+            0|1) ;;
+            *) echo "Unsupported runtime_images_reuse_existing: ${RUNTIME_IMAGES_REUSE_EXISTING}" >&2; exit 1 ;;
+          esac
+          if [ -n "${APACHE_IMAGE}" ] && ! printf '%s' "${APACHE_IMAGE}" | grep -Eq '^[A-Za-z0-9._:@/-]+$'; then
+            echo "Unsupported apache_image characters" >&2
+            exit 1
+          fi
+          if [ -n "${OLS_MODULE_IMAGE}" ] && ! printf '%s' "${OLS_MODULE_IMAGE}" | grep -Eq '^[A-Za-z0-9._:@/-]+$'; then
+            echo "Unsupported ols_module_image characters" >&2
+            exit 1
+          fi
+
+  resolve-runtime-images:
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      compose_build: ${{ steps.resolve.outputs.compose_build }}
+      apache_image: ${{ steps.resolve.outputs.apache_image }}
+      ols_module_image: ${{ steps.resolve.outputs.ols_module_image }}
+      should_build_apache: ${{ steps.resolve.outputs.should_build_apache }}
+      should_build_ols_module: ${{ steps.resolve.outputs.should_build_ols_module }}
+    steps:
+      - name: Resolve runtime images
+        id: resolve
+        env:
+          REQUESTED_PHASE: ${{ inputs.phase }}
+          REQUESTED_COMPOSE_BUILD: ${{ inputs.compose_build }}
+          REQUESTED_APACHE_IMAGE: ${{ inputs.apache_image }}
+          REQUESTED_OLS_MODULE_IMAGE: ${{ inputs.ols_module_image }}
+          PREBUILD_APACHE_IMAGE: ${{ inputs.prebuild_apache_image }}
+          PREBUILD_OLS_MODULE_IMAGE: ${{ inputs.prebuild_ols_module_image }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          repo="$(printf '%s' "${REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          apache_image_ref="ghcr.io/${repo}/apps-matrix-apache-runtime:${SHA}"
+          ols_module_image_ref="ghcr.io/${repo}/apps-matrix-ols-module:${SHA}"
+          compose_build="${REQUESTED_COMPOSE_BUILD}"
+          selected_apache_image="${REQUESTED_APACHE_IMAGE}"
+          selected_ols_module_image="${REQUESTED_OLS_MODULE_IMAGE}"
+          should_build_apache=0
+          should_build_ols_module=0
+
+          if [ -n "${REQUESTED_OLS_MODULE_IMAGE}" ]; then
+            compose_build=0
+          elif [ "${REQUESTED_PHASE}" != "install" ] && [ "${PREBUILD_OLS_MODULE_IMAGE}" = "1" ]; then
+            compose_build=0
+            selected_ols_module_image="${ols_module_image_ref}"
+            should_build_ols_module=1
+          fi
+
+          if [ "${REQUESTED_PHASE}" != "install" ] && [ "${compose_build}" = "0" ]; then
+            if [ -z "${selected_apache_image}" ] && [ "${PREBUILD_APACHE_IMAGE}" = "1" ]; then
+              selected_apache_image="${apache_image_ref}"
+              should_build_apache=1
+            fi
+            if [ -z "${selected_apache_image}" ]; then
+              echo "compose_build=0 requires apache_image or prebuild_apache_image=1" >&2
+              exit 1
+            fi
+            if [ -z "${selected_ols_module_image}" ]; then
+              echo "compose_build=0 requires ols_module_image or prebuild_ols_module_image=1" >&2
+              exit 1
+            fi
+          fi
+
+          {
+            echo "compose_build=${compose_build}"
+            echo "apache_image=${selected_apache_image}"
+            echo "ols_module_image=${selected_ols_module_image}"
+            echo "should_build_apache=${should_build_apache}"
+            echo "should_build_ols_module=${should_build_ols_module}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+        if: steps.resolve.outputs.should_build_apache == '1' || steps.resolve.outputs.should_build_ols_module == '1'
+
+      - uses: docker/login-action@v4
+        if: steps.resolve.outputs.should_build_apache == '1' || steps.resolve.outputs.should_build_ols_module == '1'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check existing runtime image tags
+        id: existing
+        if: steps.resolve.outputs.should_build_apache == '1' || steps.resolve.outputs.should_build_ols_module == '1'
+        env:
+          REUSE_EXISTING: ${{ inputs.runtime_images_reuse_existing }}
+          SHOULD_BUILD_APACHE: ${{ steps.resolve.outputs.should_build_apache }}
+          SHOULD_BUILD_OLS_MODULE: ${{ steps.resolve.outputs.should_build_ols_module }}
+          APACHE_IMAGE: ${{ steps.resolve.outputs.apache_image }}
+          OLS_MODULE_IMAGE: ${{ steps.resolve.outputs.ols_module_image }}
+        run: |
+          apache_exists=0
+          ols_module_exists=0
+          if [ "${REUSE_EXISTING}" = "1" ]; then
+            if [ "${SHOULD_BUILD_APACHE}" = "1" ] && docker buildx imagetools inspect "${APACHE_IMAGE}" >/dev/null 2>&1; then
+              apache_exists=1
+            fi
+            if [ "${SHOULD_BUILD_OLS_MODULE}" = "1" ] && docker buildx imagetools inspect "${OLS_MODULE_IMAGE}" >/dev/null 2>&1; then
+              ols_module_exists=1
+            fi
+          fi
+          echo "apache_exists=${apache_exists}" >> "$GITHUB_OUTPUT"
+          echo "ols_module_exists=${ols_module_exists}" >> "$GITHUB_OUTPUT"
+          if [ "${SHOULD_BUILD_APACHE}" = "1" ] && [ "${apache_exists}" = "1" ]; then
+            echo "Reusing existing one-shot Apache runtime image."
+          fi
+          if [ "${SHOULD_BUILD_OLS_MODULE}" = "1" ] && [ "${ols_module_exists}" = "1" ]; then
+            echo "Reusing existing one-shot OLS module runtime image."
+          fi
+
+      - uses: actions/checkout@v5
+        if: (steps.resolve.outputs.should_build_apache == '1' && steps.existing.outputs.apache_exists != '1') || (steps.resolve.outputs.should_build_ols_module == '1' && steps.existing.outputs.ols_module_exists != '1')
+
+      - name: Build Apache runtime image
+        uses: docker/build-push-action@v7
+        if: steps.resolve.outputs.should_build_apache == '1' && steps.existing.outputs.apache_exists != '1'
+        with:
+          context: .
+          file: tests/e2e/apps-matrix/Dockerfile.apache-runtime
+          push: true
+          tags: ${{ steps.resolve.outputs.apache_image }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=apps-matrix-apache-runtime
+          cache-to: type=gha,mode=max,scope=apps-matrix-apache-runtime
+
+      - name: Build OLS module runtime image
+        uses: docker/build-push-action@v7
+        if: steps.resolve.outputs.should_build_ols_module == '1' && steps.existing.outputs.ols_module_exists != '1'
+        with:
+          context: .
+          file: tests/e2e/Dockerfile.custom-ols
+          push: true
+          tags: ${{ steps.resolve.outputs.ols_module_image }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            APPS_MATRIX_LSPHP_VERSION=82
+          cache-from: type=gha,scope=apps-matrix-ols-module
+          cache-to: type=gha,mode=max,scope=apps-matrix-ols-module
+
+  apps-matrix-heavy-all:
+    if: inputs.phase == 'all'
+    needs:
+      - validate-inputs
+      - resolve-runtime-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - wordpress-core
+          - wordpress-redirection
+          - wordpress-w3-total-cache
+          - wordpress-litespeed-cache
+          - wordpress-wordfence
+          - wordpress-ewww
+          - wordpress-wp-optimize
+          - laravel
+          - drupal
+          - nextcloud
+          - joomla
+          - mediawiki
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Filter scenario
+        id: filter
+        env:
+          REQUESTED_SCENARIO: ${{ inputs.scenario }}
+          REQUESTED_FAMILY: ${{ inputs.family }}
+          CURRENT_SCENARIO: ${{ matrix.scenario }}
+        run: |
+          requested="${REQUESTED_SCENARIO}"
+          family="${REQUESTED_FAMILY}"
+          current="${CURRENT_SCENARIO}"
+          run=true
+          case "${family}:${current}" in
+            all:*|wordpress:wordpress-*|cms:drupal|cms:nextcloud|cms:joomla|cms:mediawiki|framework:laravel) ;;
+            *) run=false ;;
+          esac
+          if [ -n "$requested" ] && [ "$requested" != "all" ] && [ "$requested" != "heavy" ] && [ "$requested" != "$current" ]; then
+            run=false
+          fi
+          if [ "$run" = true ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/login-action@v4
+        if: steps.filter.outputs.run == 'true' && needs.resolve-runtime-images.outputs.compose_build == '0'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install apps-matrix heavy deps
+        if: steps.filter.outputs.run == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bzip2 composer curl default-mysql-client php-cli php-curl php-gd php-intl php-mbstring php-mysql php-xml php-zip tar unzip
+
+      - name: Cache apps-matrix downloads
+        if: steps.filter.outputs.run == 'true'
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/apps-matrix-cache/downloads
+          key: apps-matrix-heavy-downloads-${{ hashFiles('tests/e2e/apps-matrix/config/versions.env') }}
+          restore-keys: |
+            apps-matrix-heavy-downloads-
+            apps-matrix-downloads-
+
+      - name: Cache Composer packages
+        if: steps.filter.outputs.run == 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/.composer/cache
+          key: apps-matrix-heavy-composer-${{ runner.os }}-${{ hashFiles('tests/e2e/apps-matrix/config/versions.env') }}
+          restore-keys: |
+            apps-matrix-heavy-composer-${{ runner.os }}-
+            apps-matrix-composer-${{ runner.os }}-
+
+      - name: Prewarm fixture cache
+        if: steps.filter.outputs.run == 'true' && inputs.prewarm_cache == '1'
+        env:
+          MATRIX_OUT_DIR: ${{ runner.temp }}/apps-matrix-prewarm/${{ matrix.scenario }}
+          MATRIX_SCENARIO: ${{ matrix.scenario }}
+          MATRIX_SCENARIOS: ${{ matrix.scenario }}
+          MATRIX_FIXTURE_MODE: real
+          MATRIX_REAL_ALLOW_NETWORK: 1
+          MATRIX_REAL_DOWNLOAD_DIR: ${{ runner.temp }}/apps-matrix-cache/downloads
+          MATRIX_REAL_SOURCE_ROOT: ${{ runner.temp }}/apps-matrix-cache/real-sources/${{ matrix.scenario }}
+          MATRIX_ENGINES: apache
+        run: bash tests/e2e/apps-matrix/prewarm_fixture_cache.sh
+
+      - name: Run heavy real app install matrix
+        if: steps.filter.outputs.run == 'true'
+        env:
+          MATRIX_OUT_DIR: ${{ runner.temp }}/apps-matrix-heavy/${{ matrix.scenario }}
+          MATRIX_SCENARIO: ${{ matrix.scenario }}
+          MATRIX_TIER: nightly
+          MATRIX_FIXTURE_MODE: real
+          MATRIX_REAL_ALLOW_NETWORK: 1
+          MATRIX_REAL_DOWNLOAD_DIR: ${{ runner.temp }}/apps-matrix-cache/downloads
+          MATRIX_REAL_RUN_APP_INSTALL: 1
+          MATRIX_REAL_DEEP_CONFIG: 1
+          MATRIX_REAL_VALIDATE_CONFIG: 1
+          MATRIX_REAL_STRICT_PLUGIN_INSTALL: ${{ inputs.strict_plugin_install }}
+          MATRIX_REAL_HEALTH_PROBES: ${{ inputs.health_probes }}
+          MATRIX_REAL_ENFORCE_HEALTH_PROBES: ${{ inputs.enforce_health_probes }}
+          MATRIX_PER_ENGINE_BUDGET_MS: 20000
+          MATRIX_ENFORCE_PERF_BUDGET: ${{ inputs.enforce_budgets }}
+          MATRIX_ENFORCE_SCENARIO_BUDGET: ${{ inputs.enforce_budgets }}
+          MATRIX_KEEP_STACK: ${{ inputs.keep_stack }}
+          MATRIX_COMPOSE_BUILD: ${{ needs.resolve-runtime-images.outputs.compose_build }}
+          MATRIX_APACHE_IMAGE: ${{ needs.resolve-runtime-images.outputs.apache_image }}
+          MATRIX_OLS_MODULE_IMAGE: ${{ needs.resolve-runtime-images.outputs.ols_module_image }}
+        run: bash tests/e2e/apps-matrix/run_full_matrix.sh
+
+      - name: Tune budget suggestions
+        if: always() && steps.filter.outputs.run == 'true'
+        run: |
+          python3 tests/e2e/apps-matrix/lib/tune_budgets.py \
+            --out-dir "${RUNNER_TEMP}/apps-matrix-heavy/${{ matrix.scenario }}" \
+            --include-per-engine \
+            > "${RUNNER_TEMP}/apps-matrix-heavy/${{ matrix.scenario }}/budget-suggestions.env" || true
+
+      - name: Prepare summary artifacts
+        if: always() && steps.filter.outputs.run == 'true' && inputs.artifact_mode == 'summary'
+        run: |
+          python3 tests/e2e/apps-matrix/lib/collect_artifact_manifest.py \
+            --out-dir "${RUNNER_TEMP}/apps-matrix-heavy/${{ matrix.scenario }}" \
+            --mode summary \
+            > "${RUNNER_TEMP}/apps-matrix-heavy/${{ matrix.scenario }}/artifact-manifest.txt"
+          python3 tests/e2e/apps-matrix/lib/collect_artifact_manifest.py \
+            --out-dir "${RUNNER_TEMP}/apps-matrix-heavy/${{ matrix.scenario }}" \
+            --mode summary \
+            --copy-to "${RUNNER_TEMP}/apps-matrix-heavy-summary/${{ matrix.scenario }}" \
+            > /dev/null
+
+      - name: Upload heavy summary artifacts
+        if: always() && steps.filter.outputs.run == 'true' && inputs.artifact_mode == 'summary'
+        uses: actions/upload-artifact@v7
+        with:
+          name: apps-matrix-heavy-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/apps-matrix-heavy-summary/${{ matrix.scenario }}
+          if-no-files-found: ignore
+
+      - name: Upload heavy full artifacts
+        if: always() && steps.filter.outputs.run == 'true' && inputs.artifact_mode == 'full'
+        uses: actions/upload-artifact@v7
+        with:
+          name: apps-matrix-heavy-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/apps-matrix-heavy/${{ matrix.scenario }}
+          if-no-files-found: ignore
+
+  apps-matrix-heavy-install:
+    if: inputs.phase == 'split' || inputs.phase == 'install'
+    needs: validate-inputs
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - wordpress-core
+          - wordpress-redirection
+          - wordpress-w3-total-cache
+          - wordpress-litespeed-cache
+          - wordpress-wordfence
+          - wordpress-ewww
+          - wordpress-wp-optimize
+          - laravel
+          - drupal
+          - nextcloud
+          - joomla
+          - mediawiki
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Filter scenario
+        id: filter
+        env:
+          REQUESTED_SCENARIO: ${{ inputs.scenario }}
+          REQUESTED_FAMILY: ${{ inputs.family }}
+          CURRENT_SCENARIO: ${{ matrix.scenario }}
+        run: |
+          requested="${REQUESTED_SCENARIO}"
+          family="${REQUESTED_FAMILY}"
+          current="${CURRENT_SCENARIO}"
+          run=true
+          case "${family}:${current}" in
+            all:*|wordpress:wordpress-*|cms:drupal|cms:nextcloud|cms:joomla|cms:mediawiki|framework:laravel) ;;
+            *) run=false ;;
+          esac
+          if [ -n "$requested" ] && [ "$requested" != "all" ] && [ "$requested" != "heavy" ] && [ "$requested" != "$current" ]; then
+            run=false
+          fi
+          if [ "$run" = true ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install apps-matrix heavy deps
+        if: steps.filter.outputs.run == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bzip2 composer curl default-mysql-client php-cli php-curl php-gd php-intl php-mbstring php-mysql php-xml php-zip tar unzip
+
+      - name: Cache apps-matrix downloads
+        if: steps.filter.outputs.run == 'true'
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/apps-matrix-cache/downloads
+          key: apps-matrix-heavy-downloads-${{ hashFiles('tests/e2e/apps-matrix/config/versions.env') }}
+          restore-keys: |
+            apps-matrix-heavy-downloads-
+            apps-matrix-downloads-
+
+      - name: Cache Composer packages
+        if: steps.filter.outputs.run == 'true'
+        uses: actions/cache@v5
+        with:
+          path: ~/.composer/cache
+          key: apps-matrix-heavy-composer-${{ runner.os }}-${{ hashFiles('tests/e2e/apps-matrix/config/versions.env') }}
+          restore-keys: |
+            apps-matrix-heavy-composer-${{ runner.os }}-
+            apps-matrix-composer-${{ runner.os }}-
+
+      - name: Prewarm fixture cache
+        if: steps.filter.outputs.run == 'true' && inputs.prewarm_cache == '1'
+        env:
+          MATRIX_OUT_DIR: ${{ runner.temp }}/apps-matrix-prewarm/${{ matrix.scenario }}
+          MATRIX_SCENARIO: ${{ matrix.scenario }}
+          MATRIX_SCENARIOS: ${{ matrix.scenario }}
+          MATRIX_FIXTURE_MODE: real
+          MATRIX_REAL_ALLOW_NETWORK: 1
+          MATRIX_REAL_DOWNLOAD_DIR: ${{ runner.temp }}/apps-matrix-cache/downloads
+          MATRIX_REAL_SOURCE_ROOT: ${{ runner.temp }}/apps-matrix-cache/real-sources/${{ matrix.scenario }}
+          MATRIX_ENGINES: apache
+        run: bash tests/e2e/apps-matrix/prewarm_fixture_cache.sh
+
+      - name: Run heavy real app install phase
+        if: steps.filter.outputs.run == 'true'
+        env:
+          MATRIX_OUT_DIR: ${{ runner.temp }}/apps-matrix-heavy-install/${{ matrix.scenario }}
+          MATRIX_SCENARIO: ${{ matrix.scenario }}
+          MATRIX_TIER: nightly
+          MATRIX_FULL_PHASE: install
+          MATRIX_FIXTURE_MODE: real
+          MATRIX_REAL_ALLOW_NETWORK: 1
+          MATRIX_REAL_DOWNLOAD_DIR: ${{ runner.temp }}/apps-matrix-cache/downloads
+          MATRIX_REAL_RUN_APP_INSTALL: 1
+          MATRIX_REAL_DEEP_CONFIG: 1
+          MATRIX_REAL_VALIDATE_CONFIG: 1
+          MATRIX_REAL_STRICT_PLUGIN_INSTALL: ${{ inputs.strict_plugin_install }}
+          MATRIX_REAL_HEALTH_PROBES: ${{ inputs.health_probes }}
+          MATRIX_REAL_ENFORCE_HEALTH_PROBES: ${{ inputs.enforce_health_probes }}
+          MATRIX_ENFORCE_SCENARIO_BUDGET: ${{ inputs.enforce_budgets }}
+          MATRIX_KEEP_STACK: ${{ inputs.keep_stack }}
+        run: bash tests/e2e/apps-matrix/run_full_matrix.sh
+
+      - name: Tune install budget suggestions
+        if: always() && steps.filter.outputs.run == 'true'
+        run: |
+          python3 tests/e2e/apps-matrix/lib/tune_budgets.py \
+            --out-dir "${RUNNER_TEMP}/apps-matrix-heavy-install/${{ matrix.scenario }}" \
+            > "${RUNNER_TEMP}/apps-matrix-heavy-install/${{ matrix.scenario }}/budget-suggestions.env" || true
+
+      - name: Upload install handoff
+        if: always() && steps.filter.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: apps-matrix-heavy-install-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/apps-matrix-heavy-install/${{ matrix.scenario }}
+          if-no-files-found: error
+
+  apps-matrix-heavy-verify:
+    if: inputs.phase == 'split'
+    needs:
+      - validate-inputs
+      - resolve-runtime-images
+      - apps-matrix-heavy-install
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - wordpress-core
+          - wordpress-redirection
+          - wordpress-w3-total-cache
+          - wordpress-litespeed-cache
+          - wordpress-wordfence
+          - wordpress-ewww
+          - wordpress-wp-optimize
+          - laravel
+          - drupal
+          - nextcloud
+          - joomla
+          - mediawiki
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Filter scenario
+        id: filter
+        env:
+          REQUESTED_SCENARIO: ${{ inputs.scenario }}
+          REQUESTED_FAMILY: ${{ inputs.family }}
+          CURRENT_SCENARIO: ${{ matrix.scenario }}
+        run: |
+          requested="${REQUESTED_SCENARIO}"
+          family="${REQUESTED_FAMILY}"
+          current="${CURRENT_SCENARIO}"
+          run=true
+          case "${family}:${current}" in
+            all:*|wordpress:wordpress-*|cms:drupal|cms:nextcloud|cms:joomla|cms:mediawiki|framework:laravel) ;;
+            *) run=false ;;
+          esac
+          if [ -n "$requested" ] && [ "$requested" != "all" ] && [ "$requested" != "heavy" ] && [ "$requested" != "$current" ]; then
+            run=false
+          fi
+          if [ "$run" = true ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/login-action@v4
+        if: steps.filter.outputs.run == 'true' && needs.resolve-runtime-images.outputs.compose_build == '0'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download install handoff
+        if: steps.filter.outputs.run == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: apps-matrix-heavy-install-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/apps-matrix-heavy-verify/${{ matrix.scenario }}
+
+      - name: Run heavy real app verify phase
+        if: steps.filter.outputs.run == 'true'
+        env:
+          MATRIX_OUT_DIR: ${{ runner.temp }}/apps-matrix-heavy-verify/${{ matrix.scenario }}
+          MATRIX_SCENARIO: ${{ matrix.scenario }}
+          MATRIX_TIER: nightly
+          MATRIX_FULL_PHASE: verify
+          MATRIX_FIXTURE_MODE: real
+          MATRIX_REAL_ALLOW_NETWORK: 1
+          MATRIX_REAL_RUN_APP_INSTALL: 1
+          MATRIX_REAL_DEEP_CONFIG: 1
+          MATRIX_REAL_VALIDATE_CONFIG: 1
+          MATRIX_REAL_STRICT_PLUGIN_INSTALL: ${{ inputs.strict_plugin_install }}
+          MATRIX_REAL_HEALTH_PROBES: ${{ inputs.health_probes }}
+          MATRIX_REAL_ENFORCE_HEALTH_PROBES: ${{ inputs.enforce_health_probes }}
+          MATRIX_PER_ENGINE_BUDGET_MS: 20000
+          MATRIX_ENFORCE_PERF_BUDGET: ${{ inputs.enforce_budgets }}
+          MATRIX_ENFORCE_SCENARIO_BUDGET: ${{ inputs.enforce_budgets }}
+          MATRIX_KEEP_STACK: ${{ inputs.keep_stack }}
+          MATRIX_COMPOSE_BUILD: ${{ needs.resolve-runtime-images.outputs.compose_build }}
+          MATRIX_APACHE_IMAGE: ${{ needs.resolve-runtime-images.outputs.apache_image }}
+          MATRIX_OLS_MODULE_IMAGE: ${{ needs.resolve-runtime-images.outputs.ols_module_image }}
+        run: bash tests/e2e/apps-matrix/run_full_matrix.sh
+
+      - name: Tune verify budget suggestions
+        if: always() && steps.filter.outputs.run == 'true'
+        run: |
+          python3 tests/e2e/apps-matrix/lib/tune_budgets.py \
+            --out-dir "${RUNNER_TEMP}/apps-matrix-heavy-verify/${{ matrix.scenario }}" \
+            --include-per-engine \
+            > "${RUNNER_TEMP}/apps-matrix-heavy-verify/${{ matrix.scenario }}/budget-suggestions.env" || true
+
+      - name: Prepare verify summary artifacts
+        if: always() && steps.filter.outputs.run == 'true' && inputs.artifact_mode == 'summary'
+        run: |
+          python3 tests/e2e/apps-matrix/lib/collect_artifact_manifest.py \
+            --out-dir "${RUNNER_TEMP}/apps-matrix-heavy-verify/${{ matrix.scenario }}" \
+            --mode summary \
+            > "${RUNNER_TEMP}/apps-matrix-heavy-verify/${{ matrix.scenario }}/artifact-manifest.txt"
+          python3 tests/e2e/apps-matrix/lib/collect_artifact_manifest.py \
+            --out-dir "${RUNNER_TEMP}/apps-matrix-heavy-verify/${{ matrix.scenario }}" \
+            --mode summary \
+            --copy-to "${RUNNER_TEMP}/apps-matrix-heavy-verify-summary/${{ matrix.scenario }}" \
+            > /dev/null
+
+      - name: Upload verify summary artifacts
+        if: always() && steps.filter.outputs.run == 'true' && inputs.artifact_mode == 'summary'
+        uses: actions/upload-artifact@v7
+        with:
+          name: apps-matrix-heavy-verify-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/apps-matrix-heavy-verify-summary/${{ matrix.scenario }}
+          if-no-files-found: ignore
+
+      - name: Upload verify full artifacts
+        if: always() && steps.filter.outputs.run == 'true' && inputs.artifact_mode == 'full'
+        uses: actions/upload-artifact@v7
+        with:
+          name: apps-matrix-heavy-verify-${{ matrix.scenario }}
+          path: ${{ runner.temp }}/apps-matrix-heavy-verify/${{ matrix.scenario }}
+          if-no-files-found: ignore
