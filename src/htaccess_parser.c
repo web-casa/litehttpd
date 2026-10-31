@@ -980,14 +980,36 @@ static htaccess_directive_t *parse_bot_challenge_int(directive_type_t t,
 /**
  * Parse: BotChallengeExempt regex — validated at exec time.
  */
-static htaccess_directive_t *parse_bot_challenge_exempt(const char *args,
-                                                        int line)
+/* BotChallengeIf takes an ap_expr expression — the REST of the line,
+ * with optional surrounding double quotes stripped. */
+static htaccess_directive_t *parse_bot_challenge_if(const char *args,
+                                                    int line)
+{
+    const char *p = skip_ws(args);
+    if (!p || !*p)
+        return NULL;
+    char *val = rest_of_line(&p);
+    if (!val || !*val) { free(val); return NULL; }
+    size_t len = strlen(val);
+    if (len >= 2 && val[0] == '"' && val[len - 1] == '"') {
+        memmove(val, val + 1, len - 2);
+        val[len - 2] = '\0';
+    }
+    htaccess_directive_t *d = alloc_directive(DIR_BOT_CHALLENGE_IF, line);
+    if (!d) { free(val); return NULL; }
+    d->value = val;
+    return d;
+}
+
+static htaccess_directive_t *parse_bot_challenge_str(int type,
+                                                     const char *args,
+                                                     int line)
 {
     const char *p = skip_ws(args);
     char *val = next_token(&p);
     if (!val)
         return NULL;
-    htaccess_directive_t *d = alloc_directive(DIR_BOT_CHALLENGE_EXEMPT, line);
+    htaccess_directive_t *d = alloc_directive(type, line);
     if (!d) { free(val); return NULL; }
     d->value = val;
     return d;
@@ -1776,7 +1798,19 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
                                        line_num);
     after = match_kw(p, "BotChallengeExempt");
     if (after)
-        return parse_bot_challenge_exempt(after, line_num);
+        return parse_bot_challenge_str(DIR_BOT_CHALLENGE_EXEMPT, after,
+                                       line_num);
+    after = match_kw(p, "BotChallengeTrustedProxy");
+    if (after)
+        return parse_bot_challenge_str(DIR_BOT_CHALLENGE_TRUSTED_PROXY,
+                                       after, line_num);
+    after = match_kw(p, "BotChallengePage");
+    if (after)
+        return parse_bot_challenge_str(DIR_BOT_CHALLENGE_PAGE, after,
+                                       line_num);
+    after = match_kw(p, "BotChallengeIf");
+    if (after)
+        return parse_bot_challenge_if(after, line_num);
 
     /* ExpiresActive */
     after = match_kw(p, "ExpiresActive");

@@ -713,6 +713,28 @@ static int print_directive(strbuf_t *sb, const htaccess_directive_t *d)
         }
         break;
 
+    case DIR_BOT_CHALLENGE_TRUSTED_PROXY:
+        if (strbuf_append(sb, "BotChallengeTrustedProxy ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_BOT_CHALLENGE_PAGE:
+        if (strbuf_append(sb, "BotChallengePage ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_BOT_CHALLENGE_IF:
+        if (strbuf_append(sb, "BotChallengeIf \"") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        if (strbuf_append(sb, "\"") != 0) return -1;
+        break;
+
     /* --- ESI body processing opt-in --- */
     case DIR_ESI_ENABLE:
         if (strbuf_append(sb, "EsiEnable ") != 0) return -1;

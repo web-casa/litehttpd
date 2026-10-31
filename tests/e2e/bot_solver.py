@@ -30,8 +30,44 @@ def solve(salt: str, difficulty: int = 16) -> int:
         n += 1
 
 
+def xff_mode(base: str) -> int:
+    """Trusted-proxy variant: mint through an X-Forwarded-For header,
+    replay from another host in the SAME /24 (must pass), and from a
+    DIFFERENT class (must be re-challenged)."""
+    salt = "s%d" % (int(time.time()) // 86400)
+    nonce = solve(salt)
+
+    def get(u: str, xff: str, cookie: str | None = None):
+        r = urllib.request.Request(u)
+        r.add_header("X-Forwarded-For", xff)
+        if cookie:
+            r.add_header("Cookie", f"lhttpd_bot={cookie}")
+        return urllib.request.urlopen(r, timeout=10)
+
+    r = get(f"{base}?__lhc={nonce}", "1.2.3.4, 203.0.113.5")
+    setc = r.headers.get("Set-Cookie", "")
+    assert "lhttpd_bot=" in setc, f"no cookie minted: {setc!r}"
+    cookie = setc.split("lhttpd_bot=")[1].split(";")[0]
+    assert "fnv" not in r.read().decode(), "answer did not pass"
+
+    same = get(base, "203.0.113.99", cookie).read().decode()
+    assert "fnv" not in same and same.strip(), "same-class replay failed"
+
+    cross = get(base, "198.51.100.1", cookie).read().decode()
+    assert "fnv" in cross, "cross-class cookie was not re-challenged"
+    print("bot_solver --xff: mint/replay/cross-class OK")
+    return 0
+
+
 def main() -> int:
-    base = sys.argv[1].rstrip("/")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    xff = "--xff" in sys.argv
+    base = (args[0] if args else "").rstrip("/")
+    if not base:
+        print("usage: bot_solver.py [--xff] URL", file=sys.stderr)
+        return 2
+    if xff:
+        return xff_mode(base)
     salt = "s%d" % (int(time.time()) // 86400)
     nonce = solve(salt)
 

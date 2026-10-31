@@ -123,6 +123,8 @@ add_executable(test_bot_challenge test_bot_challenge.cpp)
 target_sources(test_bot_challenge PRIVATE ../src/htaccess_exec_botchallenge.c
                                          ../src/htaccess_botcrypto.c
                                          ../src/htaccess_regex.c
+                                         ../src/htaccess_cidr.c
+                                         ../src/htaccess_expr.c
                                          ${MOCK_SOURCES})
 target_include_directories(test_bot_challenge PRIVATE ../include)
 litehttpd_link_pcre2(test_bot_challenge)

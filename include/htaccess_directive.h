@@ -164,6 +164,9 @@ typedef enum {
     DIR_BOT_CHALLENGE_TTL,             /* 92 */
     DIR_BOT_CHALLENGE_DIFFICULTY,      /* 93 */
     DIR_BOT_CHALLENGE_EXEMPT,          /* 94 */
+    DIR_BOT_CHALLENGE_TRUSTED_PROXY,   /* 95 */
+    DIR_BOT_CHALLENGE_PAGE,            /* 96 */
+    DIR_BOT_CHALLENGE_IF,              /* 97 */
 } directive_type_t;
 
 /**

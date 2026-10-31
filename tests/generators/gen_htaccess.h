@@ -218,6 +218,26 @@ inline rc::Gen<TaggedLine> taggedDirectiveLine()
                 return {"BotChallengeDifficulty " + std::to_string(n),
                         DIR_BOT_CHALLENGE_DIFFICULTY};
             }),
+        rc::gen::map(
+            rc::gen::element("10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12",
+                             "203.0.113.7"),
+            [](const std::string &v) -> TaggedLine {
+                return {"BotChallengeTrustedProxy " + v,
+                        DIR_BOT_CHALLENGE_TRUSTED_PROXY};
+            }),
+        rc::gen::map(
+            rc::gen::element("challenge.html", "pages/bot.tpl"),
+            [](const std::string &v) -> TaggedLine {
+                return {"BotChallengePage " + v,
+                        DIR_BOT_CHALLENGE_PAGE};
+            }),
+        rc::gen::map(
+            rc::gen::element("%{REMOTE_ADDR} -ipmatch 10.0.0.0/8",
+                             "%{REQUEST_URI} =~ /^\\/admin/"),
+            [](const std::string &v) -> TaggedLine {
+                return {"BotChallengeIf \"" + v + "\"",
+                        DIR_BOT_CHALLENGE_IF};
+            }),
         /* EsiEnable On|Off */
         rc::gen::map(
             rc::gen::element("On", "Off"),

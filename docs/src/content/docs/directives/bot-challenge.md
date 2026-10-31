@@ -19,6 +19,9 @@ don't have.
 | `BotChallengeTTL` | `seconds` (default `3600`, minimum `60`) |
 | `BotChallengeDifficulty` | `bits` (default `16`, range `8`–`24`) |
 | `BotChallengeExempt` | `"regex"` matched against the User-Agent |
+| `BotChallengeTrustedProxy` | `"cidr-list"` — honour X-Forwarded-For |
+| `BotChallengePage` | `template.html` — custom challenge page |
+| `BotChallengeIf` | `"ap_expr"` — condition the gate per request |
 
 ## Example
 
@@ -65,6 +68,63 @@ BotChallengeExempt "(?i)(googlebot|bingbot)"
   one more challenge.
 - Tuning: `TTL` trades convenience against replay windows;
   `Difficulty` raises the per-request cost for everyone including you.
+
+## Behind a reverse proxy / CDN
+
+By default the credential binds to the DIRECT peer — behind Cloudflare
+or an Nginx proxy that means every visitor shares the proxy's IP class,
+which defeats the binding. `BotChallengeTrustedProxy` fixes that:
+
+```apache
+BotChallenge On
+BotChallengeTrustedProxy "10.0.0.0/8 192.168.0.0/16"
+```
+
+When (and only when) the direct peer is inside the listed CIDRs, the
+credential binds to the **rightmost** `X-Forwarded-For` token — the
+address your proxy appended. Leftmost (client-supplied) entries are
+spoofable and are never used; an unlisted peer's XFF is ignored
+entirely. IPv4 CIDRs.
+
+## Conditional gating
+
+`BotChallengeIf` takes an `ap_expr` expression evaluated per request;
+the gate only applies when it holds. Combined with the GeoIP pathway
+this scopes the challenge by country:
+
+```apache
+BotChallenge On
+# challenge everything except US/GB traffic
+BotChallengeIf "%{ENV:GEOIP_COUNTRY_CODE} !~ /^(US|GB)$/"
+```
+
+Any expression works — URL, headers, environment. An unparsable
+expression fails **open** (gate off) with one warning per occurrence in
+the error log: a broken config never locks humans out.
+
+## Custom challenge page
+
+`BotChallengePage` serves your own template instead of the built-in
+page — brand it, add CSS, localize it:
+
+```apache
+BotChallengePage challenge.html
+```
+
+The path is relative to the `.htaccess` directory (absolute paths must
+resolve inside it; symlinks are not followed — same confinement as
+`AuthUserFile`). The template may use `%{SALT}`, `%{DIFF}` and
+`%{URI}`; the URI is JS-escaped before substitution. Your template
+must run the same FNV-1a loop and navigate to `%{URI}?__lhc=<nonce>` —
+copy the `<script>` block from the built-in page as a starting point.
+A missing or invalid template falls back to the built-in page.
+
+## Rotating the secret
+
+`tools/rotate-botsecret.sh` (shipped in the tarball / repo) atomically
+replaces the secret and gracefully restarts OLS so workers reload it.
+All outstanding cookies are invalidated; visitors simply solve one more
+challenge.
 
 ## Interaction with caching
 

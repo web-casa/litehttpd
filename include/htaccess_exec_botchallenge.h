@@ -55,11 +55,23 @@ extern "C" {
  * query param from the URI before returning BC_PASS.
  */
 int exec_bot_challenge(lsi_session_t *session,
-                       const htaccess_directive_t *directives);
+                       const htaccess_directive_t *directives,
+                       const char *base_dir);
 
 /* Exposed for tests: build the challenge HTML into buf. */
 int bc_build_challenge_page(char *buf, size_t buf_size, const char *uri,
                             const char *salt, int difficulty);
+
+/* Exposed for tests: JS-string escape and trusted-proxy IP selection. */
+int bc_js_escape(const char *in, char *out, size_t out_sz);
+int bc_pick_effective_ip(const char *peer_ip, const char *xff,
+                         const char *trusted_cidrs, char *out,
+                         size_t out_sz);
+
+/* Exposed for tests: render an operator template (%{SALT} %{DIFF}
+ * %{URI}); returns -1 on any problem so callers fall back to built-in. */
+int bc_render_template(char *buf, size_t buf_size, const char *tpl,
+                       const char *uri, const char *salt, int difficulty);
 
 /* Exposed for tests: verify + mint the credential cookie. Returns 0 and
  * fills cookie_out ("exp|hexmac") on success. */

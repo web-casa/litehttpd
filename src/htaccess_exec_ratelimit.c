@@ -107,11 +107,27 @@ int exec_ratelimit(lsi_session_t *session, const htaccess_directive_t *dir)
                     ip, cfg.requests, cfg.window_secs, current);
             return LSI_ERROR;
         } else if (cfg.action == 1) {
-            /* throttle: sleep proportional to excess */
-            int excess = current - cfg.requests;
-            int delay_ms = excess * 10; /* 10ms per excess request */
-            if (delay_ms > 5000) delay_ms = 5000;
-            usleep(delay_ms * 1000);
+            /* throttle: immediate 429 + Retry-After. Never sleep in the
+             * hook — a usleep here parks the whole worker and turns a
+             * client flood into a self-inflicted DoS (the trap upstream
+             * OLS fell into with dynReqPerSec, issue #531). Clients and
+             * CDNs honour Retry-After; the worker stays free. */
+            long elapsed = (long)now - (long)out.first_attempt;
+            int retry = (int)(cfg.window_secs - elapsed);
+            if (retry < 1)
+                retry = 1;
+            char ra[16];
+            snprintf(ra, sizeof(ra), "%d", retry);
+            lsi_log(session, LSI_LOG_WARN,
+                    "[htaccess] RateLimit: %s exceeded %d/%ds (count=%d), "
+                    "429 retry-after=%d",
+                    ip, cfg.requests, cfg.window_secs, current, retry);
+            lsi_session_set_status(session, 429);
+            lsi_session_add_resp_header(session, "Retry-After", 11,
+                                        ra, (int)strlen(ra));
+            lsi_session_end_resp(session);
+            return RL_THROTTLED; /* response served; caller must not
+                                  * overwrite the status */
         }
         /* action == 2: log-only, fall through */
     }

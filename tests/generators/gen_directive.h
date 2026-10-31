@@ -140,7 +140,10 @@ inline rc::Gen<directive_type_t> directiveTypeV7()
                             DIR_SEC_RULE_ENGINE, DIR_ESI_ENABLE,
                             DIR_BOT_CHALLENGE, DIR_BOT_CHALLENGE_TTL,
                             DIR_BOT_CHALLENGE_DIFFICULTY,
-                            DIR_BOT_CHALLENGE_EXEMPT);
+                            DIR_BOT_CHALLENGE_EXEMPT,
+                            DIR_BOT_CHALLENGE_TRUSTED_PROXY,
+                            DIR_BOT_CHALLENGE_PAGE,
+                            DIR_BOT_CHALLENGE_IF);
 }
 
 /**
