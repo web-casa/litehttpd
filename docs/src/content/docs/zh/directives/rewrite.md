@@ -117,3 +117,33 @@ RewriteRule ^/secret - [F]
   完全一致。
 - RewriteCond 测试串中的 `$N` 反向引用在首条规则匹配前近似为空。
 - 替换串中的 `%N` 条件组引用 v1 中预留未填充。
+
+## GeoIP 条件（零额外代码）
+
+OLS 原生支持 MaxMind MMDB 并把 `GEOIP_*` 变量注入请求环境；本引擎的
+`%{ENV:var}` 直接读取。一次性服务器配置（`httpd_config.conf`，语法按
+OLS 源码逐字核实）：
+
+```
+geoipDB /usr/local/share/GeoLite2-Country.mmdb {
+  geoipDBName COUNTRY_DB
+  maxminddbenv GEOIP_COUNTRY_CODE COUNTRY_DB/country/iso_code
+}
+```
+
+:::note[两个坑]
+- `maxminddbenv` 的值是**单 token**——`COUNTRY_DB/country/iso_code`
+  中间不能有空格。
+- 有代理时设 `useIpInProxyHeader 1`，让查询使用 X-Forwarded-For 里的
+  真实客户端 IP（仅当代理可信）。
+:::
+
+之后按国规则就是普通重写：
+
+```apache
+RewriteEngine On
+RewriteCond %{ENV:GEOIP_COUNTRY_CODE} ^(US|DE)$ [NC]
+RewriteRule .* - [F]
+```
+
+已实测：GB 地址请求 → 403，US → 200，无需任何模块改动。

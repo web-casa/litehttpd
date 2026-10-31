@@ -125,3 +125,35 @@ RewriteRule ^/secret - [F]
   as empty until the first rule has matched.
 - `%N` cond-group references inside substitutions are reserved but not
   filled in v1.
+
+## GeoIP Conditions (zero extra code)
+
+OLS ships native MaxMind MMDB support and injects `GEOIP_*` variables into
+the request environment; this engine's `%{ENV:var}` reads them directly.
+One-time server config (`httpd_config.conf`, exact syntax verified against
+the OLS source):
+
+```
+geoipDB /usr/local/share/GeoLite2-Country.mmdb {
+  geoipDBName COUNTRY_DB
+  maxminddbenv GEOIP_COUNTRY_CODE COUNTRY_DB/country/iso_code
+}
+```
+
+:::note[Two gotchas]
+- The `maxminddbenv` value is a **single token** — `COUNTRY_DB/country/iso_code`
+  with no space between the DB name and the path.
+- Behind a proxy, set `useIpInProxyHeader 1` so the lookup uses the real
+  client IP from `X-Forwarded-For` (only when the proxy is trusted).
+:::
+
+Then country rules are plain rewrites:
+
+```apache
+RewriteEngine On
+RewriteCond %{ENV:GEOIP_COUNTRY_CODE} ^(US|DE)$ [NC]
+RewriteRule .* - [F]
+```
+
+Verified live: GB-addressed request → 403, US → 200, no module changes
+required.
