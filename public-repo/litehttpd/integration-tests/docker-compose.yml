@@ -1,0 +1,50 @@
+# =============================================================================
+# Docker Compose for litehttpd Integration Testing
+#
+# Tests litehttpd_htaccess module with 4 real PHP applications:
+#   - WordPress, Laravel, Nextcloud, Drupal
+#
+# Usage:
+#   ./run_all.sh              # Run all tests
+#   ./run_all.sh wordpress    # Run only WordPress tests
+#   ./run_all.sh --build      # Rebuild images first
+# =============================================================================
+
+services:
+  ols:
+    build:
+      context: ..
+      dockerfile: integration-tests/Dockerfile.ols
+    container_name: ols-integ
+    ports:
+      - "8088:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - app-data:/var/www/vhosts/localhost/html
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "-o", "/dev/null", "http://localhost:80/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  db:
+    image: mariadb:10.11
+    container_name: ols-integ-db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: wordpress
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mariadb", "-uroot", "-prootpass", "-e", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  app-data:
+  db-data:

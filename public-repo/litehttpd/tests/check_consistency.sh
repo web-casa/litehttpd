@@ -144,4 +144,8 @@ if [ "$TOTAL_WARN" -gt 0 ]; then
 fi
 echo "========================================"
 
+if [ "$TOTAL_WARN" -gt 0 ]; then
+    echo "FAIL: $TOTAL_WARN consistency gap(s) found"
+    exit 1
+fi
 exit 0

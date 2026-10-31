@@ -17,7 +17,6 @@ description: 访问控制指令参考
 | `Require ip` | `Require ip ip\|cidr [...]` | 允许来自指定 IP 或 CIDR 范围的访问 |
 | `Require not ip` | `Require not ip ip\|cidr [...]` | 拒绝来自指定 IP 或 CIDR 范围的访问 |
 | `Require env` | `Require env VAR` | 当指定的环境变量被设置时允许访问 |
-| `Satisfy` | `Satisfy Any\|All` | 组合基于主机的访问检查与认证要求 |
 
 ## 示例
 
@@ -68,17 +67,6 @@ Require ip 2001:db8::/32
 SetEnvIf X-Forwarded-For "^10\." is_internal
 Require env is_internal
 ```
-
-### 组合 IP 规则和认证
-
-```apache
-Order Deny,Allow
-Deny from all
-Allow from 10.0.0.0/8
-Satisfy Any
-```
-
-使用 `Satisfy Any` 时，IP 规则放行或认证成功任一条件满足即可访问。使用 `Satisfy All` 时，两者都必须通过。
 
 :::note
 所有基于 IP 的指令都支持 IPv4 和 IPv6 地址，包括 CIDR 表示法（例如 `192.168.0.0/16`、`2001:db8::/32`）。

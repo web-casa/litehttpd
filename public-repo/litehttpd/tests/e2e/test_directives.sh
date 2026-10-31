@@ -14,6 +14,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/lib/assertions.sh"
 
+wait_for_ols_ready
+
 # =============================================================================
 # Task 3.1 — Header Directive Tests (Requirements: 4.1, 4.2, 4.3, 4.4, 9.1)
 # =============================================================================
@@ -249,8 +251,20 @@ test_options_indexes() {
     docker exec "${OLS_CONTAINER}" chown -R nobody:nogroup "${OLS_DOCROOT}/emptydir"
 
     deploy_htaccess 'Options +Indexes' "emptydir"
-    assert_status_code GET /emptydir/ 200
-    assert_body_contains GET /emptydir/ "readme.txt"
+    # stock OLS re-reads .htaccess on its own cache schedule; retry to
+    # absorb the reload race (flaky on GH runners, see CI history)
+    ok=0
+    for i in 1 2 3 4 5; do
+        if assert_status_code GET /emptydir/ 200 && \
+           assert_body_contains GET /emptydir/ "readme.txt"; then
+            ok=1; break
+        fi
+        sleep 2
+    done
+    if [ "$ok" != "1" ]; then
+        echo "TEST: Options +Indexes ... FAIL (listing never appeared after 5 tries)"
+        exit 1
+    fi
     cleanup_htaccess "emptydir"
 
     # Clean up the test directory

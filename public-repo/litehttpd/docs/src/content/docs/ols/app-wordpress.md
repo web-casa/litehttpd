@@ -90,7 +90,7 @@ virtualhost example {
   # Enable .htaccess processing
   rewrite {
     enable                1
-    autoLoadHtaccess      0
+    autoLoadHtaccess      1
   }
 }
 ```
@@ -104,7 +104,7 @@ OLS needs rewrite rules for WordPress pretty permalinks. There are two approache
 ```apacheconf
 rewrite {
   enable                  1
-  autoLoadHtaccess        0
+  autoLoadHtaccess        1
 
   rules                   <<<END_rules
     RewriteEngine On

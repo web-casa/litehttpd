@@ -7,13 +7,13 @@ description: 为现有 OpenLiteSpeed 安装添加 .htaccess 支持
 
 如果你正在运行原版 OpenLiteSpeed（通过[官方仓库](https://docs.openlitespeed.org/installation/)、[ols1clk.sh 脚本](https://docs.openlitespeed.org/installation/script/)或手动下载安装），添加 LiteHTTPD 即可获得完整的 `.htaccess` 支持，无需更改现有配置。
 
-原版 OLS 只处理少量 `.htaccess` 指令（主要是 `RewriteFile` 的基本重写规则）。LiteHTTPD 添加 83 种指令类型，包括 `Header`、`Require`、`FilesMatch`、`AuthType Basic`、`If/ElseIf/Else` 等。
+原版 OLS 只处理少量 `.htaccess` 指令（主要是 `RewriteFile` 的基本重写规则）。LiteHTTPD 添加 80 种指令，包括 `Header`、`Require`、`FilesMatch`、`AuthType Basic`、`If/ElseIf/Else` 等。
 
 ## 获得的功能
 
 | 功能 | 原版 OLS | 加装 LiteHTTPD |
 |------|---------|---------------|
-| .htaccess 指令类型 | ~6（仅 RewriteFile） | **83** |
+| .htaccess 指令 | ~6（仅 RewriteFile） | **80** |
 | `Require all denied` | 返回 200（失效） | 返回 403 |
 | `Header set` | 被忽略 | 正常生效 |
 | `RewriteRule [R=301]` | 404 | 301 重定向 |

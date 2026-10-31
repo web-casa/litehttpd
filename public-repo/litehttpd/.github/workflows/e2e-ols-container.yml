@@ -1,0 +1,270 @@
+name: E2E (OLS container)
+
+# Full-stack verification against a real OpenLiteSpeed instance in a
+# Docker container — the same method validated on OLS 1.9.4 during the
+# e2e hardening round (see docs/specs/* and git history for the bugs it
+# caught: undefined-symbol load failure, ls_shmhash API mismatch crash,
+# nftables layout gaps, stream-filter contract violations).
+#
+# Covers what unit tests cannot: real OLS hook dispatch, real LSI API
+# tables, real libmodsecurity, real nftables kernel path.
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  OLS_IMAGE: litespeedtech/openlitespeed:latest
+  CT: ols-e2e
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ols-container-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build module (runner-native amd64)
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)" --target litehttpd_htaccess
+          test -f build/litehttpd_htaccess.so
+
+      - name: Build firewall daemon
+        uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --manifest-path firewalld/Cargo.toml
+      - run: test -x firewalld/target/release/litehttpd-firewalld
+
+      - name: Start OLS container
+        run: |
+          docker run -d --cap-add=NET_ADMIN --name "$CT" -p 8080:80 "$OLS_IMAGE"
+          for i in $(seq 1 30); do
+            docker exec "$CT" /usr/local/lsws/bin/lswsctrl status 2>/dev/null | grep -q running && break
+            sleep 2
+          done
+          docker exec "$CT" /usr/local/lsws/bin/lswsctrl status | grep running
+
+      - name: Install nftables in container
+        run: |
+          docker exec "$CT" apt-get update -qq
+          docker exec -e DEBIAN_FRONTEND=noninteractive "$CT" apt-get install -y -qq nftables git curl
+
+      - name: Deploy module + daemon
+        run: |
+          docker cp build/litehttpd_htaccess.so "$CT":/usr/local/lsws/modules/litehttpd_htaccess.so
+          docker cp firewalld/target/release/litehttpd-firewalld "$CT":/usr/local/bin/litehttpd-firewalld
+          docker exec "$CT" sh -c '
+            chmod 755 /usr/local/lsws/modules/litehttpd_htaccess.so \
+                      /usr/local/bin/litehttpd-firewalld
+            printf "\nmodule litehttpd_htaccess {\n  ls_enabled 1\n}\n" >> /usr/local/lsws/conf/httpd_config.conf
+            /usr/local/lsws/bin/lswsctrl restart'
+          sleep 4
+          docker exec "$CT" sh -c '! grep -q "Failed to load module \[litehttpd_htaccess\]" /usr/local/lsws/logs/error.log'
+
+      - name: Start firewall daemon
+        run: |
+          docker exec -d "$CT" sh -c '/usr/local/bin/litehttpd-firewalld > /tmp/fwd.log 2>&1'
+          sleep 2
+          docker exec "$CT" sh -c 'grep -q "backend: nftables" /tmp/fwd.log && test -S /var/run/litehttpd/firewall.sock'
+
+      # ── Check 1: module processes .htaccess ─────────────────────────
+      - name: E2E-1 htaccess Header directive
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/t1
+            printf "Header set X-LiteHttpd-Alive yes\n" > $D/t1/.htaccess
+            chmod 644 $D/t1/.htaccess; echo ok > $D/t1/index.html'
+          curl -s -D- -o /dev/null http://127.0.0.1:8080/t1/index.html | grep -i '^x-litehttpd-alive: yes'
+
+      # ── Check 2: native RewriteRule engine (stock OLS) ─────────────
+      - name: E2E-2 native rewrite
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            printf "RewriteEngine On\nRewriteRule ^/t1/index.html$ /t1/rewritten.html [R=301,L]\n" > $D/t1/.htaccess
+            chmod 644 $D/t1/.htaccess; echo rewritten > $D/t1/rewritten.html'
+          # the module engine sees the URI before OLS rewrite; assert via redirect location
+          curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/t1/index.html | grep -q 301
+
+      # ── Check 3: ESI include (PHP handler output) ───────────────────
+      - name: E2E-3 ESI include + comment strip
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            printf "E2E-FRAGMENT-42" > $D/esi-frag.html
+            mkdir -p $D/esi
+            printf "EsiEnable On\n" > $D/esi/.htaccess; chmod 644 $D/esi/.htaccess
+            cat > $D/esi/page.php <<EOF
+          <?php echo "A<esi:include src=\"/esi-frag.html\"/>B<esi:comment>zz</esi:comment>C"; ?>
+          EOF
+          '
+          BODY=$(curl -s http://127.0.0.1:8080/esi/page.php)
+          echo "body: $BODY"
+          echo "$BODY" | grep -q 'AE2E-FRAGMENT-42BC'
+          ! echo "$BODY" | grep -q '<esi:'
+
+      # ── Check 3b: DYNAMIC ESI include (loopback PHP sub-request) ────
+      - name: E2E-3b dynamic ESI (PHP fragment)
+        run: |
+          cat > /tmp/frag.php <<'PHPEOF'
+          <?php $n = $_GET["n"] ?? "?"; echo "CI-FRAG[" . $n . "]"; ?>
+          PHPEOF
+          cat > /tmp/page.php <<'PHPEOF'
+          <?php echo "A<esi:include src=\"/dyn/frag.php?n=7\"/>B<esi:comment>zz</esi:comment>C"; ?>
+          PHPEOF
+          cat > /tmp/miss.php <<'PHPEOF'
+          <?php echo "X<esi:include src=\"/dyn/nothere.php\"/>Y"; ?>
+          PHPEOF
+          docker exec "$CT" mkdir -p /var/www/vhosts/localhost/html/dyn
+          docker cp /tmp/frag.php "$CT":/var/www/vhosts/localhost/html/dyn/frag.php
+          docker cp /tmp/page.php "$CT":/var/www/vhosts/localhost/html/dyn/page.php
+          docker cp /tmp/miss.php "$CT":/var/www/vhosts/localhost/html/dyn/miss.php
+          docker exec "$CT" sh -c 'printf "EsiEnable On\n" > /var/www/vhosts/localhost/html/dyn/.htaccess; chmod 644 /var/www/vhosts/localhost/html/dyn/.htaccess'
+          set -e
+          # soak 10x: the loopback sub-request must not race the joiner
+          for i in $(seq 1 10); do
+            BODY=$(curl -s -m 10 http://127.0.0.1:8080/dyn/page.php)
+            echo "$BODY" | grep -q '^ACI-FRAG\[7\]BC$' || { echo "attempt $i got: $BODY"; exit 1; }
+          done
+          echo "dynamic include: 10/10"
+          # fail-open on a missing fragment endpoint
+          curl -s -m 10 http://127.0.0.1:8080/dyn/miss.php | grep -q '^XY$'
+
+      # ── Check 4: brute force -> daemon -> nftables kernel rule ──────
+      - name: E2E-4 firewall full chain
+        run: |
+          docker exec "$CT" mkdir -p /var/www/vhosts/localhost/html/wp
+          printf '<?php echo "login"; ?>' > /tmp/wp-index.php
+          docker cp /tmp/wp-index.php "$CT":/var/www/vhosts/localhost/html/wp/index.php
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            printf "BruteForceProtection On\nBruteForceAllowedAttempts 3\nBruteForceWindow 20\nBruteForceAction block\n" > $D/wp/.htaccess
+            chmod 644 $D/wp/.htaccess
+            rm -f /var/lib/litehttpd/firewall.db
+            /usr/local/lsws/bin/lswsctrl restart'
+          sleep 4
+          set -e
+          # 1-3: within threshold -> 200
+          for i in 1 2 3; do
+            code=$(curl -s -m 8 -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8080/wp/index.php)
+            echo "attempt $i: $code"; [ "$code" = "200" ]
+          done
+          # 4: crosses threshold -> app-level 403 (escalation fired once)
+          code=$(curl -s -m 8 -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8080/wp/index.php)
+          echo "attempt 4: $code"; [ "$code" = "403" ]
+          # 5: the nftables rule now drops the runner's bridge traffic at the
+          # KERNEL level (GH runners reach the container directly, unlike the
+          # proxied local setup) — connection failure is the CORRECT outcome.
+          code=$(curl -s -m 8 -o /dev/null -w "%{http_code}" -X POST http://127.0.0.1:8080/wp/index.php || true)
+          echo "attempt 5: $code (kernel-level drop expected)"
+          [ "$code" != "200" ]
+          # kernel rule with TTL is present
+          docker exec "$CT" nft list set inet litehttpd blocked4 | grep -E 'elements = \{.*timeout'
+          # after the 20s TTL the kernel timeout + daemon sweep lift the block
+          sleep 25
+          code=$(curl -s -m 8 -o /dev/null -w "%{http_code}" http://127.0.0.1:8080/esi-frag.html)
+          echo "post-TTL: $code"; [ "$code" = "200" ]
+
+      # ── Check 5: modsec bridge (SecRuleEngine Off per-dir) ─────────
+      - name: E2E-5 modsec bridge
+        run: |
+          cat > /tmp/modsec_rule.conf <<'EOF'
+          SecRuleEngine On
+          SecRule ARGS "@rx (?i)(union.{0,20}select|or.{0,10}1.{0,5}=.{0,5}1)" "id:9001,deny,status:403,log,msg:e2e-probe"
+          EOF
+          docker cp /tmp/modsec_rule.conf "$CT":/usr/local/lsws/conf/modsec_e2e.conf
+          docker exec "$CT" sh -c '
+            printf "\nmodule mod_security {\n  ls_enabled 1\n  modsecurity on\n  modsecurity_rules_file /usr/local/lsws/conf/modsec_e2e.conf\n}\n" >> /usr/local/lsws/conf/httpd_config.conf
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/sec-off
+            printf "SecRuleEngine Off\n" > $D/sec-off/.htaccess; chmod 644 $D/sec-off/.htaccess
+            echo form > $D/sec-off/form.php
+            /usr/local/lsws/bin/lswsctrl restart'
+          sleep 4
+          set -e
+          echo -n "control (WAF on): "; curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8080/t1/index.html?s=1%27%20OR%20%271%27%3D%271" | grep 403
+          echo -n "bridged (SecRuleEngine Off): "; curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8080/sec-off/form.php?s=1%27%20OR%20%271%27%3D%271" | grep 200
+
+      # ── Check 6: BotChallenge JS PoW gate (full loop) ───────────────
+      - name: E2E-6 bot challenge loop
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/bot
+            echo secret-content > $D/bot/index.html
+            printf "BotChallenge On\nBotChallengeTTL 120\nBotChallengeExempt \"(?i)googlebot\"\n" > $D/bot/.htaccess
+            chmod 644 $D/bot/.htaccess
+            # provisioning as shipped by packaging (tmpfiles.d / install):
+            # dir present and worker-writable; only the secret is fresh
+            install -d -m 0770 -o nobody -g nogroup /var/run/litehttpd
+            rm -f /var/run/litehttpd/botchallenge.secret
+            /usr/local/lsws/bin/lswsctrl restart'
+          sleep 4
+          set -e
+          # exempt UA passes straight through
+          curl -s -m 8 -A "Googlebot/2.1" http://127.0.0.1:8080/bot/index.html | grep -q secret-content
+          # no cookie -> challenge page with the inline solver
+          curl -s -m 8 -A "curl/8" http://127.0.0.1:8080/bot/index.html | grep -q "function fnv"
+          # solve the PoW like the served JS, answer, replay, tamper
+          python3 tests/e2e/bot_solver.py http://127.0.0.1:8080/bot/index.html
+          # the shared secret was created by the worker with mode 0600
+          docker exec "$CT" sh -c 'test -s /var/run/litehttpd/botchallenge.secret && [ "$(stat -c %a /var/run/litehttpd/botchallenge.secret)" = 600 ]'
+
+      # ── Check 7: regression — protection strictness under load ──────
+      # Guards against two upstream OLS engine bug classes we must not
+      # inherit with our own implementations:
+      #  - litespeedtech/openlitespeed#533: the CAPTCHA gate was bypassed
+      #    non-deterministically (~1/3 of requests) while a challenge was
+      #    pending → soak our BotChallenge gate: EVERY request from a
+      #    non-verified client must be challenged (sequential + concurrent,
+      #    unique URLs, no content leaks).
+      #  - litespeedtech/openlitespeed#531: dynReqPerSec released the whole
+      #    backlog at the next timer tick instead of the configured rate →
+      #    hammer a cold RateLimit counter with 40-way concurrency and
+      #    assert the ceiling holds EXACTLY (allow = N + burst).
+      - name: E2E-7 regression strictness (ols#533 / ols#531 class)
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/gate $D/rl
+            echo gate-secret-content > $D/gate/index.html
+            echo rl-ok > $D/rl/index.html
+            printf "BotChallenge On\n" > $D/gate/.htaccess; chmod 644 $D/gate/.htaccess
+            printf "RateLimit 10/60 burst=5\n" > $D/rl/.htaccess; chmod 644 $D/rl/.htaccess
+            # cold the SHM rate counter: hard restart drops the anon segment
+            /usr/local/lsws/bin/lswsctrl stop >/dev/null 2>&1; sleep 2
+            /usr/local/lsws/bin/lswsctrl start >/dev/null 2>&1; sleep 3'
+          set -e
+          # ── 7a: gate soak, sequential (30 unique URLs) ──
+          chal=0; leak=0
+          for i in $(seq 1 30); do
+            body=$(curl -s -m 8 -A "curl/8" "http://127.0.0.1:8080/gate/index.html?u=$i")
+            echo "$body" | grep -q "function fnv" && chal=$((chal+1)) || true
+            echo "$body" | grep -q "gate-secret-content" && leak=$((leak+1)) || true
+          done
+          echo "7a sequential: challenged=$chal/30 leaks=$leak"
+          [ "$chal" -eq 30 ] && [ "$leak" -eq 0 ]
+          # ── 7a: gate soak, concurrent (10 parallel unique URLs) ──
+          seq 1 10 | xargs -P10 -I{} sh -c \
+            'curl -s -m 8 -A "curl/8" "http://127.0.0.1:8080/gate/index.html?c={}"' > /tmp/gate_conc.html
+          [ "$(grep -c "function fnv" /tmp/gate_conc.html)" -eq 10 ]
+          [ "$(grep -c "gate-secret-content" /tmp/gate_conc.html || true)" -eq 0 ]
+          echo "7a concurrent: 10/10 challenged, 0 leaks"
+          # ── 7b: cold RateLimit counter, 40-way concurrency, allow=15 ──
+          seq 1 40 | xargs -P40 -I{} curl -s -m 10 -o /dev/null -w "%{http_code}\n" \
+            http://127.0.0.1:8080/rl/index.html > /tmp/rl_codes.txt
+          ok=$(grep -c "^200$" /tmp/rl_codes.txt || true)
+          denied=$(grep -c "^403$" /tmp/rl_codes.txt || true)
+          echo "7b concurrency: successes=$ok denied=$denied (expect exactly 15/25)"
+          [ "$ok" -eq 15 ] && [ "$denied" -eq 25 ]
+
+      - name: Collect evidence on failure
+        if: failure()
+        run: |
+          docker exec "$CT" sh -c 'tail -50 /usr/local/lsws/logs/error.log; cat /tmp/fwd.log 2>/dev/null' || true

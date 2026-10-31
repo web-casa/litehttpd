@@ -9,6 +9,7 @@
 #include "htaccess_exec_brute_force.h"
 #include "htaccess_shm.h"
 #include "htaccess_cidr.h"
+#include "htaccess_firewall_client.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -219,6 +220,20 @@ int exec_brute_force(lsi_session_t *session,
         }
     }
 
+    /* SHM namespace key: "b:<ip>". RateLimit uses "r:<ip>" — sharing the
+     * bare IP made the two features corrupt each other's counters (a
+     * rate-limited normal client would trip the brute-force threshold). */
+    char bf_key[52];
+    {
+        size_t ip_len = strlen(effective_ip);
+        if (ip_len > 46)
+            ip_len = 46; /* key field holds 48 + NUL */
+        bf_key[0] = 'b';
+        bf_key[1] = ':';
+        memcpy(bf_key + 2, effective_ip, ip_len);
+        bf_key[2 + ip_len] = '\0';
+    }
+
     /* Step 2b: Whitelist check — whitelisted IPs bypass protection */
     if (whitelist_cidrs && is_ip_whitelisted(effective_ip, whitelist_cidrs)) {
         free(xff_ip);
@@ -257,7 +272,7 @@ int exec_brute_force(lsi_session_t *session,
     shm_cleanup_expired(now);
 
     /* Step 4: Get current record from shared memory */
-    rec = shm_get_record(effective_ip);
+    rec = shm_get_record(bf_key);
 
     if (rec) {
         /* Step 4: Record exists — check if within window */
@@ -268,9 +283,25 @@ int exec_brute_force(lsi_session_t *session,
                 int cur_count = rec->attempt_count;
                 new_rec = *rec;
                 new_rec.attempt_count++;
-                shm_update_record(effective_ip, &new_rec);
+                shm_update_record(bf_key, &new_rec);
 
                 if (action == BF_ACTION_BLOCK) {
+                    /* Escalate to the kernel-level firewall daemon on the
+                     * FIRST request that crosses the threshold — exactly one
+                     * UDS send per attacker per window (codex review: the
+                     * per-request send also fired for every later blocked
+                     * request). Later blocked requests still get the 403 but
+                     * skip the daemon round-trip; if the kernel rule somehow
+                     * lapses early, the window reset re-arms escalation.
+                     * TTL mirrors the detection window. Failure is silent:
+                     * the 403 below still applies, so sites without the
+                     * daemon see no behaviour change. */
+                    if (cur_count == allowed_attempts &&
+                        fw_client_block(effective_ip, window_sec) == 0)
+                        lsi_log(session, LSI_LOG_INFO,
+                                "[htaccess] brute force: %s escalated to "
+                                "firewall daemon (ttl %ds)",
+                                effective_ip, window_sec);
                     lsi_session_set_status(session, 403);
                     free(xff_ip);
                     return LSI_ERROR;
@@ -311,7 +342,7 @@ int exec_brute_force(lsi_session_t *session,
             if (count_attempt && is_post) {
                 new_rec = *rec;
                 new_rec.attempt_count++;
-                shm_update_record(effective_ip, &new_rec);
+                shm_update_record(bf_key, &new_rec);
             }
         } else {
             /* Window expired — reset record (only when counting) */
@@ -323,7 +354,7 @@ int exec_brute_force(lsi_session_t *session,
                 new_rec.attempt_count = 1;
                 new_rec.first_attempt = now;
                 new_rec.blocked_until = 0;
-                shm_update_record(effective_ip, &new_rec);
+                shm_update_record(bf_key, &new_rec);
             }
         }
     } else {
@@ -337,7 +368,7 @@ int exec_brute_force(lsi_session_t *session,
             new_rec.first_attempt = now;
             new_rec.blocked_until = 0;
 
-            if (shm_update_record(effective_ip, &new_rec) != 0) {
+            if (shm_update_record(bf_key, &new_rec) != 0) {
                 lsi_log(session, LSI_LOG_ERROR,
                         "BruteForce: SHM allocation failed for IP %s, "
                         "disabling protection", effective_ip);

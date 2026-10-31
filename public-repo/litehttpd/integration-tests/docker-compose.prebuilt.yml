@@ -1,0 +1,63 @@
+# =============================================================================
+# Docker Compose for CI integration testing with a prebuilt patched OLS image.
+#
+# This mirrors docker-compose.yml, but consumes OLS_INTEGRATION_IMAGE instead of
+# rebuilding integration-tests/Dockerfile.ols in every nightly run.
+# =============================================================================
+
+services:
+  ols:
+    image: "${OLS_INTEGRATION_IMAGE:?set OLS_INTEGRATION_IMAGE}"
+    container_name: ols-integ
+    ports:
+      - "8088:8088"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - app-data:/var/www/vhosts/localhost/html
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      APPS_MATRIX_OLS_DOCROOT: /var/www/vhosts/localhost/html
+    entrypoint:
+      - /bin/bash
+      - -lc
+      - |
+        set -e
+        docroot="$${APPS_MATRIX_OLS_DOCROOT:-/var/www/vhosts/localhost/html}"
+        for vhconf in /usr/local/lsws/conf/vhosts/Example/vhconf.conf /usr/local/lsws/conf/vhosts/localhost/vhconf.conf; do
+          if [ -f "$${vhconf}" ]; then
+            sed -i "s|^[[:space:]]*docRoot[[:space:]].*|  docRoot                  $${docroot}|" "$${vhconf}" || true
+          fi
+        done
+        mkdir -p /usr/local/lsws/logs
+        touch /usr/local/lsws/logs/error.log /usr/local/lsws/logs/access.log
+        /usr/local/lsws/bin/lswsctrl start
+        trap '/usr/local/lsws/bin/lswsctrl stop >/dev/null 2>&1 || true; exit 0' INT TERM
+        tail -F /usr/local/lsws/logs/error.log /usr/local/lsws/logs/access.log
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8088/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  db:
+    image: mariadb:10.11
+    container_name: ols-integ-db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: wordpress
+    volumes:
+      - db-data:/var/lib/mysql
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "mariadb", "-uroot", "-prootpass", "-e", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  app-data:
+  db-data:

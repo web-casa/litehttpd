@@ -131,7 +131,23 @@ inline rc::Gen<directive_type_t> directiveTypeV6()
 }
 
 /**
- * Generate any of the 84 directive types.
+ * Generate v7 directive types — LSCache bridge + rate limiting.
+ */
+inline rc::Gen<directive_type_t> directiveTypeV7()
+{
+    return rc::gen::element(DIR_CACHE_ENABLE, DIR_CACHE_DISABLE, DIR_CACHE_MAX_EXPIRE,
+                            DIR_CACHE_DEFAULT_EXPIRE, DIR_RATE_LIMIT,
+                            DIR_SEC_RULE_ENGINE, DIR_ESI_ENABLE,
+                            DIR_BOT_CHALLENGE, DIR_BOT_CHALLENGE_TTL,
+                            DIR_BOT_CHALLENGE_DIFFICULTY,
+                            DIR_BOT_CHALLENGE_EXEMPT,
+                            DIR_BOT_CHALLENGE_TRUSTED_PROXY,
+                            DIR_BOT_CHALLENGE_PAGE,
+                            DIR_BOT_CHALLENGE_IF);
+}
+
+/**
+ * Generate any of the 95 directive types.
  * NOTE: not all types have dedicated generators — unsupported types
  * fall back to DIR_HEADER_SET. See directiveOfType() for details.
  */
@@ -139,7 +155,7 @@ inline rc::Gen<directive_type_t> anyDirectiveType()
 {
     return rc::gen::oneOf(directiveType(), directiveTypeExtra(), directiveTypeV2a(),
                           directiveTypeV2b(), directiveTypeV3(), directiveTypeV4(),
-                          directiveTypeV5(), directiveTypeV6());
+                          directiveTypeV5(), directiveTypeV6(), directiveTypeV7());
 }
 
 /**

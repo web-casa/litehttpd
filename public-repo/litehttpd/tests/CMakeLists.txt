@@ -80,3 +80,59 @@ if(COMPAT_TEST_SOURCES)
     )
     gtest_discover_tests(compat_tests)
 endif()
+
+add_executable(test_cidr_table test_cidr_table.cpp)
+target_sources(test_cidr_table PRIVATE ../src/htaccess_cidr.c ../src/htaccess_cidr_table.c)
+target_include_directories(test_cidr_table PRIVATE ../include)
+target_link_libraries(test_cidr_table gtest_main)
+gtest_discover_tests(test_cidr_table)
+
+add_executable(test_esi test_esi.cpp)
+target_sources(test_esi PRIVATE ../src/htaccess_esi.c)
+target_include_directories(test_esi PRIVATE ../include)
+target_link_libraries(test_esi gtest_main)
+gtest_discover_tests(test_esi)
+
+add_executable(test_shm_fork test_shm_fork.cpp)
+target_sources(test_shm_fork PRIVATE ../src/htaccess_shm.c ../src/ols_native_api.c)
+target_include_directories(test_shm_fork PRIVATE ../include)
+target_link_libraries(test_shm_fork gtest_main pthread rt crypt)
+gtest_discover_tests(test_shm_fork)
+
+add_executable(test_cache_bridge test_cache_bridge.cpp)
+target_sources(test_cache_bridge PRIVATE ../src/htaccess_exec_cache.c ${MOCK_SOURCES})
+target_include_directories(test_cache_bridge PRIVATE ../include)
+target_link_libraries(test_cache_bridge gtest_main)
+gtest_discover_tests(test_cache_bridge)
+
+add_executable(test_modsec_bridge test_modsec_bridge.cpp)
+target_sources(test_modsec_bridge PRIVATE ../src/htaccess_exec_modsec.c ${MOCK_SOURCES})
+target_include_directories(test_modsec_bridge PRIVATE ../include)
+target_link_libraries(test_modsec_bridge gtest_main)
+gtest_discover_tests(test_modsec_bridge)
+
+add_executable(test_esi_stream_hook test_esi_stream_hook.cpp
+                                    ${MODULE_SOURCES} ${MOCK_SOURCES})
+target_compile_definitions(test_esi_stream_hook PRIVATE MNAME=litehttpd_htaccess HTACCESS_UNIT_TEST)
+target_include_directories(test_esi_stream_hook PRIVATE ../include)
+litehttpd_link_pcre2(test_esi_stream_hook)
+target_link_libraries(test_esi_stream_hook gtest_main pthread rt crypt)
+gtest_discover_tests(test_esi_stream_hook)
+
+add_executable(test_bot_challenge test_bot_challenge.cpp)
+target_sources(test_bot_challenge PRIVATE ../src/htaccess_exec_botchallenge.c
+                                         ../src/htaccess_botcrypto.c
+                                         ../src/htaccess_regex.c
+                                         ../src/htaccess_cidr.c
+                                         ../src/htaccess_expr.c
+                                         ${MOCK_SOURCES})
+target_include_directories(test_bot_challenge PRIVATE ../include)
+litehttpd_link_pcre2(test_bot_challenge)
+target_link_libraries(test_bot_challenge gtest_main pthread)
+gtest_discover_tests(test_bot_challenge)
+
+add_executable(test_firewall_client test_firewall_client.cpp)
+target_sources(test_firewall_client PRIVATE ../src/htaccess_firewall_client.c)
+target_include_directories(test_firewall_client PRIVATE ../include)
+target_link_libraries(test_firewall_client gtest_main pthread)
+gtest_discover_tests(test_firewall_client)

@@ -44,7 +44,7 @@ protected:
 TEST_F(ExecRewriteTest, EngineOffReturnsZero) {
     auto *d = parse(
         "RewriteEngine Off\n"
-        "RewriteRule ^test$ /new [L]\n"
+        "RewriteRule ^/test$ /new [L]\n"
     );
     ASSERT_NE(d, nullptr);
 
@@ -55,7 +55,7 @@ TEST_F(ExecRewriteTest, EngineOffReturnsZero) {
 }
 
 TEST_F(ExecRewriteTest, NoEngineDirectiveReturnsZero) {
-    auto *d = parse("RewriteRule ^test$ /new [L]\n");
+    auto *d = parse("RewriteRule ^/test$ /new [L]\n");
     ASSERT_NE(d, nullptr);
 
     int rc = exec_rewrite_rules(session_.handle(), d);
@@ -64,28 +64,138 @@ TEST_F(ExecRewriteTest, NoEngineDirectiveReturnsZero) {
     htaccess_directives_free(d);
 }
 
-TEST_F(ExecRewriteTest, EngineOnStockOlsReturnsNegative) {
-    /* g_api is NULL in test mode → stock OLS, no rewrite support */
+TEST_F(ExecRewriteTest, EngineOnStockOlsRunsNativeEngine) {
+    /* g_api is NULL in test mode → stock OLS → the built-in engine runs.
+     * This was previously -1 (unsupported); the native engine landed. */
+    session_.set_request_uri("/test");
     auto *d = parse(
         "RewriteEngine On\n"
-        "RewriteRule ^test$ /new [L]\n"
+        "RewriteRule ^/test$ /new [L]\n"
     );
     ASSERT_NE(d, nullptr);
 
     int rc = exec_rewrite_rules(session_.handle(), d);
-    EXPECT_EQ(rc, -1); /* Stock OLS → unsupported */
+    EXPECT_EQ(rc, 1); /* internal rewrite applied */
+    EXPECT_EQ(session_.get_internal_uri(), "/new");
 
     htaccess_directives_free(d);
 }
 
 TEST_F(ExecRewriteTest, NoRewriteRulesReturnsZero) {
+    session_.set_request_uri("/x");
     auto *d = parse("RewriteEngine On\n");
     ASSERT_NE(d, nullptr);
 
-    /* Engine On but no rules → g_api is NULL → returns -1 (unsupported) */
     int rc = exec_rewrite_rules(session_.handle(), d);
-    EXPECT_EQ(rc, -1);
+    EXPECT_EQ(rc, 0); /* engine on, no rules, nothing happened */
 
+    htaccess_directives_free(d);
+}
+
+/* ================================================================== */
+/*  Native engine behaviour                                            */
+/* ================================================================== */
+
+TEST_F(ExecRewriteTest, Native_WordPress_FrontController) {
+    /* The single most important real-world pattern: everything that is
+     * not a real file or dir goes to index.php. */
+    session_.set_request_uri("/2026/10/some-post/");
+    auto *d = parse(
+        "RewriteEngine On\n"
+        "RewriteCond %{REQUEST_FILENAME} !-f\n"
+        "RewriteCond %{REQUEST_FILENAME} !-d\n"
+        "RewriteRule . /index.php [L]\n"
+    );
+    ASSERT_NE(d, nullptr);
+    /* docroot has no such file → conds pass */
+    int rc = exec_rewrite_rules(session_.handle(), d);
+    EXPECT_EQ(rc, 1);
+    EXPECT_EQ(session_.get_internal_uri(), "/index.php");
+    htaccess_directives_free(d);
+}
+
+TEST_F(ExecRewriteTest, Native_BackreferenceSubstitution) {
+    session_.set_request_uri("/old/hello-world");
+    auto *d = parse(
+        "RewriteEngine On\n"
+        "RewriteRule ^/old/(.*)$ /new/$1 [L]\n"
+    );
+    ASSERT_NE(d, nullptr);
+    int rc = exec_rewrite_rules(session_.handle(), d);
+    EXPECT_EQ(rc, 1);
+    EXPECT_EQ(session_.get_internal_uri(), "/new/hello-world");
+    htaccess_directives_free(d);
+}
+
+TEST_F(ExecRewriteTest, Native_ExternalRedirectFlag) {
+    session_.set_request_uri("/gone-page");
+    auto *d = parse(
+        "RewriteEngine On\n"
+        "RewriteRule ^/gone-page$ https://example.com/ [R=301,L]\n"
+    );
+    ASSERT_NE(d, nullptr);
+    int rc = exec_rewrite_rules(session_.handle(), d);
+    EXPECT_EQ(rc, 301);
+    EXPECT_EQ(session_.get_status_code(), 301);
+    EXPECT_EQ(session_.get_response_header("Location"), "https://example.com/");
+    htaccess_directives_free(d);
+}
+
+TEST_F(ExecRewriteTest, Native_ForbiddenFlag) {
+    session_.set_request_uri("/secret");
+    auto *d = parse(
+        "RewriteEngine On\n"
+        "RewriteRule ^/secret - [F]\n"
+    );
+    ASSERT_NE(d, nullptr);
+    int rc = exec_rewrite_rules(session_.handle(), d);
+    EXPECT_EQ(rc, 403);
+    htaccess_directives_free(d);
+}
+
+TEST_F(ExecRewriteTest, Native_NoMatchLeavesUriAlone) {
+    session_.set_request_uri("/api/v1");
+    auto *d = parse(
+        "RewriteEngine On\n"
+        "RewriteRule ^/wp-admin /index.php [L]\n"
+    );
+    ASSERT_NE(d, nullptr);
+    int rc = exec_rewrite_rules(session_.handle(), d);
+    EXPECT_EQ(rc, 0);
+    EXPECT_EQ(session_.get_request_uri(), "/api/v1");
+    htaccess_directives_free(d);
+}
+
+TEST_F(ExecRewriteTest, Native_CondBlocksRuleWhenFileExists) {
+    /* REQUEST_FILENAME -f: file exists → '!' fails → rule skipped */
+    session_.set_doc_root("/tmp");
+    session_.set_request_uri("/wp-content/uploads/2020/a.jpg");
+    /* the engine stats the real filesystem — create the file for -f */
+    system("mkdir -p /tmp/wp-content/uploads/2020 && touch /tmp/wp-content/uploads/2020/a.jpg");
+    auto *d = parse(
+        "RewriteEngine On\n"
+        "RewriteCond %{REQUEST_FILENAME} !-f\n"
+        "RewriteRule . /index.php [L]\n"
+    );
+    ASSERT_NE(d, nullptr);
+    int rc = exec_rewrite_rules(session_.handle(), d);
+    EXPECT_EQ(rc, 0);
+    EXPECT_EQ(session_.get_request_uri(), "/wp-content/uploads/2020/a.jpg");
+    htaccess_directives_free(d);
+    system("rm -rf /tmp/wp-content");
+}
+
+TEST_F(ExecRewriteTest, Native_QSAAppendsOriginalQuery) {
+    session_.set_request_uri("/search");
+    session_.set_query_string("lang=zh");
+    auto *d = parse(
+        "RewriteEngine On\n"
+        "RewriteRule ^/search$ /results?mode=full [QSA,L]\n"
+    );
+    ASSERT_NE(d, nullptr);
+    int rc = exec_rewrite_rules(session_.handle(), d);
+    EXPECT_EQ(rc, 1);
+    EXPECT_EQ(session_.get_internal_uri(), "/results?mode=full&lang=zh");
     htaccess_directives_free(d);
 }
 

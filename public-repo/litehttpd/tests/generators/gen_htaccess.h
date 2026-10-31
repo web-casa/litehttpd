@@ -177,6 +177,86 @@ inline rc::Gen<TaggedLine> taggedDirectiveLine()
                 return {block ? "BruteForceAction block"
                               : "BruteForceAction throttle",
                         DIR_BRUTE_FORCE_ACTION};
+            }),
+        /* CacheEnable public|private|off */
+        rc::gen::map(
+            rc::gen::element("public", "private", "off"),
+            [](const std::string &v) -> TaggedLine {
+                return {"CacheEnable " + v, DIR_CACHE_ENABLE};
+            }),
+        /* CacheDisable (no args) */
+        rc::gen::just(TaggedLine{"CacheDisable", DIR_CACHE_DISABLE}),
+        /* CacheMaxExpire <sec> */
+        rc::gen::map(
+            rc::gen::inRange(1, 86400),
+            [](int n) -> TaggedLine {
+                return {"CacheMaxExpire " + std::to_string(n),
+                        DIR_CACHE_MAX_EXPIRE};
+            }),
+        /* CacheDefaultExpire <sec> */
+        rc::gen::map(
+            rc::gen::inRange(1, 86400),
+            [](int n) -> TaggedLine {
+                return {"CacheDefaultExpire " + std::to_string(n),
+                        DIR_CACHE_DEFAULT_EXPIRE};
+            }),
+        /* BotChallenge family */
+        rc::gen::map(
+            rc::gen::element("On", "Off"),
+            [](const std::string &v) -> TaggedLine {
+                return {"BotChallenge " + v, DIR_BOT_CHALLENGE};
+            }),
+        rc::gen::map(
+            rc::gen::inRange(60, 86400),
+            [](int n) -> TaggedLine {
+                return {"BotChallengeTTL " + std::to_string(n),
+                        DIR_BOT_CHALLENGE_TTL};
+            }),
+        rc::gen::map(
+            rc::gen::inRange(8, 24),
+            [](int n) -> TaggedLine {
+                return {"BotChallengeDifficulty " + std::to_string(n),
+                        DIR_BOT_CHALLENGE_DIFFICULTY};
+            }),
+        rc::gen::map(
+            rc::gen::element("10.0.0.0/8", "192.168.0.0/16", "172.16.0.0/12",
+                             "203.0.113.7"),
+            [](const std::string &v) -> TaggedLine {
+                return {"BotChallengeTrustedProxy " + v,
+                        DIR_BOT_CHALLENGE_TRUSTED_PROXY};
+            }),
+        rc::gen::map(
+            rc::gen::element("challenge.html", "pages/bot.tpl"),
+            [](const std::string &v) -> TaggedLine {
+                return {"BotChallengePage " + v,
+                        DIR_BOT_CHALLENGE_PAGE};
+            }),
+        rc::gen::map(
+            rc::gen::element("%{REMOTE_ADDR} -ipmatch 10.0.0.0/8",
+                             "%{REQUEST_URI} =~ /^\\/admin/"),
+            [](const std::string &v) -> TaggedLine {
+                return {"BotChallengeIf \"" + v + "\"",
+                        DIR_BOT_CHALLENGE_IF};
+            }),
+        /* EsiEnable On|Off */
+        rc::gen::map(
+            rc::gen::element("On", "Off"),
+            [](const std::string &v) -> TaggedLine {
+                return {"EsiEnable " + v, DIR_ESI_ENABLE};
+            }),
+        /* SecRuleEngine On|Off|DetectionOnly */
+        rc::gen::map(
+            rc::gen::element("On", "Off", "DetectionOnly"),
+            [](const std::string &v) -> TaggedLine {
+                return {"SecRuleEngine " + v, DIR_SEC_RULE_ENGINE};
+            }),
+        /* RateLimit N/M */
+        rc::gen::map(
+            rc::gen::pair(rc::gen::inRange(1, 1000), rc::gen::inRange(1, 3600)),
+            [](const std::pair<int, int> &p) -> TaggedLine {
+                return {"RateLimit " + std::to_string(p.first) + "/" +
+                            std::to_string(p.second),
+                        DIR_RATE_LIMIT};
             })
     );
 }

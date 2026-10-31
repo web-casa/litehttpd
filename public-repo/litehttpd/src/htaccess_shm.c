@@ -45,9 +45,12 @@ static int native_shm_init(size_t max_records)
     g_shm_pool = api->shm_opengpool(SHM_POOL_NAME, SHM_POOL_SIZE);
     if (!g_shm_pool) return -1;
 
+    /* NULL hash/compare callbacks select OLS's defaults (ls_shm.h usage
+     * example does exactly this). initSize sizes the shared pool chunk,
+     * not the entry count. */
     g_shm_ht = api->shmhash_open(g_shm_pool, SHM_HASH_NAME,
-                                  (int)(max_records * sizeof(brute_force_record_t)),
-                                  SHM_HASH_SIZE);
+                                  (size_t)(max_records * sizeof(brute_force_record_t)),
+                                  NULL, NULL);
     if (!g_shm_ht) {
         g_shm_pool = NULL;
         return -1;
@@ -64,10 +67,14 @@ static brute_force_record_t *native_shm_get(const char *ip)
     const ols_native_api_t *api = ols_native_api_get();
     if (!g_shm_ht || !api || !ip) return NULL;
 
-    ls_shmoff_t val_off = 0;
     api->shmhash_lock(g_shm_ht);
-    ls_shmoff_t off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip), &val_off);
-    if (off <= 0 || val_off <= 0) {
+    int val_len = 0;
+    int flags = 0;
+    /* Read-only lookup: no LSI_SHM_INIT, so an existing entry is returned
+     * as-is and a missing key returns offset 0 without creating. */
+    ls_shmoff_t val_off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip),
+                                            &val_len, &flags);
+    if (val_off <= 0) {
         api->shmhash_unlock(g_shm_ht);
         return NULL;
     }
@@ -90,9 +97,13 @@ static int native_shm_update(const char *ip, const brute_force_record_t *record)
     if (!g_shm_ht || !api || !ip || !record) return -1;
 
     api->shmhash_lock(g_shm_ht);
-    ls_shmoff_t val_off = 0;
-    ls_shmoff_t off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip), &val_off);
-    if (off > 0 && val_off > 0) {
+    int val_len = (int)sizeof(brute_force_record_t);
+    int flags = OLS_LSI_SHM_INIT; /* zero the slot if newly created */
+    /* Upsert: get() creates a missing entry with val_len bytes of value
+     * space (LSI_SHM_INIT zeroes it); the returned offset is the value. */
+    ls_shmoff_t val_off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip),
+                                            &val_len, &flags);
+    if (val_off > 0) {
         brute_force_record_t *rec = (brute_force_record_t *)
             api->shmhash_off2ptr(g_shm_ht, val_off);
         if (rec) {
@@ -100,9 +111,8 @@ static int native_shm_update(const char *ip, const brute_force_record_t *record)
             rec->magic = BF_RECORD_MAGIC;
         }
     }
-    /* Note: if entry doesn't exist, ls_shmhash_get creates it */
     api->shmhash_unlock(g_shm_ht);
-    return 0;
+    return (val_off > 0) ? 0 : -1;
 }
 
 static void native_shm_destroy(void)
@@ -284,14 +294,11 @@ static int native_shm_atomic_increment(const char *ip, time_t now,
 
     api->shmhash_lock(g_shm_ht);
 
-    ls_shmoff_t val_off = 0;
-    ls_shmoff_t off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip), &val_off);
-    if ((off <= 0 || val_off <= 0)) {
-        /* shmhash_get may create the entry lazily — retry once to obtain the
-         * offset of the freshly created (zeroed) slot. */
-        off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip), &val_off);
-    }
-    if (off > 0 && val_off > 0) {
+    int val_len = (int)sizeof(brute_force_record_t);
+    int flags = OLS_LSI_SHM_INIT;
+    ls_shmoff_t val_off = api->shmhash_get(g_shm_ht, ip, (int)strlen(ip),
+                                            &val_len, &flags);
+    if (val_off > 0) {
         brute_force_record_t *rec = (brute_force_record_t *)
             api->shmhash_off2ptr(g_shm_ht, val_off);
         if (rec) {
@@ -299,8 +306,8 @@ static int native_shm_atomic_increment(const char *ip, time_t now,
                 /* Existing, valid record — increment in place. */
                 rec->attempt_count++;
             } else {
-                /* Freshly created (zeroed) slot or incompatible data —
-                 * (re)initialize as a new record. */
+                /* Newly created (LSI_SHM_INIT zeroed it) or incompatible
+                 * data — initialize as a new record. */
                 memset(rec, 0, sizeof(brute_force_record_t));
                 rec->magic = BF_RECORD_MAGIC;
                 strncpy(rec->ip, ip, sizeof(rec->ip) - 1);
@@ -314,7 +321,7 @@ static int native_shm_atomic_increment(const char *ip, time_t now,
     }
 
     api->shmhash_unlock(g_shm_ht);
-    return 0;
+    return (val_off > 0) ? 0 : -1;
 }
 
 static int builtin_shm_atomic_increment(const char *ip, time_t now,
@@ -390,9 +397,13 @@ int shm_atomic_increment(const char *ip, time_t now,
 
 int shm_cleanup_expired(time_t now)
 {
-    /* Native SHM doesn't need manual cleanup (OLS manages it) */
-    if (g_use_native_shm)
+    if (g_use_native_shm) {
+        /* OLS shmhash API has no iterate/delete; entries expire naturally
+         * when blocked_until < now (checked by callers via shm_get).
+         * The hash itself is bounded by SHM_POOL_SIZE (1 MB).
+         * Full purge on shm_destroy or module reload. */
         return 0;
+    }
     return builtin_shm_cleanup(now);
 }
 

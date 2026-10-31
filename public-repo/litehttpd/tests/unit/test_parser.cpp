@@ -1268,3 +1268,32 @@ TEST_F(ParserTest, NestedRequireAllInsideRequireAnyKeepsAndLogic) {
 
     htaccess_directives_free(d);
 }
+
+/* BotChallenge family round-trips (v1.1 additions) */
+TEST(BotChallengeParse, NewDirectivesSurviveParse)
+{
+    const char *input =
+        "BotChallenge On\n"
+        "BotChallengeTrustedProxy \"10.0.0.0/8 192.168.0.0/16\"\n"
+        "BotChallengePage challenge.html\n"
+        "BotChallengeIf \"%{REQUEST_URI} =~ /gated/\"\n";
+    auto *d = htaccess_parse(input, strlen(input), "<test>");
+    ASSERT_NE(d, nullptr);
+    int seen_tp = 0, seen_page = 0, seen_if = 0;
+    for (auto *p = d; p; p = p->next) {
+        if (p->type == DIR_BOT_CHALLENGE_TRUSTED_PROXY) {
+            seen_tp = 1;
+            EXPECT_STREQ(p->value, "10.0.0.0/8 192.168.0.0/16");
+        } else if (p->type == DIR_BOT_CHALLENGE_PAGE) {
+            seen_page = 1;
+            EXPECT_STREQ(p->value, "challenge.html");
+        } else if (p->type == DIR_BOT_CHALLENGE_IF) {
+            seen_if = 1;
+            EXPECT_STREQ(p->value, "%{REQUEST_URI} =~ /gated/");
+        }
+    }
+    EXPECT_TRUE(seen_tp);
+    EXPECT_TRUE(seen_page);
+    EXPECT_TRUE(seen_if);
+    htaccess_directives_free(d);
+}

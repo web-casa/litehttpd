@@ -76,6 +76,12 @@ typedef struct lsi_serverhook_s lsi_serverhook_t;
 typedef struct lsi_reqhdlr_s    lsi_reqhdlr_t;
 typedef struct lsi_confparser_s lsi_confparser_t;
 
+/* Stream-filter callback flags — mirrors ls.h */
+#define LSI_CBFO_BUFFERED 1
+#define LSI_CBFI_FLUSH    1
+#define LSI_CBFI_EOF      2
+#define LSI_CBFI_STATIC   4
+
 /* lsi_param_t — hook callback parameter (matches ls.h) */
 struct lsi_param_s {
     const lsi_session_t  *session;

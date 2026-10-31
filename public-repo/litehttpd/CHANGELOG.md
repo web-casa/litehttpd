@@ -2,6 +2,64 @@
 
 All notable changes to litehttpd will be documented in this file.
 
+## [2.2.0] - 2026-10-31
+
+The Enterprise-parity feature release. Everything below is verified against
+real OpenLiteSpeed 1.9.4 (x86_64 container CI: actual OLS + libmodsecurity
+3.0.15 + nftables, running WordPress).
+
+### Added — Enterprise feature bridges
+- **Native RewriteRule/RewriteCond execution** (the headline): stock OLS now
+  executes rewrites with a built-in PCRE2 engine — no patch required.
+  Apache mod_rewrite subset: `R[=301..308] L END NC QSA F G`, `!` negation,
+  `$0..$9` groups, `%{VAR}` expansion, `-f/-d/-s` / `<` `>` `=` conditions,
+  `NC`/`OR` cond flags, `RewriteBase`, QSA. Patched OLS keeps its fast path.
+- **ModSecurity bridge**: `SecRuleEngine Off` per directory — an LSWS
+  Enterprise feature — via an early URI hook that wins the env race against
+  the WAF (verified: SQLi probe 403 outside, 200 inside a bridged dir).
+- **ESI**, opt-in per directory with `EsiEnable`: `<esi:include>` (static
+  fragments, realpath-contained to the docroot), `<esi:remove>`,
+  `<esi:comment>`, `<esi:vars>` substitution; chunk-boundary reassembly so
+  split tags never leak; PHP-handler output filtered end to end.
+- **Firewall full chain**: brute-force thresholds escalate to kernel-level
+  nftables drops via the `litehttpd-firewalld` daemon (input + forward
+  hooks, kernel TTL timeouts, persistence, once-per-window notification).
+  Verified transcript: 200x3 -> 403 -> kernel drop -> TTL auto-expiry.
+- **LSCache bridge**: `CacheEnable public[,esi=on]` / `CacheDisable` /
+  `CacheMaxExpire` / `CacheDefaultExpire` drive the OLS cache module from
+  `.htaccess`; `,esi=on` marks fragment-aware pages.
+- `RateLimit N/M [burst=B] [action=deny|throttle|log]` per-IP limiting.
+
+### Fixed — found by real-OLS container e2e (each shipped broken before)
+- `ls_shmhash_get` called with 4 args against OLS's 5-arg API — wrote a
+  flag through a garbage register pointer; **every brute-force check
+  segfaulted the worker**. Signatures now match `ls_shm.h` exactly.
+- Module .so deployed without `htaccess_stream.c` (undefined symbol — load
+  failure) — CMake target fixed.
+- Brute-force POST counting had no caller outside the auth-fail branch:
+  form-logins (WordPress) were never blocked.
+- nftables backend never created its table/set (`add element` always
+  failed); TTL was hardcoded. Now idempotent layout + kernel timeouts.
+- ESI filter returned `len1` without `stream_write_next` — consumed input
+  is not auto-forwarded in the OLS stream contract; the body would have
+  been dropped once ESI engaged. Backpressure semantics corrected too.
+- ESI include resolved `src` against a hardcoded `/` docroot (arbitrary
+  file read, caught before release by the codex probe + self-review);
+  now session-docroot-bounded with realpath containment.
+- RateLimit and brute-force shared one SHM record namespace — rate-limited
+  normal clients fed login-failure counters. Namespaced `b:`/`r:`.
+- Firewall client `connect()` was unbounded on AF_UNIX (socket timeouts do
+  not cover it); now non-blocking connect + poll deadline.
+- Escalation fired on every over-threshold request; now once per window.
+
+### Testing
+- Suite 1131/1131; directive/printer/generator consistency 0 gaps.
+- New GitHub Actions job `E2E (OLS container)`: five live checks (htaccess
+  header, native rewrite redirect, ESI include + comment strip, firewall
+  full chain with kernel drop, modsec bridge) on every push/PR.
+- Hook-level regression tests pin the stream-filter contract; stub-daemon
+  tests pin the firewall wire protocol; split-tag ESI tests.
+
 ## [2.1.5] - 2026-07-05
 
 ### Changed

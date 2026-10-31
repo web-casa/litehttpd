@@ -1,0 +1,13 @@
+[package]
+name = "litehttpd-firewalld"
+version = "0.1.0"
+edition = "2021"
+description = "Firewall daemon for litehttpd"
+
+[[bin]]
+name = "litehttpd-firewalld"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+strip = true

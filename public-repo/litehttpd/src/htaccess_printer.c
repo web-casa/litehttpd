@@ -661,6 +661,104 @@ static int print_directive(strbuf_t *sb, const htaccess_directive_t *d)
         }
         break;
 
+    /* --- LSCache bridge directives (value is a plain string) --- */
+    case DIR_CACHE_ENABLE:
+        if (strbuf_append(sb, "CacheEnable ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_CACHE_DISABLE:
+        if (strbuf_append(sb, "CacheDisable") != 0) return -1;
+        break;
+
+    case DIR_CACHE_MAX_EXPIRE:
+        if (strbuf_append(sb, "CacheMaxExpire ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_CACHE_DEFAULT_EXPIRE:
+        if (strbuf_append(sb, "CacheDefaultExpire ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    /* --- Bot challenge --- */
+    case DIR_BOT_CHALLENGE:
+        if (strbuf_append(sb, "BotChallenge ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_BOT_CHALLENGE_TTL:
+        snprintf(tmp, sizeof(tmp), "BotChallengeTTL %s", d->value ? d->value : "");
+        if (strbuf_append(sb, tmp) != 0) return -1;
+        break;
+
+    case DIR_BOT_CHALLENGE_DIFFICULTY:
+        snprintf(tmp, sizeof(tmp), "BotChallengeDifficulty %s",
+                 d->value ? d->value : "");
+        if (strbuf_append(sb, tmp) != 0) return -1;
+        break;
+
+    case DIR_BOT_CHALLENGE_EXEMPT:
+        if (strbuf_append(sb, "BotChallengeExempt ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_BOT_CHALLENGE_TRUSTED_PROXY:
+        if (strbuf_append(sb, "BotChallengeTrustedProxy ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_BOT_CHALLENGE_PAGE:
+        if (strbuf_append(sb, "BotChallengePage ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    case DIR_BOT_CHALLENGE_IF:
+        if (strbuf_append(sb, "BotChallengeIf \"") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        if (strbuf_append(sb, "\"") != 0) return -1;
+        break;
+
+    /* --- ESI body processing opt-in --- */
+    case DIR_ESI_ENABLE:
+        if (strbuf_append(sb, "EsiEnable ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    /* --- ModSecurity bridge --- */
+    case DIR_SEC_RULE_ENGINE:
+        if (strbuf_append(sb, "SecRuleEngine ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
+    /* --- Per-IP rate limiting --- */
+    case DIR_RATE_LIMIT:
+        if (strbuf_append(sb, "RateLimit ") != 0) return -1;
+        if (d->value) {
+            if (strbuf_append(sb, d->value) != 0) return -1;
+        }
+        break;
+
     /* --- Handler/Type directives --- */
     case DIR_ADD_HANDLER:
         if (strbuf_append(sb, "AddHandler ") != 0) return -1;

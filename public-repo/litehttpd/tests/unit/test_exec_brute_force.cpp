@@ -7,14 +7,23 @@
  * Validates: Requirements 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8
  */
 #include <gtest/gtest.h>
+#include <atomic>
 #include <cstring>
 #include <cstdlib>
+#include <mutex>
+#include <string>
+#include <thread>
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 #include "mock_lsiapi.h"
 
 extern "C" {
 #include "htaccess_exec_brute_force.h"
 #include "htaccess_directive.h"
+#include "htaccess_firewall_client.h"
 #include "htaccess_shm.h"
 }
 
@@ -305,7 +314,7 @@ TEST_F(ExecBruteForceTest, WindowExpiryResetsCount)
     exec_brute_force(session_.handle(), dirs, "10.0.0.1", 1);
 
     /* Expire the window by manipulating the record */
-    brute_force_record_t *rec = shm_get_record("10.0.0.1");
+    brute_force_record_t *rec = shm_get_record("b:10.0.0.1");
     ASSERT_NE(rec, nullptr);
     rec->first_attempt = time(nullptr) - 61; /* Past the 60s window */
 
@@ -315,7 +324,7 @@ TEST_F(ExecBruteForceTest, WindowExpiryResetsCount)
     EXPECT_EQ(session_.get_status_code(), 200);
 
     /* Verify count was reset */
-    rec = shm_get_record("10.0.0.1");
+    rec = shm_get_record("b:10.0.0.1");
     ASSERT_NE(rec, nullptr);
     EXPECT_EQ(rec->attempt_count, 1);
 
@@ -407,4 +416,109 @@ TEST_F(ExecBruteForceTest, NoBruteForceDirectivesReturnsOk)
     EXPECT_EQ(exec_brute_force(session_.handle(), d, "10.0.0.1", 1), LSI_OK);
 
     free_dir_list(d);
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Firewall escalation: exactly one UDS send per attacker per window  */
+/* ------------------------------------------------------------------ */
+
+namespace {
+
+class CountingStubDaemon {
+public:
+    ~CountingStubDaemon() { stop(); }
+
+    bool start(const std::string &path)
+    {
+        path_ = path;
+        ::unlink(path_.c_str());
+        listen_fd_ = ::socket(AF_UNIX, SOCK_STREAM, 0);
+        if (listen_fd_ < 0)
+            return false;
+        struct sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path_.c_str());
+        if (::bind(listen_fd_, reinterpret_cast<struct sockaddr *>(&addr),
+                   sizeof(addr)) < 0 ||
+            ::listen(listen_fd_, 8) < 0) {
+            ::close(listen_fd_);
+            listen_fd_ = -1;
+            return false;
+        }
+        running_ = true;
+        th_ = std::thread([this] { loop(); });
+        return true;
+    }
+
+    void stop()
+    {
+        if (!running_.exchange(false))
+            return;
+        ::shutdown(listen_fd_, SHUT_RDWR);
+        ::close(listen_fd_);
+        if (th_.joinable())
+            th_.join();
+        if (!path_.empty())
+            ::unlink(path_.c_str());
+    }
+
+    int connections() const { return conns_.load(); }
+
+private:
+    void loop()
+    {
+        while (running_) {
+            int c = ::accept(listen_fd_, nullptr, nullptr);
+            if (c < 0)
+                break;
+            conns_++;
+            char buf[256];
+            (void)::read(c, buf, sizeof(buf) - 1);
+            (void)::write(c, "ok\n", 3);
+            ::close(c);
+        }
+    }
+
+    std::string path_;
+    int listen_fd_ = -1;
+    std::atomic<bool> running_{false};
+    std::atomic<int> conns_{0};
+    std::thread th_;
+};
+
+} // namespace
+
+TEST_F(ExecBruteForceTest, FirewallEscalationSentOncePerWindow)
+{
+    char templ[] = "/tmp/litehttpd-bf-esc-XXXXXX";
+    ASSERT_NE(mkdtemp(templ), nullptr);
+    std::string sock = std::string(templ) + "/fw.sock";
+    const char *saved = getenv("LITEHTTPD_FW_SOCK");
+    setenv("LITEHTTPD_FW_SOCK", sock.c_str(), 1);
+
+    CountingStubDaemon daemon;
+    ASSERT_TRUE(daemon.start(sock));
+
+    auto *dirs = build_bf_directives(1, 3, 300, BF_ACTION_BLOCK, 1000);
+    session_.set_client_ip("203.0.113.77");
+
+    /* Cross the threshold, then keep hammering well past it. */
+    for (int i = 0; i < 10; i++) {
+        session_.set_status_code(200);
+        exec_brute_force(session_.handle(), dirs, "203.0.113.77", 1);
+    }
+    /* Every over-threshold request must still be blocked at the app level. */
+    EXPECT_EQ(session_.get_status_code(), 403);
+
+    /* But the daemon saw exactly ONE connection — the first crossing. */
+    EXPECT_EQ(daemon.connections(), 1);
+
+    free_dir_list(dirs);
+    daemon.stop();
+    if (saved)
+        setenv("LITEHTTPD_FW_SOCK", saved, 1);
+    else
+        unsetenv("LITEHTTPD_FW_SOCK");
+    rmdir(templ);
 }

@@ -165,16 +165,16 @@ This blocks direct access (returns 403). Without LiteHTTPD, stock OLS **does not
 
 ### Does LiteHTTPD protect against brute force attacks?
 
-**Yes.** 9 built-in directives for progressive throttling:
+**Yes.** 8 built-in directives for progressive throttling:
 
 ```apache
-BruteForceProtection On
-BruteForceAllowedAttempts 5
-BruteForceWindow 300
-BruteForceAction throttle
+LSBruteForceProtection On
+LSBruteForceAllowedAttempts 5
+LSBruteForceWindow 300
+LSBruteForceAction throttle
 ```
 
-Features include IP detection through trusted proxies (`BruteForceXForwardedFor` + `BruteForceTrustedProxy`), CIDR whitelist (`BruteForceWhitelist`), and custom path protection (`BruteForceProtectPath`).
+Features include IP detection through proxies (`LSBruteForceXForwardedFor`), CIDR whitelist (`LSBruteForceWhitelist`), and custom path protection (`LSBruteForceProtectPath`).
 
 ---
 
@@ -185,7 +185,7 @@ Features include IP detection through trusted proxies (`BruteForceXForwardedFor`
 | | Full Mode | Thin Mode |
 |-|-----------|-----------|
 | **OLS binary** | Patched (4 patches) | Stock (unmodified) |
-| **Directives** | 83 parsed types | 83 parsed types; no RewriteRule execution or php_value passthrough |
+| **Directives** | 80 (all features) | 70+ (no RewriteRule exec, no php_value) |
 | **Install** | `dnf install openlitespeed-litehttpd` | Copy `.so` file |
 | **Best for** | Production, full Apache migration | Quick evaluation, Docker |
 

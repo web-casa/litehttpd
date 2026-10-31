@@ -124,6 +124,18 @@ set(MODULE_SOURCES
     src/htaccess_expr.c
     src/htaccess_expires.c
     src/htaccess_parser.c
+    src/htaccess_exec_ratelimit.c
+    src/htaccess_exec_cache.c
+    src/htaccess_exec_modsec.c
+    src/htaccess_firewall_client.c
+    src/htaccess_stream.c
+    src/htaccess_rewrite_native.c
+    src/htaccess_esi_fetch.c
+    src/htaccess_botcrypto.c
+    src/htaccess_exec_botchallenge.c
+    src/htaccess_esi.c
+    src/htaccess_cidr_table.c
+    src/htaccess_regex.c
     src/htaccess_printer.c
     src/htaccess_shm.c
     src/lsiapi_shim.c

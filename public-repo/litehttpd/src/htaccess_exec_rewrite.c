@@ -10,6 +10,7 @@
  * On stock OLS (no rewrite patch), gracefully returns -1.
  */
 #include "htaccess_exec_rewrite.h"
+#include "htaccess_rewrite_native.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -288,10 +289,10 @@ int exec_rewrite_rules(lsi_session_t *session,
     if (!engine_on)
         return 0;
 
-    /* 2. Check rewrite support (requires custom OLS with ABI marker) */
+    /* 2. Engine selection: patched-OLS fast path first; on stock OLS
+     * fall back to the built-in native engine (mod_rewrite subset). */
     if (!lsiapi_has_rewrite_extensions()) {
-        /* Capability already logged at module init — skip silently */
-        return -1;
+        return rewrite_native_exec(session, directives, rewrite_base);
     }
 
     /* 3. Check handle cache via lightweight fingerprint */

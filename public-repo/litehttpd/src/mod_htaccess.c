@@ -20,6 +20,12 @@
 #include "htaccess_exec_php.h"
 #include "htaccess_exec_env.h"
 #include "htaccess_exec_brute_force.h"
+#include "htaccess_exec_ratelimit.h"
+#include "htaccess_exec_modsec.h"
+#include "htaccess_exec_botchallenge.h"
+#include "htaccess_esi.h"
+#include "htaccess_stream.h"
+#include "htaccess_exec_cache.h"
 #include "htaccess_exec_header.h"
 #include "htaccess_exec_expires.h"
 #include "htaccess_exec_error_doc.h"
@@ -45,9 +51,9 @@
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
 
-#define MOD_HTACCESS_CACHE_BUCKETS  64
+#define MOD_HTACCESS_CACHE_BUCKETS 64
 #define MOD_HTACCESS_SHM_MAX_RECORDS 1024
-#define MOD_HTACCESS_HOOK_PRIORITY  100
+#define MOD_HTACCESS_HOOK_PRIORITY 100
 
 /* ------------------------------------------------------------------ */
 /*  Per-request directive cache (avoids double dirwalk)                 */
@@ -61,23 +67,31 @@
  * reuse them in SEND_RESP_HEADER if the session pointer matches.
  */
 static __thread struct {
-    const lsi_session_t  *session;     /* session identity */
-    htaccess_directive_t *directives;  /* cached merged result (owned) */
-} req_cache = { NULL, NULL };
+    const lsi_session_t *session;     /* session identity */
+    uint64_t seq;                     /* request generation (pointer-reuse guard) */
+    htaccess_directive_t *directives; /* cached merged result (owned) */
+} req_cache = {NULL, 0, NULL};
 
-static void req_cache_store(const lsi_session_t *session,
-                            htaccess_directive_t *dirs)
+/* Monotonic per-thread request counter: bumped once at the start of each
+ * request's URI_MAP pass. OLS recycles lsi_session_t pointers, so pointer
+ * equality alone can match a *different* request that reused the object;
+ * the sequence number disambiguates. */
+static __thread uint64_t req_seq_counter = 0;
+
+static void req_cache_store(const lsi_session_t *session, htaccess_directive_t *dirs)
 {
     /* Always free previous entry (session pointers may be recycled by OLS) */
     if (req_cache.directives && req_cache.directives != dirs)
         htaccess_directives_free(req_cache.directives);
     req_cache.session = session;
+    req_cache.seq = req_seq_counter;
     req_cache.directives = dirs;
 }
 
 static htaccess_directive_t *req_cache_get(const lsi_session_t *session)
 {
-    if (req_cache.session == session && req_cache.directives)
+    if (req_cache.session == session && req_cache.directives &&
+        req_cache.seq == req_seq_counter)
         return req_cache.directives;
     return NULL;
 }
@@ -87,6 +101,7 @@ static void req_cache_clear(void)
     if (req_cache.directives)
         htaccess_directives_free(req_cache.directives);
     req_cache.session = NULL;
+    req_cache.seq = 0;
     req_cache.directives = NULL;
 }
 
@@ -104,6 +119,18 @@ static int on_send_resp_header(lsi_session_t *session);
 static int on_uri_map_hook(lsi_param_t *param)
 {
     return on_uri_map((lsi_session_t *)param->session);
+}
+
+/* Early URI_MAP pass (LSI_HOOK_EARLY, before modsecurity-ls at NORMAL):
+ * applies SecRuleEngine from .htaccess through the request-env bypass
+ * contract. Self-contained walk — the main pass at priority 100 owns its
+ * own directive list and its error paths free it, so sharing the list
+ * through req_cache would race ownership; the second walk is a validated
+ * cache hit (no re-parse), costing only the merge deep-copy. */
+static int on_uri_map_early(lsi_session_t *session);
+static int on_uri_map_early_hook(lsi_param_t *param)
+{
+    return on_uri_map_early((lsi_session_t *)param->session);
 }
 
 static int on_http_begin_hook(lsi_param_t *param)
@@ -126,21 +153,443 @@ static int on_main_atexit_hook(lsi_param_t *param)
     return mod_htaccess_cleanup(NULL);
 }
 
+
+/* ------------------------------------------------------------------ */
+/*  ESI stream filter (RECV_RESP_BODY per chunk + RCVD_RESP_BODY flush) */
+/* ------------------------------------------------------------------ */
+
+/* Thread-local per-request ESI state, mirroring req_cache: OLS workers
+ * are single-threaded event loops, so the body chunks of one request and
+ * its RCVD_RESP_BODY flush run in this thread sequentially. The seq guard
+ * recycles safely when a request aborts without a RCVD callback. */
+static __thread struct {
+    const lsi_session_t *session;
+    uint64_t seq;
+    esi_ctx_t *ctx; /* heap ESI context when the filter engaged */
+    int bypass;     /* 1 = gate failed, chunks pass through untouched */
+} esi_req = {NULL, 0, NULL, 0};
+
+/* Set by esi_gate_check when the subrequest marker is present. */
+static __thread int esi_req_subrequest = 0;
+
+static int esi_flush_parked(lsi_param_t *param);
+
+static void esi_req_reset(void)
+{
+    if (esi_req.ctx) {
+        esi_ctx_free(esi_req.ctx);
+        free(esi_req.ctx);
+        esi_req.ctx = NULL;
+    }
+    esi_req.session = NULL;
+    esi_req.seq = 0;
+    esi_req.bypass = 0;
+}
+
+/* One-time gate per request: the directory opted in via EsiEnable AND the
+ * response is untransformed text/html (esi_should_process also rejects
+ * compressed bodies). Reading the response Content-Type here mirrors the
+ * SEND_RESP_HEADER pattern. */
+static int esi_gate_check(lsi_session_t *session)
+{
+    /* EsiEnable scan lives here (not in the ESI text processor) so the
+     * directive is interpreted by its owning executor. Last directive
+     * in the merged list wins — deepest directory override. */
+    const htaccess_directive_t *dirs = req_cache_get(session);
+    if (!dirs)
+        return 0;
+    int esi_on = 0;
+    for (const htaccess_directive_t *d = dirs; d; d = d->next) {
+        if (d->type == DIR_ESI_ENABLE && d->value)
+            esi_on = (strcmp(d->value, "on") == 0);
+    }
+    if (!esi_on)
+        return 0;
+
+    int ct_len = 0;
+    const char *ct = NULL;
+    static __thread char ct_buf[256];
+    if (g_api && g_api->get_resp_header) {
+        struct iovec iov[1];
+        int n = g_api->get_resp_header((const lsi_session_t *)session,
+                                       LSI_RSPHDR_CONTENT_TYPE, NULL, 0, iov, 1);
+        if (n > 0 && iov[0].iov_len > 0) {
+            ct_len = (int)iov[0].iov_len;
+            if (ct_len >= (int)sizeof(ct_buf))
+                ct_len = (int)sizeof(ct_buf) - 1;
+            memcpy(ct_buf, iov[0].iov_base, ct_len);
+            ct_buf[ct_len] = '\0';
+            ct = ct_buf;
+        }
+    }
+    if (!ct)
+        ct = lsi_session_get_resp_content_type(session, &ct_len);
+
+    int ce_len = 0;
+    const char *ce = lsi_session_get_resp_header_by_name(
+        session, "Content-Encoding", 16, &ce_len);
+
+    if (!esi_should_process(ct, ct_len, ce, ce_len))
+        return 0;
+
+    /* Loop protection: this request is itself an ESI fragment — dynamic
+     * includes inside it are dropped (static ESI still works). */
+    int mk_len = 0;
+    const char *mk = lsi_session_get_req_header_by_name(
+        session, ESI_SUBREQ_MARKER, 27, &mk_len);
+    if (mk && mk_len > 0)
+        esi_req_subrequest = 1;
+    return 1;
+}
+
+/* ── Dynamic-include EOF join ────────────────────────────────────────
+ * Fetch each pending fragment over the loopback (bounded by a shared
+ * page budget; the seam lets tests stub the fetch), splice it over its
+ * placeholder, then strip whatever did not resolve. Called only from the
+ * EOF chunk (and the RCVD safety net). */
+static void esi_dyn_join(lsi_param_t *param)
+{
+    esi_ctx_t *c = esi_req.ctx;
+    if (!c || c->dyn_count == 0)
+        return;
+
+    lsi_session_t *session = (lsi_session_t *)param->session;
+
+    long per = ESI_DYN_PER_MS_DFLT, total = ESI_DYN_TOTAL_MS_DFLT;
+    {
+        const char *e = getenv("LITEHTTPD_ESI_DYN_TIMEOUT_MS");
+        if (e && atoi(e) > 0)
+            per = atoi(e);
+        e = getenv("LITEHTTPD_ESI_DYN_TOTAL_MS");
+        if (e && atoi(e) > 0)
+            total = atoi(e);
+    }
+
+    /* Parent headers forwarded to the fragment (session-dependent frags) */
+    int hlen = 0;
+    const char *host = lsi_session_get_req_header_by_name(
+        session, "Host", 4, &hlen);
+    char host_buf[512];
+    if (host && hlen > 0) {
+        if (hlen > 511)
+            hlen = 511;
+        memcpy(host_buf, host, hlen);
+        host_buf[hlen] = '\0';
+        host = host_buf;
+    } else {
+        host = NULL;
+    }
+    int clen = 0;
+    const char *cookie = lsi_session_get_req_header_by_name(
+        session, "Cookie", 6, &clen);
+    char cookie_buf[2048];
+    if (cookie && clen > 0) {
+        if (clen > 2047)
+            clen = 2047;
+        memcpy(cookie_buf, cookie, clen);
+        cookie_buf[clen] = '\0';
+        cookie = cookie_buf;
+    } else {
+        cookie = NULL;
+    }
+
+    for (int i = 0; i < c->dyn_count; i++) {
+        int budget = (int)((long)per < total ? per : total);
+        if (budget <= 0)
+            break;
+        char *body = NULL;
+        if (esi_dyn_fetch_fn)
+            body = esi_dyn_fetch_fn(c->dyn_uri[i], host, cookie, budget);
+        esi_dyn_splice(c, i, body, body ? strlen(body) : 0);
+        free(body);
+        total -= budget; /* conservative: budget charged even on fast return */
+    }
+    esi_dyn_strip_remaining(c);
+}
+
+int on_recv_resp_body_esi_hook(lsi_param_t *param)
+{
+    lsi_session_t *session = (lsi_session_t *)param->session;
+
+    /* New request? Evaluate the gate once, then engage or bypass. */
+    if (esi_req.session != session || esi_req.seq != req_seq_counter) {
+        esi_req_reset();
+        esi_req.session = session;
+        esi_req.seq = req_seq_counter;
+        if (esi_gate_check(session)) {
+            int dr_len = 0;
+            const char *dr = lsi_session_get_doc_root(session, &dr_len);
+            esi_req.ctx = malloc(sizeof(esi_ctx_t));
+            if (esi_req.ctx) {
+                esi_ctx_init(esi_req.ctx, dr, (size_t)(dr_len > 0 ? dr_len : 0));
+                esi_req.ctx->subrequest = esi_req_subrequest;
+                esi_req.bypass = 0;
+            } else {
+                esi_req.bypass = 1; /* OOM: pass through unchanged */
+            }
+        } else {
+            esi_req.bypass = 1;
+        }
+    }
+
+    /* Stream-filter contract (per OLS modgzip): consumed input is NOT
+     * auto-forwarded — every byte we want delivered goes out through
+     * ht_stream_write, including on the bypass path. On partial accept we
+     * park the undelivered OUTPUT, set LSI_CBFO_BUFFERED, and still report
+     * the input consumed: the input was transformed once; returning 0
+     * would make OLS re-deliver it and double the output. */
+
+    if (esi_req.bypass || !esi_req.ctx)
+        return ht_stream_write(param, (const char *)param->ptr1, param->len1);
+
+    if (param->flag_in & LSI_CBFI_EOF) {
+        /* Final chunk: drain parked output, process, then — if dynamic
+         * includes are pending — run the bounded EOF join (fetch each
+         * fragment over the loopback, splice over its placeholder), emit
+         * the finish tail, and end the stream. */
+        if (!esi_flush_parked(param))
+            return param->len1; /* still blocked; RCVD net will retry */
+
+        char *out = NULL;
+        size_t out_len = 0;
+        esi_process(esi_req.ctx, (const char *)param->ptr1,
+                    (size_t)param->len1, &out, &out_len);
+
+        /* Dynamic hold: collect this chunk's output, run the join, and
+         * emit the whole held buffer. Out-of-order streaming never
+         * happened, so ordering is trivially preserved. */
+        if (esi_req.ctx->dyn_holding) {
+            esi_ctx_t *c = esi_req.ctx;
+            if (out_len > 0 && c->dyn_hold_len + out_len <= ESI_MAX_BUFFER) {
+                if (!c->dyn_hold) {
+                    c->dyn_hold = malloc(65536);
+                    c->dyn_hold_cap = c->dyn_hold ? 65536 : 0;
+                }
+                if (c->dyn_hold &&
+                    c->dyn_hold_len + out_len + 1 > c->dyn_hold_cap) {
+                    size_t nc = c->dyn_hold_cap ? c->dyn_hold_cap : 65536;
+                    while (nc < c->dyn_hold_len + out_len + 1)
+                        nc *= 2;
+                    char *nb = realloc(c->dyn_hold, nc);
+                    if (nb) {
+                        c->dyn_hold = nb;
+                        c->dyn_hold_cap = nc;
+                    }
+                }
+                if (c->dyn_hold && c->dyn_hold_cap > c->dyn_hold_len) {
+                    size_t n = out_len;
+                    if (n > c->dyn_hold_cap - c->dyn_hold_len)
+                        n = c->dyn_hold_cap - c->dyn_hold_len;
+                    memcpy(c->dyn_hold + c->dyn_hold_len, out, n);
+                    c->dyn_hold_len += n;
+                }
+            }
+            esi_finish(c, &out, &out_len); /* flush held-back partial tags */
+            if (out_len > 0 && c->dyn_hold_len + out_len <= ESI_MAX_BUFFER) {
+                if (c->dyn_hold_len + out_len + 1 > c->dyn_hold_cap &&
+                    c->dyn_hold) {
+                    size_t nc = c->dyn_hold_cap;
+                    while (nc < c->dyn_hold_len + out_len + 1)
+                        nc *= 2;
+                    char *nb = realloc(c->dyn_hold, nc);
+                    if (nb) {
+                        c->dyn_hold = nb;
+                        c->dyn_hold_cap = nc;
+                    }
+                }
+                if (c->dyn_hold &&
+                    c->dyn_hold_cap >= c->dyn_hold_len + out_len) {
+                    memcpy(c->dyn_hold + c->dyn_hold_len, out, out_len);
+                    c->dyn_hold_len += out_len;
+                }
+            }
+
+            /* ── EOF join: bounded fetch + splice ── */
+            esi_dyn_join(param);
+
+            /* Emit the joined buffer (bounded retry via RCVD net on
+             * partial writes is unnecessary at this size — a single
+             * write; on failure the response ends short, same as any
+             * filter I/O failure). */
+            if (c->dyn_hold_len > 0)
+                ht_stream_write(param, c->dyn_hold, (int)c->dyn_hold_len);
+            ht_stream_write(param, NULL, 0); /* end of stream */
+            esi_req_reset();
+            return param->len1;
+        }
+
+        int written = 0;
+        if (out_len > 0)
+            written = ht_stream_write(param, out, (int)out_len);
+        if (written >= 0 && (size_t)written == out_len) {
+            esi_finish(esi_req.ctx, &out, &out_len);
+            if (out_len > 0)
+                written = ht_stream_write(param, out, (int)out_len);
+            else
+                written = 0;
+            if (written >= 0 && (size_t)written == out_len) {
+                ht_stream_write(param, NULL, 0); /* end of stream */
+                esi_req_reset();
+                return param->len1;
+            }
+        }
+        if (written >= 0 && out_len > (size_t)(written > 0 ? written : 0)) {
+            size_t off = (written > 0) ? (size_t)written : 0;
+            size_t rest = out_len - off;
+            memmove(esi_req.ctx->buf, out + off, rest);
+            esi_req.ctx->pend_len = rest;
+            if (param->flag_out)
+                *param->flag_out |= LSI_CBFO_BUFFERED;
+        }
+        return param->len1;
+    }
+
+    if (!esi_flush_parked(param))
+        return param->len1; /* parked output still blocked */
+
+    char *out = NULL;
+    size_t out_len = 0;
+    esi_process(esi_req.ctx, (const char *)param->ptr1, (size_t)param->len1,
+                &out, &out_len);
+
+    /* Dynamic-include hold mode: from the chunk that produced the first
+     * placeholder, output is retained (static tags keep processing inside
+     * it) and joined at EOF — never streamed out of order. */
+    if (esi_req.ctx->dyn_holding) {
+        esi_ctx_t *c = esi_req.ctx;
+        if (out_len > 0 && c->dyn_hold_len + out_len <= ESI_MAX_BUFFER) {
+            if (!c->dyn_hold) {
+                c->dyn_hold = malloc(65536);
+                c->dyn_hold_cap = c->dyn_hold ? 65536 : 0;
+            }
+            if (c->dyn_hold &&
+                c->dyn_hold_len + out_len + 1 > c->dyn_hold_cap) {
+                size_t nc = c->dyn_hold_cap ? c->dyn_hold_cap : 65536;
+                while (nc < c->dyn_hold_len + out_len + 1)
+                    nc *= 2;
+                char *nb = realloc(c->dyn_hold, nc);
+                if (nb) {
+                    c->dyn_hold = nb;
+                    c->dyn_hold_cap = nc;
+                }
+            }
+            if (c->dyn_hold && c->dyn_hold_cap > c->dyn_hold_len) {
+                size_t n = out_len;
+                if (n > c->dyn_hold_cap - c->dyn_hold_len)
+                    n = c->dyn_hold_cap - c->dyn_hold_len;
+                memcpy(c->dyn_hold + c->dyn_hold_len, out, n);
+                c->dyn_hold_len += n;
+            }
+            return param->len1; /* held; joined at EOF */
+        }
+        /* budget exceeded: stop holding, stream onward (placeholders in
+         * the collected part are stripped fail-open at the join) */
+        c->dyn_holding = 0;
+    }
+
+    if (out_len == 0)
+        return param->len1; /* nothing to emit yet (held back) */
+
+    int written = ht_stream_write(param, out, (int)out_len);
+    if (written < 0)
+        return param->len1; /* downstream error: input consumed, output lost */
+    if ((size_t)written < out_len) {
+        /* Downstream backpressure: park the undelivered remainder and
+         * signal BUFFERED, but report the input consumed (see contract
+         * note above). */
+        size_t rest = out_len - (size_t)written;
+        memmove(esi_req.ctx->buf, out + written, rest);
+        esi_req.ctx->pend_len = rest;
+        if (param->flag_out)
+            *param->flag_out |= LSI_CBFO_BUFFERED;
+    }
+    return param->len1;
+}
+
+/* Flush parked (backpressured) output. Returns 1 when everything parked
+ * has been delivered, 0 when the downstream is still blocked (BUFFERED
+ * set, remainder re-parked). */
+static int esi_flush_parked(lsi_param_t *param)
+{
+    if (!esi_req.ctx || esi_req.ctx->pend_len == 0)
+        return 1;
+    int flushed = ht_stream_write(param, esi_req.ctx->buf,
+                                  (int)esi_req.ctx->pend_len);
+    if (flushed < 0)
+        return 1; /* treat as gone; do not wedge the stream */
+    if ((size_t)flushed < esi_req.ctx->pend_len) {
+        size_t rest = esi_req.ctx->pend_len - (size_t)flushed;
+        memmove(esi_req.ctx->buf, esi_req.ctx->buf + flushed, rest);
+        esi_req.ctx->pend_len = rest;
+        if (param->flag_out)
+            *param->flag_out |= LSI_CBFO_BUFFERED;
+        return 0;
+    }
+    esi_req.ctx->pend_len = 0;
+    return 1;
+}
+
+/* Safety net: EOF chunks normally finish the document in the RECV hook.
+ * If a response aborts (or an EOF write was backpressured), flush parked
+ * output plus any held partial tag literally, end the stream, release. */
+int on_rcvd_resp_body_esi_hook(lsi_param_t *param)
+{
+    if (!esi_req.bypass && esi_req.ctx &&
+        esi_req.session == param->session &&
+        esi_req.seq == req_seq_counter) {
+        (void)esi_flush_parked(param);
+        char *out = NULL;
+        size_t out_len = 0;
+        esi_finish(esi_req.ctx, &out, &out_len);
+        if (esi_req.ctx->dyn_holding) {
+            /* EOF chunk never came (or was backpressured): collect the
+             * finish tail, join, and emit the held buffer whole. */
+            esi_ctx_t *c = esi_req.ctx;
+            if (out_len > 0 && c->dyn_hold_len + out_len <= ESI_MAX_BUFFER &&
+                c->dyn_hold && c->dyn_hold_cap >= c->dyn_hold_len + out_len) {
+                memcpy(c->dyn_hold + c->dyn_hold_len, out, out_len);
+                c->dyn_hold_len += out_len;
+            }
+            esi_dyn_join(param);
+            if (c->dyn_hold_len > 0)
+                ht_stream_write(param, c->dyn_hold, (int)c->dyn_hold_len);
+        } else if (out_len > 0) {
+            ht_stream_write(param, out, (int)out_len);
+        }
+        ht_stream_write(param, NULL, 0); /* end of stream */
+    }
+    esi_req_reset();
+    return LSI_OK;
+}
+
+/* Test seam: install a merged directive list for this session exactly as
+ * on_uri_map would, so gate-dependent hooks can be exercised in unit
+ * tests. Takes ownership of dirs. */
+void mod_htaccess_test_prime(lsi_session_t *session, htaccess_directive_t *dirs)
+{
+    req_seq_counter++;
+    req_cache_store(session, dirs);
+}
+
 static lsi_serverhook_t server_hooks[] = {
+    /* URI_MAP early pass: SecRuleEngine bridge — must run before
+     * modsecurity-ls (LSI_HOOK_NORMAL) to win the env race */
+    {LSI_HKPT_URI_MAP, on_uri_map_early_hook, LSI_HOOK_EARLY, LSI_FLAG_ENABLED},
     /* URI_MAP: ACL, redirects, PHP config, env vars, RequestHeader, brute force */
-    { LSI_HKPT_URI_MAP, on_uri_map_hook,
-      MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED },
+    {LSI_HKPT_URI_MAP, on_uri_map_hook, MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED},
     /* HTTP_BEGIN: ErrorDocument local-path (internal redirect on error status) */
-    { LSI_HKPT_HTTP_BEGIN, on_http_begin_hook,
-      MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED },
+    {LSI_HKPT_HTTP_BEGIN, on_http_begin_hook, MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED},
     /* SEND_RESP_HEADER: response headers, expires, AddType/ForceType */
-    { LSI_HKPT_SEND_RESP_HEADER, on_send_resp_header_hook,
-      MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED },
+    {LSI_HKPT_SEND_RESP_HEADER, on_send_resp_header_hook, MOD_HTACCESS_HOOK_PRIORITY,
+     LSI_FLAG_ENABLED},
+    /* ESI: response body stream filter — per-chunk transform + final flush */
+    {LSI_HKPT_RECV_RESP_BODY, on_recv_resp_body_esi_hook, MOD_HTACCESS_HOOK_PRIORITY,
+     LSI_FLAG_ENABLED},
+    {LSI_HKPT_RCVD_RESP_BODY, on_rcvd_resp_body_esi_hook, MOD_HTACCESS_HOOK_PRIORITY,
+     LSI_FLAG_ENABLED},
     /* MAIN_ATEXIT: cleanup cache and SHM */
-    { LSI_HKPT_MAIN_ATEXIT, on_main_atexit_hook,
-      MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED },
-    LSI_HOOK_END
-};
+    {LSI_HKPT_MAIN_ATEXIT, on_main_atexit_hook, MOD_HTACCESS_HOOK_PRIORITY, LSI_FLAG_ENABLED},
+    LSI_HOOK_END};
 
 /* ------------------------------------------------------------------ */
 /*  Module descriptor (19.1)                                           */
@@ -148,12 +597,12 @@ static lsi_serverhook_t server_hooks[] = {
 
 LSMODULE_EXPORT lsi_module_t MNAME = {
     LSI_MODULE_SIGNATURE,
-    mod_htaccess_init,      /* init_pf callback */
-    NULL,                   /* reqhandler (not used) */
-    NULL,                   /* config_parser */
-    "ols-htaccess v1.0",    /* about */
-    server_hooks,           /* serverhook array */
-    {0}                     /* reserved */
+    mod_htaccess_init,   /* init_pf callback */
+    NULL,                /* reqhandler (not used) */
+    NULL,                /* config_parser */
+    "ols-htaccess v1.0", /* about */
+    server_hooks,        /* serverhook array */
+    {0}                  /* reserved */
 };
 
 /* ------------------------------------------------------------------ */
@@ -162,8 +611,7 @@ LSMODULE_EXPORT lsi_module_t MNAME = {
 /*  Returns a malloc'd string the caller must free.                    */
 /* ------------------------------------------------------------------ */
 
-static char *build_target_dir(const char *doc_root, int doc_root_len,
-                              const char *uri, int uri_len)
+static char *build_target_dir(const char *doc_root, int doc_root_len, const char *uri, int uri_len)
 {
     /* Find last '/' in URI to strip filename */
     int dir_len = uri_len;
@@ -204,12 +652,11 @@ static char *build_target_dir(const char *doc_root, int doc_root_len,
     /* Cache resolved doc_root — it rarely changes between requests */
     static __thread char cached_doc_root[PATH_MAX];
     static __thread char cached_resolved_root[PATH_MAX];
-    static __thread int  cached_root_valid = 0;
+    static __thread int cached_root_valid = 0;
     static __thread size_t cached_root_rlen = 0;
 
     /* Invalidate cache if doc_root changed */
-    if (!cached_root_valid ||
-        strcmp(cached_doc_root, doc_root) != 0) {
+    if (!cached_root_valid || strcmp(cached_doc_root, doc_root) != 0) {
         if (!realpath(doc_root, cached_resolved_root)) {
             /* doc_root can't be resolved — don't cache, retry next request.
              * Use raw doc_root for this request's ".." traversal check. */
@@ -238,13 +685,13 @@ static char *build_target_dir(const char *doc_root, int doc_root_len,
         while (slash > parent) {
             *slash = '\0';
             slash--;
-            while (slash > parent && *slash != '/') slash--;
+            while (slash > parent && *slash != '/')
+                slash--;
             if (slash > parent) {
                 char resolved_parent[PATH_MAX];
                 if (realpath(parent, resolved_parent)) {
                     /* Validate parent is within doc_root (with boundary check) */
-                    if (strncmp(resolved_parent, cached_resolved_root,
-                                cached_root_rlen) != 0 ||
+                    if (strncmp(resolved_parent, cached_resolved_root, cached_root_rlen) != 0 ||
                         (resolved_parent[cached_root_rlen] != '/' &&
                          resolved_parent[cached_root_rlen] != '\0')) {
                         free(result);
@@ -259,7 +706,10 @@ static char *build_target_dir(const char *doc_root, int doc_root_len,
         {
             const char *p = result;
             while (*p) {
-                if (*p == '/') { p++; continue; }
+                if (*p == '/') {
+                    p++;
+                    continue;
+                }
                 const char *seg_end = strchr(p, '/');
                 size_t seg_len = seg_end ? (size_t)(seg_end - p) : strlen(p);
                 if (seg_len == 2 && p[0] == '.' && p[1] == '.') {
@@ -285,6 +735,46 @@ static char *build_target_dir(const char *doc_root, int doc_root_len,
     }
 
     return result;
+}
+
+static int directory_has_common_index(lsi_session_t *session, const char *target_dir)
+{
+    static const char *const candidates[] = {
+        "index.php",
+        "index.html",
+        "index.htm",
+        "default.html",
+        "default.htm",
+        NULL
+    };
+    size_t dir_len;
+    int need_slash;
+
+    if (!session || !target_dir)
+        return 0;
+
+    dir_len = strlen(target_dir);
+    need_slash = (dir_len > 0 && target_dir[dir_len - 1] != '/') ? 1 : 0;
+
+    for (int i = 0; candidates[i] != NULL; ++i) {
+        size_t name_len = strlen(candidates[i]);
+        char *path = (char *)malloc(dir_len + (size_t)need_slash + name_len + 1);
+        if (!path)
+            return 0;
+
+        memcpy(path, target_dir, dir_len);
+        if (need_slash)
+            path[dir_len] = '/';
+        memcpy(path + dir_len + (size_t)need_slash, candidates[i], name_len + 1);
+
+        if (lsi_session_file_exists(session, path)) {
+            free(path);
+            return 1;
+        }
+        free(path);
+    }
+
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -327,10 +817,11 @@ static const char *extract_filename(const char *uri, int uri_len)
     int i = uri_len;
     while (i > 0 && uri[i - 1] != '/')
         i--;
-    int n = uri_len - i;                 /* filename length (no terminator) */
-    if (n < 0) n = 0;
+    int n = uri_len - i; /* filename length (no terminator) */
+    if (n < 0)
+        n = 0;
     if (n > (int)sizeof(fnbuf) - 1)
-        n = (int)sizeof(fnbuf) - 1;      /* truncate pathologically long names */
+        n = (int)sizeof(fnbuf) - 1; /* truncate pathologically long names */
     memcpy(fnbuf, uri + i, (size_t)n);
     fnbuf[n] = '\0';
     return fnbuf;
@@ -344,29 +835,24 @@ static const char *extract_filename(const char *uri, int uri_len)
  * Log a successful directive application at DEBUG level.
  * Format: "Applying directive <type> at <filepath>:<line>"
  */
-static void log_directive_ok(lsi_session_t *session,
-                             const htaccess_directive_t *dir,
+static void log_directive_ok(lsi_session_t *session, const htaccess_directive_t *dir,
                              const char *type_str)
 {
     const char *file = dir->name ? dir->name : "(unknown)";
-    lsi_log(session, LSI_LOG_DEBUG,
-            "Applying directive %s at %s:%d",
-            type_str, file, dir->line_number);
+    lsi_log(session, LSI_LOG_DEBUG, "Applying directive %s at %s:%d", type_str, file,
+            dir->line_number);
 }
 
 /**
  * Log a directive failure at WARN level.
  * Format: "Directive <type> failed at <filepath>:<line>: <reason>"
  */
-static void log_directive_fail(lsi_session_t *session,
-                               const htaccess_directive_t *dir,
-                               const char *type_str,
-                               const char *reason)
+static void log_directive_fail(lsi_session_t *session, const htaccess_directive_t *dir,
+                               const char *type_str, const char *reason)
 {
     const char *file = dir->name ? dir->name : "(unknown)";
-    lsi_log(session, LSI_LOG_WARN,
-            "Directive %s failed at %s:%d: %s",
-            type_str, file, dir->line_number, reason);
+    lsi_log(session, LSI_LOG_WARN, "Directive %s failed at %s:%d: %s", type_str, file,
+            dir->line_number, reason);
 }
 
 /**
@@ -375,91 +861,177 @@ static void log_directive_fail(lsi_session_t *session,
 static const char *directive_type_str(directive_type_t type)
 {
     switch (type) {
-    case DIR_HEADER_SET:                    return "Header set";
-    case DIR_HEADER_UNSET:                  return "Header unset";
-    case DIR_HEADER_APPEND:                 return "Header append";
-    case DIR_HEADER_MERGE:                  return "Header merge";
-    case DIR_HEADER_ADD:                    return "Header add";
-    case DIR_REQUEST_HEADER_SET:            return "RequestHeader set";
-    case DIR_REQUEST_HEADER_UNSET:          return "RequestHeader unset";
-    case DIR_PHP_VALUE:                     return "php_value";
-    case DIR_PHP_FLAG:                      return "php_flag";
-    case DIR_PHP_ADMIN_VALUE:               return "php_admin_value";
-    case DIR_PHP_ADMIN_FLAG:                return "php_admin_flag";
-    case DIR_ORDER:                         return "Order";
-    case DIR_ALLOW_FROM:                    return "Allow from";
-    case DIR_DENY_FROM:                     return "Deny from";
-    case DIR_REDIRECT:                      return "Redirect";
-    case DIR_REDIRECT_MATCH:                return "RedirectMatch";
-    case DIR_ERROR_DOCUMENT:                return "ErrorDocument";
-    case DIR_FILES_MATCH:                   return "FilesMatch";
-    case DIR_EXPIRES_ACTIVE:                return "ExpiresActive";
-    case DIR_EXPIRES_BY_TYPE:               return "ExpiresByType";
-    case DIR_SETENV:                        return "SetEnv";
-    case DIR_SETENVIF:                      return "SetEnvIf";
-    case DIR_BROWSER_MATCH:                 return "BrowserMatch";
-    case DIR_BRUTE_FORCE_PROTECTION:        return "BruteForceProtection";
-    case DIR_BRUTE_FORCE_ALLOWED_ATTEMPTS:  return "BruteForceAllowedAttempts";
-    case DIR_BRUTE_FORCE_WINDOW:            return "BruteForceWindow";
-    case DIR_BRUTE_FORCE_ACTION:            return "BruteForceAction";
-    case DIR_BRUTE_FORCE_THROTTLE_DURATION: return "BruteForceThrottleDuration";
+    case DIR_HEADER_SET:
+        return "Header set";
+    case DIR_HEADER_UNSET:
+        return "Header unset";
+    case DIR_HEADER_APPEND:
+        return "Header append";
+    case DIR_HEADER_MERGE:
+        return "Header merge";
+    case DIR_HEADER_ADD:
+        return "Header add";
+    case DIR_REQUEST_HEADER_SET:
+        return "RequestHeader set";
+    case DIR_REQUEST_HEADER_UNSET:
+        return "RequestHeader unset";
+    case DIR_PHP_VALUE:
+        return "php_value";
+    case DIR_PHP_FLAG:
+        return "php_flag";
+    case DIR_PHP_ADMIN_VALUE:
+        return "php_admin_value";
+    case DIR_PHP_ADMIN_FLAG:
+        return "php_admin_flag";
+    case DIR_ORDER:
+        return "Order";
+    case DIR_ALLOW_FROM:
+        return "Allow from";
+    case DIR_DENY_FROM:
+        return "Deny from";
+    case DIR_REDIRECT:
+        return "Redirect";
+    case DIR_REDIRECT_MATCH:
+        return "RedirectMatch";
+    case DIR_ERROR_DOCUMENT:
+        return "ErrorDocument";
+    case DIR_FALLBACK_RESOURCE:
+        return "FallbackResource";
+    case DIR_FILES_MATCH:
+        return "FilesMatch";
+    case DIR_EXPIRES_ACTIVE:
+        return "ExpiresActive";
+    case DIR_EXPIRES_BY_TYPE:
+        return "ExpiresByType";
+    case DIR_SETENV:
+        return "SetEnv";
+    case DIR_SETENVIF:
+        return "SetEnvIf";
+    case DIR_BROWSER_MATCH:
+        return "BrowserMatch";
+    case DIR_BRUTE_FORCE_PROTECTION:
+        return "BruteForceProtection";
+    case DIR_BRUTE_FORCE_ALLOWED_ATTEMPTS:
+        return "BruteForceAllowedAttempts";
+    case DIR_BRUTE_FORCE_WINDOW:
+        return "BruteForceWindow";
+    case DIR_BRUTE_FORCE_ACTION:
+        return "BruteForceAction";
+    case DIR_BRUTE_FORCE_THROTTLE_DURATION:
+        return "BruteForceThrottleDuration";
     /* v2 types */
-    case DIR_IFMODULE:                      return "IfModule";
-    case DIR_OPTIONS:                       return "Options";
-    case DIR_FILES:                         return "Files";
-    case DIR_HEADER_ALWAYS_SET:             return "Header always set";
-    case DIR_HEADER_ALWAYS_UNSET:           return "Header always unset";
-    case DIR_HEADER_ALWAYS_APPEND:          return "Header always append";
-    case DIR_HEADER_ALWAYS_MERGE:           return "Header always merge";
-    case DIR_HEADER_ALWAYS_ADD:             return "Header always add";
-    case DIR_EXPIRES_DEFAULT:               return "ExpiresDefault";
-    case DIR_REQUIRE_ALL_GRANTED:           return "Require all granted";
-    case DIR_REQUIRE_ALL_DENIED:            return "Require all denied";
-    case DIR_REQUIRE_IP:                    return "Require ip";
-    case DIR_REQUIRE_NOT_IP:                return "Require not ip";
-    case DIR_REQUIRE_ANY_OPEN:              return "RequireAny";
-    case DIR_REQUIRE_ALL_OPEN:              return "RequireAll";
-    case DIR_LIMIT:                         return "Limit";
-    case DIR_LIMIT_EXCEPT:                  return "LimitExcept";
-    case DIR_AUTH_TYPE:                      return "AuthType";
-    case DIR_AUTH_NAME:                      return "AuthName";
-    case DIR_AUTH_USER_FILE:                 return "AuthUserFile";
-    case DIR_REQUIRE_VALID_USER:            return "Require valid-user";
-    case DIR_REQUIRE_USER:                  return "Require user";
-    case DIR_REQUIRE_GROUP:                 return "Require group";
-    case DIR_REQUIRE_ENV:                  return "Require env";
-    case DIR_ADD_HANDLER:                   return "AddHandler";
-    case DIR_SET_HANDLER:                   return "SetHandler";
-    case DIR_REMOVE_TYPE:                  return "RemoveType";
-    case DIR_REMOVE_HANDLER:               return "RemoveHandler";
-    case DIR_ACTION:                       return "Action";
-    case DIR_ADD_TYPE:                      return "AddType";
-    case DIR_DIRECTORY_INDEX:               return "DirectoryIndex";
-    case DIR_FORCE_TYPE:                    return "ForceType";
-    case DIR_ADD_ENCODING:                  return "AddEncoding";
-    case DIR_ADD_CHARSET:                   return "AddCharset";
-    case DIR_BRUTE_FORCE_X_FORWARDED_FOR:   return "BruteForceXForwardedFor";
-    case DIR_BRUTE_FORCE_WHITELIST:         return "BruteForceWhitelist";
-    case DIR_BRUTE_FORCE_PROTECT_PATH:      return "BruteForceProtectPath";
-    case DIR_BRUTE_FORCE_TRUSTED_PROXY:     return "BruteForceTrustedProxy";
-    case DIR_SETENVIF_NOCASE:               return "SetEnvIfNoCase";
-    case DIR_HEADER_EDIT:                   return "Header edit";
-    case DIR_HEADER_EDIT_STAR:              return "Header edit*";
-    case DIR_HEADER_ALWAYS_EDIT:            return "Header always edit";
-    case DIR_HEADER_ALWAYS_EDIT_STAR:       return "Header always edit*";
-    case DIR_REWRITE_ENGINE:                return "RewriteEngine";
-    case DIR_REWRITE_BASE:                  return "RewriteBase";
-    case DIR_REWRITE_COND:                  return "RewriteCond";
-    case DIR_REWRITE_RULE:                  return "RewriteRule";
-    case DIR_ADD_DEFAULT_CHARSET:           return "AddDefaultCharset";
-    case DIR_DEFAULT_TYPE:                  return "DefaultType";
-    case DIR_SATISFY:                       return "Satisfy";
-    case DIR_REWRITE_OPTIONS:               return "RewriteOptions";
-    case DIR_REWRITE_MAP:                   return "RewriteMap";
-    case DIR_IF:                            return "If";
-    case DIR_ELSEIF:                        return "ElseIf";
-    case DIR_ELSE:                          return "Else";
-    default:                                return "Unknown";
+    case DIR_IFMODULE:
+        return "IfModule";
+    case DIR_OPTIONS:
+        return "Options";
+    case DIR_FILES:
+        return "Files";
+    case DIR_HEADER_ALWAYS_SET:
+        return "Header always set";
+    case DIR_HEADER_ALWAYS_UNSET:
+        return "Header always unset";
+    case DIR_HEADER_ALWAYS_APPEND:
+        return "Header always append";
+    case DIR_HEADER_ALWAYS_MERGE:
+        return "Header always merge";
+    case DIR_HEADER_ALWAYS_ADD:
+        return "Header always add";
+    case DIR_EXPIRES_DEFAULT:
+        return "ExpiresDefault";
+    case DIR_REQUIRE_ALL_GRANTED:
+        return "Require all granted";
+    case DIR_REQUIRE_ALL_DENIED:
+        return "Require all denied";
+    case DIR_REQUIRE_IP:
+        return "Require ip";
+    case DIR_REQUIRE_NOT_IP:
+        return "Require not ip";
+    case DIR_REQUIRE_ANY_OPEN:
+        return "RequireAny";
+    case DIR_REQUIRE_ALL_OPEN:
+        return "RequireAll";
+    case DIR_LIMIT:
+        return "Limit";
+    case DIR_LIMIT_EXCEPT:
+        return "LimitExcept";
+    case DIR_AUTH_TYPE:
+        return "AuthType";
+    case DIR_AUTH_NAME:
+        return "AuthName";
+    case DIR_AUTH_USER_FILE:
+        return "AuthUserFile";
+    case DIR_REQUIRE_VALID_USER:
+        return "Require valid-user";
+    case DIR_REQUIRE_USER:
+        return "Require user";
+    case DIR_REQUIRE_GROUP:
+        return "Require group";
+    case DIR_REQUIRE_ENV:
+        return "Require env";
+    case DIR_ADD_HANDLER:
+        return "AddHandler";
+    case DIR_SET_HANDLER:
+        return "SetHandler";
+    case DIR_REMOVE_TYPE:
+        return "RemoveType";
+    case DIR_REMOVE_HANDLER:
+        return "RemoveHandler";
+    case DIR_ACTION:
+        return "Action";
+    case DIR_ADD_TYPE:
+        return "AddType";
+    case DIR_DIRECTORY_INDEX:
+        return "DirectoryIndex";
+    case DIR_FORCE_TYPE:
+        return "ForceType";
+    case DIR_ADD_ENCODING:
+        return "AddEncoding";
+    case DIR_ADD_CHARSET:
+        return "AddCharset";
+    case DIR_BRUTE_FORCE_X_FORWARDED_FOR:
+        return "BruteForceXForwardedFor";
+    case DIR_BRUTE_FORCE_WHITELIST:
+        return "BruteForceWhitelist";
+    case DIR_BRUTE_FORCE_PROTECT_PATH:
+        return "BruteForceProtectPath";
+    case DIR_BRUTE_FORCE_TRUSTED_PROXY:
+        return "BruteForceTrustedProxy";
+    case DIR_SETENVIF_NOCASE:
+        return "SetEnvIfNoCase";
+    case DIR_HEADER_EDIT:
+        return "Header edit";
+    case DIR_HEADER_EDIT_STAR:
+        return "Header edit*";
+    case DIR_HEADER_ALWAYS_EDIT:
+        return "Header always edit";
+    case DIR_HEADER_ALWAYS_EDIT_STAR:
+        return "Header always edit*";
+    case DIR_REWRITE_ENGINE:
+        return "RewriteEngine";
+    case DIR_REWRITE_BASE:
+        return "RewriteBase";
+    case DIR_REWRITE_COND:
+        return "RewriteCond";
+    case DIR_REWRITE_RULE:
+        return "RewriteRule";
+    case DIR_ADD_DEFAULT_CHARSET:
+        return "AddDefaultCharset";
+    case DIR_DEFAULT_TYPE:
+        return "DefaultType";
+    case DIR_SATISFY:
+        return "Satisfy";
+    case DIR_REWRITE_OPTIONS:
+        return "RewriteOptions";
+    case DIR_REWRITE_MAP:
+        return "RewriteMap";
+    case DIR_IF:
+        return "If";
+    case DIR_ELSEIF:
+        return "ElseIf";
+    case DIR_ELSE:
+        return "Else";
+    default:
+        return "Unknown";
     }
 }
 
@@ -477,8 +1049,7 @@ static int mod_htaccess_init(lsi_module_t *module)
 
     /* Initialize cache */
     if (htaccess_cache_init(MOD_HTACCESS_CACHE_BUCKETS) != 0) {
-        lsi_log(NULL, LSI_LOG_ERROR,
-                "mod_htaccess: failed to initialize cache");
+        lsi_log(NULL, LSI_LOG_ERROR, "mod_htaccess: failed to initialize cache");
         return LSI_ERROR;
     }
 
@@ -494,8 +1065,7 @@ static int mod_htaccess_init(lsi_module_t *module)
      * not via lsi_register_hook() calls.  OLS reads the array at load time. */
 
     /* Detect RewriteRule support (requires custom OLS with rewrite patch) */
-    if (g_api && g_api->parse_rewrite_rules &&
-        g_api->exec_rewrite_rules && g_api->free_rewrite_rules) {
+    if (lsiapi_has_rewrite_extensions()) {
         lsi_log(NULL, LSI_LOG_INFO,
                 "mod_htaccess: RewriteRule support enabled (custom OLS detected)");
     } else {
@@ -505,7 +1075,7 @@ static int mod_htaccess_init(lsi_module_t *module)
     }
 
     /* Detect PHPConfig support */
-    if (g_api && g_api->set_php_config_value) {
+    if (lsiapi_has_php_config_extensions()) {
         lsi_log(NULL, LSI_LOG_INFO,
                 "mod_htaccess: PHPConfig native API enabled (custom OLS detected)");
     } else {
@@ -542,8 +1112,7 @@ int mod_htaccess_cleanup(lsi_module_t *module)
  * Combines legacy Order/Allow/Deny with modern Require ip/not ip/RequireAny/RequireAll.
  * Returns 1 if access should be denied, 0 otherwise.
  */
-static int container_acl_denies(const htaccess_directive_t *children,
-                                lsi_session_t *session,
+static int container_acl_denies(const htaccess_directive_t *children, lsi_session_t *session,
                                 const char *client_ip)
 {
     int has_require_all_granted = 0;
@@ -582,9 +1151,10 @@ static int container_acl_denies(const htaccess_directive_t *children,
                     }
                     if (should_eval) {
                         branch_taken = 1;
-                        int rc = container_acl_denies(d->data.if_block.children,
-                                                       session, client_ip);
-                        if (rc) return 1;
+                        int rc =
+                            container_acl_denies(d->data.if_block.children, session, client_ip);
+                        if (rc)
+                            return 1;
                     }
                 }
                 d = d->next;
@@ -597,9 +1167,9 @@ static int container_acl_denies(const htaccess_directive_t *children,
             int mlen = 0;
             const char *meth = lsi_session_get_method(session, &mlen);
             if (meth && limit_should_exec(child, meth)) {
-                int rc = container_acl_denies(child->data.limit.children,
-                                               session, client_ip);
-                if (rc) return 1;
+                int rc = container_acl_denies(child->data.limit.children, session, client_ip);
+                if (rc)
+                    return 1;
             }
             break;
         }
@@ -614,8 +1184,8 @@ static int container_acl_denies(const htaccess_directive_t *children,
 
     /* If there are Require ip/not ip/valid-user/RequireAny/RequireAll, delegate to exec_require */
     if (has_require_directives) {
-        int rc = exec_require(session, children, client_ip,
-                              check_auth_credentials(session, children));
+        int rc =
+            exec_require(session, children, client_ip, check_auth_credentials(session, children));
         if (rc == LSI_ERROR)
             return 1;
         return 0;
@@ -651,12 +1221,10 @@ static int container_acl_denies(const htaccess_directive_t *children,
  *
  * exec_fn receives session + directive; returns void (best-effort).
  */
-typedef int (*if_child_exec_fn)(lsi_session_t *session,
-                                  const htaccess_directive_t *child);
+typedef int (*if_child_exec_fn)(lsi_session_t *session, const htaccess_directive_t *child);
 
-static int eval_if_chain(lsi_session_t *session,
-                           const htaccess_directive_t **cursor,
-                           if_child_exec_fn exec_fn)
+static int eval_if_chain(lsi_session_t *session, const htaccess_directive_t **cursor,
+                         if_child_exec_fn exec_fn)
 {
     const htaccess_directive_t *d = *cursor;
     int branch_taken = 0;
@@ -668,10 +1236,13 @@ static int eval_if_chain(lsi_session_t *session,
         int result = eval_expr(session, expr);
         if (result > 0) {
             branch_taken = 1;
-            for (const htaccess_directive_t *child = d->data.if_block.children;
-                 child; child = child->next) {
+            for (const htaccess_directive_t *child = d->data.if_block.children; child;
+                 child = child->next) {
                 int rc = exec_fn(session, child);
-                if (rc != 0) { terminal = rc; break; }
+                if (rc != 0) {
+                    terminal = rc;
+                    break;
+                }
             }
         }
         d = d->next;
@@ -685,18 +1256,24 @@ static int eval_if_chain(lsi_session_t *session,
                 int result = eval_expr(session, expr);
                 if (result > 0) {
                     branch_taken = 1;
-                    for (const htaccess_directive_t *child = d->data.if_block.children;
-                         child; child = child->next) {
+                    for (const htaccess_directive_t *child = d->data.if_block.children; child;
+                         child = child->next) {
                         int rc = exec_fn(session, child);
-                        if (rc != 0) { terminal = rc; break; }
+                        if (rc != 0) {
+                            terminal = rc;
+                            break;
+                        }
                     }
                 }
             } else { /* DIR_ELSE */
                 branch_taken = 1;
-                for (const htaccess_directive_t *child = d->data.if_block.children;
-                     child; child = child->next) {
+                for (const htaccess_directive_t *child = d->data.if_block.children; child;
+                     child = child->next) {
                     int rc = exec_fn(session, child);
-                    if (rc != 0) { terminal = rc; break; }
+                    if (rc != 0) {
+                        terminal = rc;
+                        break;
+                    }
                 }
             }
         }
@@ -711,8 +1288,7 @@ static int eval_if_chain(lsi_session_t *session,
  * Request-phase child executor for If/ElseIf/Else children.
  * Handles SetEnv, RequestHeader, PHP directives within conditional blocks.
  */
-static int exec_if_child_request(lsi_session_t *session,
-                                   const htaccess_directive_t *child)
+static int exec_if_child_request(lsi_session_t *session, const htaccess_directive_t *child)
 {
     int rc;
     switch (child->type) {
@@ -784,8 +1360,7 @@ static int exec_if_child_request(lsi_session_t *session,
          * (processRuleSet) that only sees top-level directives.
          * Log once to help debugging; not an error since most real-world
          * .htaccess files don't put RewriteRule inside <If>. */
-        lsi_log(session, LSI_LOG_DEBUG,
-                "mod_htaccess: Rewrite inside <If> not supported, ignored");
+        lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: Rewrite inside <If> not supported, ignored");
         return 0;
     default:
         return 0;
@@ -796,8 +1371,7 @@ static int exec_if_child_request(lsi_session_t *session,
  * Response-phase child executor for If/ElseIf/Else children.
  * Handles Header, ErrorDocument, and MIME directives within conditional blocks.
  */
-static int exec_if_child_response(lsi_session_t *session,
-                                    const htaccess_directive_t *child)
+static int exec_if_child_response(lsi_session_t *session, const htaccess_directive_t *child)
 {
     switch (child->type) {
     case DIR_HEADER_SET:
@@ -827,8 +1401,7 @@ static int exec_if_child_response(lsi_session_t *session,
             int ct_len = 0;
             const char *ct = lsi_session_get_resp_content_type(session, &ct_len);
             if (!ct || ct_len == 0)
-                lsi_session_set_resp_content_type(session,
-                    child->value, (int)strlen(child->value));
+                lsi_session_set_resp_content_type(session, child->value, (int)strlen(child->value));
         }
         return 0;
     case DIR_ADD_DEFAULT_CHARSET:
@@ -839,8 +1412,7 @@ static int exec_if_child_response(lsi_session_t *session,
             if (ct && ct_len > 5 && strncasecmp(ct, "text/", 5) == 0 &&
                 !strcasestr(ct, "charset=")) {
                 char buf[256];
-                int blen = snprintf(buf, sizeof(buf), "%.*s; charset=%s",
-                                    ct_len, ct, child->value);
+                int blen = snprintf(buf, sizeof(buf), "%.*s; charset=%s", ct_len, ct, child->value);
                 if (blen > 0 && blen < (int)sizeof(buf))
                     lsi_session_set_resp_content_type(session, buf, blen);
             }
@@ -851,21 +1423,24 @@ static int exec_if_child_response(lsi_session_t *session,
         int uri_len = 0;
         const char *uri = lsi_session_get_uri(session, &uri_len);
         const char *fn = extract_filename(uri, uri_len);
-        if (fn) exec_add_type(session, child, fn);
+        if (fn)
+            exec_add_type(session, child, fn);
         return 0;
     }
     case DIR_ADD_ENCODING: {
         int uri_len = 0;
         const char *uri = lsi_session_get_uri(session, &uri_len);
         const char *fn = extract_filename(uri, uri_len);
-        if (fn) exec_add_encoding(session, child, fn);
+        if (fn)
+            exec_add_encoding(session, child, fn);
         return 0;
     }
     case DIR_ADD_CHARSET: {
         int uri_len = 0;
         const char *uri = lsi_session_get_uri(session, &uri_len);
         const char *fn = extract_filename(uri, uri_len);
-        if (fn) exec_add_charset(session, child, fn);
+        if (fn)
+            exec_add_charset(session, child, fn);
         return 0;
     }
     case DIR_EXPIRES_ACTIVE:
@@ -906,11 +1481,38 @@ static int exec_if_child_response(lsi_session_t *session,
  *    e. Brute force protection
  * 5. Free directives and return
  */
+static int on_uri_map_early(lsi_session_t *session)
+{
+    int doc_root_len = 0;
+    const char *doc_root = lsi_session_get_doc_root(session, &doc_root_len);
+    if (!doc_root || doc_root_len <= 0)
+        return LSI_OK;
+
+    int uri_len = 0;
+    const char *uri = lsi_session_get_uri(session, &uri_len);
+    if (!uri || uri_len <= 0)
+        return LSI_OK;
+
+    char *target_dir = build_target_dir(doc_root, doc_root_len, uri, uri_len);
+    if (!target_dir)
+        return LSI_OK; /* main pass re-runs the checks and denies */
+
+    htaccess_directive_t *directives = htaccess_dirwalk(session, doc_root, target_dir);
+    free(target_dir);
+    if (!directives)
+        return LSI_OK;
+
+    exec_modsec_bridge(session, directives);
+    htaccess_directives_free(directives);
+    return LSI_OK;
+}
+
 static int on_uri_map(lsi_session_t *session)
 {
-    /* Clear any stale per-request cache from a previous request.
-     * OLS may recycle session pointers, so a stale entry keyed by the
-     * same pointer value could leak directives from a prior request. */
+    /* New request: bump the generation counter and clear any stale cache.
+     * OLS may recycle session pointers, so entries are validated by both
+     * pointer and sequence number (see req_cache_get). */
+    req_seq_counter++;
     req_cache_clear();
 
     /* Reset per-request state */
@@ -919,16 +1521,14 @@ static int on_uri_map(lsi_session_t *session)
     int doc_root_len = 0;
     const char *doc_root = lsi_session_get_doc_root(session, &doc_root_len);
     if (!doc_root || doc_root_len <= 0) {
-        lsi_log(session, LSI_LOG_DEBUG,
-                "mod_htaccess: no document root, skipping");
+        lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: no document root, skipping");
         return LSI_OK;
     }
 
     int uri_len = 0;
     const char *uri = lsi_session_get_uri(session, &uri_len);
     if (!uri || uri_len <= 0) {
-        lsi_log(session, LSI_LOG_DEBUG,
-                "mod_htaccess: no request URI, skipping");
+        lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: no request URI, skipping");
         return LSI_OK;
     }
 
@@ -939,8 +1539,7 @@ static int on_uri_map(lsi_session_t *session)
         const char *fname = extract_filename(uri, uri_len);
         if (fname && fname[0] == '.' && fname[1] == 'h' && fname[2] == 't') {
             lsi_log(session, LSI_LOG_INFO,
-                    "mod_htaccess: blocked access to %.*s (protected .ht* file)",
-                    uri_len, uri);
+                    "mod_htaccess: blocked access to %.*s (protected .ht* file)", uri_len, uri);
             lsi_session_set_status(session, 403);
             lsi_session_end_resp(session);
             return LSI_DENY;
@@ -956,7 +1555,8 @@ static int on_uri_map(lsi_session_t *session)
         int org_len = 0;
         if (g_api && g_api->get_req_org_uri) {
             org_len = g_api->get_req_org_uri(session, org_uri, sizeof(org_uri) - 1);
-            if (org_len > 0) org_uri[org_len] = '\0';
+            if (org_len > 0)
+                org_uri[org_len] = '\0';
         }
         const char *check_uri = (org_len > 0) ? org_uri : uri;
         int check_len = (org_len > 0) ? org_len : uri_len;
@@ -969,12 +1569,14 @@ static int on_uri_map(lsi_session_t *session)
                 int hi = check_uri[i + 1];
                 int lo = check_uri[i + 2];
                 /* Convert hex digits */
-                int h = (hi >= '0' && hi <= '9') ? hi - '0' :
-                         (hi >= 'a' && hi <= 'f') ? hi - 'a' + 10 :
-                         (hi >= 'A' && hi <= 'F') ? hi - 'A' + 10 : -1;
-                int l = (lo >= '0' && lo <= '9') ? lo - '0' :
-                         (lo >= 'a' && lo <= 'f') ? lo - 'a' + 10 :
-                         (lo >= 'A' && lo <= 'F') ? lo - 'A' + 10 : -1;
+                int h = (hi >= '0' && hi <= '9')   ? hi - '0'
+                        : (hi >= 'a' && hi <= 'f') ? hi - 'a' + 10
+                        : (hi >= 'A' && hi <= 'F') ? hi - 'A' + 10
+                                                   : -1;
+                int l = (lo >= '0' && lo <= '9')   ? lo - '0'
+                        : (lo >= 'a' && lo <= 'f') ? lo - 'a' + 10
+                        : (lo >= 'A' && lo <= 'F') ? lo - 'A' + 10
+                                                   : -1;
                 if (h >= 0 && l >= 0) {
                     decoded[di++] = (char)((h << 4) | l);
                     i += 2;
@@ -992,10 +1594,10 @@ static int on_uri_map(lsi_session_t *session)
             if (decoded[i] == '.' && decoded[i + 1] == '.') {
                 /* Verify it's a path segment boundary */
                 int before_ok = (i == 0 || decoded[i - 1] == '/');
-                int after_ok = (i + 2 >= di || decoded[i + 2] == '/' || decoded[i + 2] == '?' || decoded[i + 2] == '\0');
+                int after_ok = (i + 2 >= di || decoded[i + 2] == '/' || decoded[i + 2] == '?' ||
+                                decoded[i + 2] == '\0');
                 if (before_ok && after_ok) {
-                    lsi_log(session, LSI_LOG_INFO,
-                            "mod_htaccess: blocked path traversal: %.*s",
+                    lsi_log(session, LSI_LOG_INFO, "mod_htaccess: blocked path traversal: %.*s",
                             check_len, check_uri);
                     lsi_session_set_status(session, 403);
                     lsi_session_end_resp(session);
@@ -1017,15 +1619,15 @@ static int on_uri_map(lsi_session_t *session)
             const char *scan = uploads + 20; /* skip "/wp-content/uploads/" */
             while (scan < uri_end) {
                 const char *dot = mem_find(scan, (int)(uri_end - scan), ".php");
-                if (!dot) break;
+                if (!dot)
+                    break;
                 /* Check it's a real extension: followed by end, /, ? or more
                  * extension. dot[4] is only valid when within bounds. */
                 const char *after_p = dot + 4;
                 char after = (after_p < uri_end) ? *after_p : '\0';
-                if (after == '\0' || after == '/' || after == '?' ||
-                    after == '5' || after == '7') { /* .php5, .php7 */
-                    lsi_log(session, LSI_LOG_INFO,
-                            "mod_htaccess: blocked PHP in uploads: %.*s",
+                if (after == '\0' || after == '/' || after == '?' || after == '5' ||
+                    after == '7') { /* .php5, .php7 */
+                    lsi_log(session, LSI_LOG_INFO, "mod_htaccess: blocked PHP in uploads: %.*s",
                             uri_len, uri);
                     lsi_session_set_status(session, 403);
                     lsi_session_end_resp(session);
@@ -1037,8 +1639,7 @@ static int on_uri_map(lsi_session_t *session)
             int uploads_len = (int)(uri_end - uploads);
             if (mem_find(uploads, uploads_len, ".phtml") ||
                 mem_find(uploads, uploads_len, ".phar")) {
-                lsi_log(session, LSI_LOG_INFO,
-                        "mod_htaccess: blocked PHP in uploads: %.*s",
+                lsi_log(session, LSI_LOG_INFO, "mod_htaccess: blocked PHP in uploads: %.*s",
                         uri_len, uri);
                 lsi_session_set_status(session, 403);
                 lsi_session_end_resp(session);
@@ -1062,15 +1663,12 @@ static int on_uri_map(lsi_session_t *session)
         return LSI_DENY;
     }
 
-
     /* Collect merged directives via DirWalker */
-    htaccess_directive_t *directives = htaccess_dirwalk(session, doc_root,
-                                                         target_dir);
+    htaccess_directive_t *directives = htaccess_dirwalk(session, doc_root, target_dir);
 
     if (!directives) {
-        lsi_log(session, LSI_LOG_DEBUG,
-                "mod_htaccess: no directives found for request");
-        req_cache_clear();  /* Prevent stale cache from prior request */
+        lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: no directives found for request");
+        req_cache_clear(); /* Prevent stale cache from prior request */
         free(target_dir);
         return LSI_OK;
     }
@@ -1102,16 +1700,11 @@ static int on_uri_map(lsi_session_t *session)
     {
         const htaccess_directive_t *scan;
         for (scan = directives; scan; scan = scan->next) {
-            if (scan->type == DIR_REQUIRE_ALL_GRANTED ||
-                scan->type == DIR_REQUIRE_ALL_DENIED ||
-                scan->type == DIR_REQUIRE_IP ||
-                scan->type == DIR_REQUIRE_NOT_IP ||
-                scan->type == DIR_REQUIRE_VALID_USER ||
-                scan->type == DIR_REQUIRE_USER ||
-                scan->type == DIR_REQUIRE_GROUP ||
-                scan->type == DIR_REQUIRE_ENV ||
-                scan->type == DIR_REQUIRE_ANY_OPEN ||
-                scan->type == DIR_REQUIRE_ALL_OPEN) {
+            if (scan->type == DIR_REQUIRE_ALL_GRANTED || scan->type == DIR_REQUIRE_ALL_DENIED ||
+                scan->type == DIR_REQUIRE_IP || scan->type == DIR_REQUIRE_NOT_IP ||
+                scan->type == DIR_REQUIRE_VALID_USER || scan->type == DIR_REQUIRE_USER ||
+                scan->type == DIR_REQUIRE_GROUP || scan->type == DIR_REQUIRE_ENV ||
+                scan->type == DIR_REQUIRE_ANY_OPEN || scan->type == DIR_REQUIRE_ALL_OPEN) {
                 has_require = 1;
                 break;
             }
@@ -1126,8 +1719,7 @@ static int on_uri_map(lsi_session_t *session)
         int rc = exec_require(session, directives, client_ip,
                               check_auth_credentials(session, directives));
         if (rc == LSI_ERROR) {
-            lsi_log(session, LSI_LOG_DEBUG,
-                    "mod_htaccess: access denied by Require");
+            lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: access denied by Require");
             lsi_session_set_status(session, 403);
             lsi_session_end_resp(session);
             free(target_dir);
@@ -1144,8 +1736,7 @@ static int on_uri_map(lsi_session_t *session)
                 lsi_log(session, LSI_LOG_DEBUG,
                         "mod_htaccess: ACL denied, trying auth (Satisfy Any)");
             } else {
-                lsi_log(session, LSI_LOG_DEBUG,
-                        "mod_htaccess: access denied by ACL");
+                lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: access denied by ACL");
                 lsi_session_set_status(session, 403);
                 lsi_session_end_resp(session);
                 free(target_dir);
@@ -1163,10 +1754,8 @@ static int on_uri_map(lsi_session_t *session)
             /* <Files exact_name> — exact filename match */
             if (fdir->type == DIR_FILES && fdir->name && req_filename) {
                 if (strcmp(fdir->name, req_filename) == 0) {
-                    if (container_acl_denies(fdir->data.files.children,
-                                             session, client_ip)) {
-                        lsi_log(session, LSI_LOG_DEBUG,
-                                "mod_htaccess: access denied by <Files %s>",
+                    if (container_acl_denies(fdir->data.files.children, session, client_ip)) {
+                        lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: access denied by <Files %s>",
                                 fdir->name);
                         lsi_session_set_status(session, 403);
                         lsi_session_end_resp(session);
@@ -1186,13 +1775,10 @@ static int on_uri_map(lsi_session_t *session)
                 }
             }
             /* <FilesMatch regex> — regex filename match */
-            if (fdir->type == DIR_FILES_MATCH && req_filename &&
-                fdir->data.files_match.pattern) {
-                int matched = fm_regex_matches(
-                    fdir->data.files_match.pattern, req_filename);
+            if (fdir->type == DIR_FILES_MATCH && req_filename && fdir->data.files_match.pattern) {
+                int matched = fm_regex_matches(fdir->data.files_match.pattern, req_filename);
                 if (matched == 1) {
-                    if (container_acl_denies(fdir->data.files_match.children,
-                                             session, client_ip)) {
+                    if (container_acl_denies(fdir->data.files_match.children, session, client_ip)) {
                         lsi_log(session, LSI_LOG_DEBUG,
                                 "mod_htaccess: access denied by <FilesMatch %s>",
                                 fdir->data.files_match.pattern);
@@ -1203,8 +1789,7 @@ static int on_uri_map(lsi_session_t *session)
                         return LSI_DENY;
                     }
                     /* Also check auth for container children */
-                    int auth_rc = exec_auth_basic(session,
-                                                   fdir->data.files_match.children);
+                    int auth_rc = exec_auth_basic(session, fdir->data.files_match.children);
                     if (auth_rc == LSI_ERROR) {
                         if (client_ip && ip_len > 0)
                             exec_brute_force(session, directives, client_ip, 1);
@@ -1225,8 +1810,7 @@ static int on_uri_map(lsi_session_t *session)
         if (dir->type == DIR_LIMIT || dir->type == DIR_LIMIT_EXCEPT) {
             if (http_method && limit_should_exec(dir, http_method)) {
                 /* Execute ACL children — full Require + legacy ACL support */
-                if (container_acl_denies(dir->data.limit.children,
-                                         session, client_ip)) {
+                if (container_acl_denies(dir->data.limit.children, session, client_ip)) {
                     lsi_session_set_status(session, 403);
                     lsi_session_end_resp(session);
                     free(target_dir);
@@ -1252,8 +1836,7 @@ static int on_uri_map(lsi_session_t *session)
      * When Require is present, Satisfy is ignored — always check auth. */
     if (satisfy_any && !acl_failed && !has_require) {
         /* Satisfy Any + ACL passed + no Require → skip auth check */
-        lsi_log(session, LSI_LOG_DEBUG,
-                "mod_htaccess: Satisfy Any, ACL passed, skipping auth");
+        lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: Satisfy Any, ACL passed, skipping auth");
     } else {
         int rc = exec_auth_basic(session, directives);
         if (rc == LSI_ERROR) {
@@ -1270,8 +1853,7 @@ static int on_uri_map(lsi_session_t *session)
                             "mod_htaccess: auth failed + brute force blocked");
                 }
             }
-            lsi_log(session, LSI_LOG_DEBUG,
-                    "mod_htaccess: authentication failed");
+            lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: authentication failed");
             free(target_dir);
             htaccess_directives_free(directives);
             return LSI_DENY;
@@ -1283,7 +1865,53 @@ static int on_uri_map(lsi_session_t *session)
         }
     }
 
-    /* (b) Redirects — execute before RewriteRule (Apache order:
+        /* (a-0) Rate limiting — check before any expensive processing */
+    for (dir = directives; dir != NULL; dir = dir->next) {
+        if (dir->type == DIR_RATE_LIMIT) {
+            int rl_rc = exec_ratelimit(session, dir);
+            if (rl_rc == RL_THROTTLED) {
+                /* 429 + Retry-After already served by the executor */
+                free(target_dir);
+                htaccess_directives_free(directives);
+                return LSI_DENY;
+            }
+            if (rl_rc != LSI_OK) {
+                lsi_log(session, LSI_LOG_WARN,
+                        "mod_htaccess: RateLimit exceeded for this client");
+                free(target_dir);
+                htaccess_directives_free(directives);
+                lsi_session_set_status(session, 403);
+                lsi_session_end_resp(session);
+                return LSI_DENY;
+            }
+        }
+    }
+
+    /* (a-1) Bot challenge — JS PoW gate; on BC_CHALLENGE the response
+     * has been fully served (challenge page), stop processing. */
+    {
+        static int bc_warned = 0;
+        int bc_rc = exec_bot_challenge(session, directives, target_dir);
+        if (bc_rc != BC_OFF && bc_secret_degraded() && !bc_warned) {
+            bc_warned = 1;
+            lsi_log(NULL, LSI_LOG_WARN,
+                    "mod_htaccess: BotChallenge secret unavailable at "
+                    "%s (not readable and not creatable by this user); "
+                    "credential cookies fall back to a weak key — make "
+                    "the directory writable by the web server user "
+                    "(packaging ships tmpfiles.d: /run/litehttpd)",
+                    getenv("LITEHTTPD_BOT_SECRET") && getenv("LITEHTTPD_BOT_SECRET")[0]
+                        ? getenv("LITEHTTPD_BOT_SECRET")
+                        : BC_SECRET_PATH);
+        }
+        if (bc_rc == BC_CHALLENGE) {
+            free(target_dir);
+            htaccess_directives_free(directives);
+            return LSI_DENY; /* response already ended by the gate */
+        }
+    }
+
+/* (b) Redirects — execute before RewriteRule (Apache order:
      * mod_alias runs in fixup phase before mod_rewrite) */
     for (dir = directives; dir != NULL; dir = dir->next) {
         int redir_rc = 0;
@@ -1295,8 +1923,7 @@ static int on_uri_map(lsi_session_t *session)
                 req_cache_store(session, directives);
                 return LSI_OK;
             } else if (redir_rc < 0) {
-                log_directive_fail(session, dir, "Redirect",
-                                   "execution error");
+                log_directive_fail(session, dir, "Redirect", "execution error");
             }
         } else if (dir->type == DIR_REDIRECT_MATCH) {
             redir_rc = exec_redirect_match(session, dir);
@@ -1306,8 +1933,7 @@ static int on_uri_map(lsi_session_t *session)
                 req_cache_store(session, directives);
                 return LSI_OK;
             } else if (redir_rc < 0) {
-                log_directive_fail(session, dir, "RedirectMatch",
-                                   "execution error");
+                log_directive_fail(session, dir, "RedirectMatch", "execution error");
             }
         }
     }
@@ -1317,17 +1943,56 @@ static int on_uri_map(lsi_session_t *session)
         int rw_rc = exec_rewrite_rules(session, directives);
         if (rw_rc > 0) {
             if (rw_rc >= 301 && rw_rc <= 399)
-                lsi_log(session, LSI_LOG_DEBUG,
-                        "mod_htaccess: rewrite redirect %d", rw_rc);
+                lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: rewrite redirect %d", rw_rc);
             else if (rw_rc == 403 || rw_rc == 410 || rw_rc == 500)
-                lsi_log(session, LSI_LOG_DEBUG,
-                        "mod_htaccess: rewrite returned %d", rw_rc);
+                lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: rewrite returned %d", rw_rc);
             else
-                lsi_log(session, LSI_LOG_DEBUG,
-                        "mod_htaccess: rewrite matched, URI changed");
+                lsi_log(session, LSI_LOG_DEBUG, "mod_htaccess: rewrite matched, URI changed");
             free(target_dir);
             req_cache_store(session, directives);
             return LSI_OK;
+        }
+    }
+
+    /* (c2) FallbackResource — front-controller fallback for requests that do
+     * not map to a real file or directory. Run after RewriteRule so native
+     * rewrite remains the preferred app router when available. */
+    {
+        const htaccess_directive_t *fallback = NULL;
+        for (dir = directives; dir != NULL; dir = dir->next) {
+            if (dir->type == DIR_FALLBACK_RESOURCE)
+                fallback = dir;
+        }
+
+        if (fallback && fallback->value &&
+            strcasecmp(fallback->value, "disabled") != 0 &&
+            fallback->value[0] == '/' &&
+            !strchr(fallback->value, '\r') &&
+            !strchr(fallback->value, '\n') &&
+            !strstr(fallback->value, "..")) {
+            int plain_len = uri_len;
+            for (int i = 0; i < uri_len; i++) {
+                if (uri[i] == '?') {
+                    plain_len = i;
+                    break;
+                }
+            }
+
+            char phys_path[4096];
+            int n = snprintf(phys_path, sizeof(phys_path), "%.*s%.*s",
+                             doc_root_len, doc_root, plain_len, uri);
+            if (n > 0 && n < (int)sizeof(phys_path) &&
+                !lsi_session_file_exists(session, phys_path)) {
+                int vlen = (int)strlen(fallback->value);
+                if (lsi_session_set_uri_internal(session, fallback->value, vlen) == LSI_OK) {
+                    lsi_log(session, LSI_LOG_DEBUG,
+                            "mod_htaccess: FallbackResource internal redirect to %s",
+                            fallback->value);
+                    free(target_dir);
+                    req_cache_store(session, directives);
+                    return LSI_OK;
+                }
+            }
         }
     }
 
@@ -1383,8 +2048,7 @@ static int on_uri_map(lsi_session_t *session)
 
     /* (e) RequestHeader — must run in request phase so backends see the values */
     for (dir = directives; dir != NULL; dir = dir->next) {
-        if (dir->type == DIR_REQUEST_HEADER_SET ||
-            dir->type == DIR_REQUEST_HEADER_UNSET) {
+        if (dir->type == DIR_REQUEST_HEADER_SET || dir->type == DIR_REQUEST_HEADER_UNSET) {
             int rh_rc = exec_request_header(session, dir);
             if (rh_rc == LSI_OK)
                 log_directive_ok(session, dir, directive_type_str(dir->type));
@@ -1394,10 +2058,16 @@ static int on_uri_map(lsi_session_t *session)
         }
     }
 
-    /* (f) Brute force protection — check-only (no counting).
-     * Counting only happens on auth failure (see a5 above). */
+    /* (f) Brute force protection.
+     * count=1: a POST counts as one attempt — form-login protection for
+     * apps (WordPress et al.) with no HTTP-level auth to fail; GETs are
+     * never counted (double-gated inside: count_attempt && is_post) and
+     * still get block-checked. HTTP-auth failures counted themselves at
+     * (a5) and returned before this point, so nothing is double-charged.
+     * Found in container e2e: without this call the POST-counting path
+     * had no caller outside the auth-fail branch and never blocked. */
     if (client_ip && ip_len > 0) {
-        int rc = exec_brute_force(session, directives, client_ip, 0);
+        int rc = exec_brute_force(session, directives, client_ip, 1);
         if (rc == LSI_ERROR) {
             lsi_log(session, LSI_LOG_DEBUG,
                     "mod_htaccess: request blocked by brute force protection");
@@ -1408,17 +2078,43 @@ static int on_uri_map(lsi_session_t *session)
     }
 
     /* (g) Options */
+    int indexes_state = 0;
     for (dir = directives; dir != NULL; dir = dir->next) {
-        if (dir->type == DIR_OPTIONS)
+        if (dir->type == DIR_OPTIONS) {
             exec_options(session, dir);
+            if (dir->data.options.indexes != 0)
+                indexes_state = dir->data.options.indexes;
+        }
     }
 
     /* (h) DirectoryIndex — only for directory requests (URI ends with /) */
+    int directory_index_found = 0;
     if (uri_len > 0 && uri[uri_len - 1] == '/') {
         for (dir = directives; dir != NULL; dir = dir->next) {
-            if (dir->type == DIR_DIRECTORY_INDEX)
-                exec_directory_index(session, dir, target_dir);
+            if (dir->type == DIR_DIRECTORY_INDEX) {
+                int di_rc = exec_directory_index(session, dir, target_dir);
+                if (di_rc > 0)
+                    directory_index_found = 1;
+                else if (di_rc == LSI_ERROR)
+                    log_directive_fail(session, dir, directive_type_str(dir->type),
+                                       "directory index error");
+            }
         }
+    }
+
+    /* Enforce Options -Indexes in the module as a fail-closed fallback only
+     * when no index file can satisfy the directory request. Patched OLS also
+     * handles this in the autoindex path, but stock OLS does not honor our
+     * per-request directory option hint. */
+    if (uri_len > 0 && uri[uri_len - 1] == '/' && indexes_state < 0 &&
+        !directory_index_found && !directory_has_common_index(session, target_dir)) {
+        lsi_log(session, LSI_LOG_DEBUG,
+                "mod_htaccess: directory listing denied by Options -Indexes");
+        lsi_session_set_status(session, 403);
+        lsi_session_end_resp(session);
+        free(target_dir);
+        htaccess_directives_free(directives);
+        return LSI_DENY;
     }
 
     /* (i) If/ElseIf/Else conditional blocks — request-phase children */
@@ -1449,13 +2145,16 @@ static int on_uri_map(lsi_session_t *session)
                 const htaccess_directive_t *d = scan;
                 while (d && (d->type == DIR_IF || d->type == DIR_ELSEIF || d->type == DIR_ELSE)) {
                     if (!branch_taken) {
-                        int should_eval = (d->type == DIR_ELSE) ? 1 :
-                            (eval_expr(session, (htaccess_expr_t *)d->data.if_block.condition) > 0);
+                        int should_eval =
+                            (d->type == DIR_ELSE)
+                                ? 1
+                                : (eval_expr(session,
+                                             (htaccess_expr_t *)d->data.if_block.condition) > 0);
                         if (should_eval) {
                             branch_taken = 1;
                             /* Full ACL check on matched branch */
-                            if (container_acl_denies(d->data.if_block.children,
-                                                      session, client_ip)) {
+                            if (container_acl_denies(d->data.if_block.children, session,
+                                                     client_ip)) {
                                 lsi_session_set_status(session, 403);
                                 lsi_session_end_resp(session);
                                 free(target_dir);
@@ -1493,15 +2192,18 @@ static int on_uri_map(lsi_session_t *session)
         /* Build the physical path for the requested URI */
         const char *q = uri;
         int plain_len = uri_len;
-        while (plain_len > 0 && q[plain_len - 1] != '?') plain_len--;
-        if (plain_len > 0) plain_len--; /* strip '?' */
-        else plain_len = uri_len;       /* no query string */
+        while (plain_len > 0 && q[plain_len - 1] != '?')
+            plain_len--;
+        if (plain_len > 0)
+            plain_len--; /* strip '?' */
+        else
+            plain_len = uri_len; /* no query string */
 
         /* Skip directory requests */
         if (plain_len > 0 && uri[plain_len - 1] != '/') {
             char phys_path[4096];
-            snprintf(phys_path, sizeof(phys_path), "%.*s%.*s",
-                     doc_root_len, doc_root, plain_len, uri);
+            snprintf(phys_path, sizeof(phys_path), "%.*s%.*s", doc_root_len, doc_root, plain_len,
+                     uri);
 
             /* Check if file does NOT exist */
             if (!lsi_session_file_exists(session, phys_path)) {
@@ -1521,11 +2223,9 @@ static int on_uri_map(lsi_session_t *session)
                      * val points into d->value which is freed by directives_free. */
                     if (strncasecmp(val, "http://", 7) == 0 ||
                         strncasecmp(val, "https://", 8) == 0) {
-                        if (!memchr(val, '\r', vlen) &&
-                            !memchr(val, '\n', vlen)) {
+                        if (!memchr(val, '\r', vlen) && !memchr(val, '\n', vlen)) {
                             lsi_session_set_status(session, 302);
-                            lsi_session_set_resp_header(session,
-                                "Location", 8, val, vlen);
+                            lsi_session_set_resp_header(session, "Location", 8, val, vlen);
                             free(target_dir);
                             htaccess_directives_free(directives);
                             lsi_session_end_resp(session);
@@ -1542,8 +2242,7 @@ static int on_uri_map(lsi_session_t *session)
                             break;
                         }
                         char err_path[4096];
-                        snprintf(err_path, sizeof(err_path), "%.*s%s",
-                                 doc_root_len, doc_root, val);
+                        snprintf(err_path, sizeof(err_path), "%.*s%s", doc_root_len, doc_root, val);
                         FILE *fp = fopen(err_path, "r");
                         if (fp) {
                             char fbuf[65536];
@@ -1551,8 +2250,7 @@ static int on_uri_map(lsi_session_t *session)
                             fclose(fp);
                             if (n > 0) {
                                 lsi_session_set_status(session, 404);
-                                lsi_session_set_resp_content_type(
-                                    session, "text/html", 9);
+                                lsi_session_set_resp_content_type(session, "text/html", 9);
                                 lsi_session_set_resp_body(session, fbuf, (int)n);
                                 free(target_dir);
                                 htaccess_directives_free(directives);
@@ -1567,7 +2265,8 @@ static int on_uri_map(lsi_session_t *session)
                     if (val[0] == '"') {
                         const char *text = val + 1;
                         int tlen = vlen - 1;
-                        if (tlen > 0 && text[tlen - 1] == '"') tlen--;
+                        if (tlen > 0 && text[tlen - 1] == '"')
+                            tlen--;
                         if (tlen > 0) {
                             lsi_session_set_status(session, 404);
                             lsi_session_set_resp_body(session, text, tlen);
@@ -1649,8 +2348,8 @@ static int on_http_begin(lsi_session_t *session)
             int val_len = (int)strlen(dir->value);
             lsi_session_set_uri_internal(session, dir->value, val_len);
             lsi_log(session, LSI_LOG_DEBUG,
-                    "mod_htaccess: ErrorDocument %d -> %s (internal redirect)",
-                    current_status, dir->value);
+                    "mod_htaccess: ErrorDocument %d -> %s (internal redirect)", current_status,
+                    dir->value);
             if (owned)
                 htaccess_directives_free(directives);
             return LSI_OK;
@@ -1661,18 +2360,22 @@ static int on_http_begin(lsi_session_t *session)
             int branch_taken = 0;
             while (d && (d->type == DIR_IF || d->type == DIR_ELSEIF || d->type == DIR_ELSE)) {
                 if (!branch_taken) {
-                    int should_eval = (d->type == DIR_ELSE) ? 1 :
-                        (eval_expr(session, (htaccess_expr_t *)d->data.if_block.condition) > 0);
+                    int should_eval =
+                        (d->type == DIR_ELSE)
+                            ? 1
+                            : (eval_expr(session, (htaccess_expr_t *)d->data.if_block.condition) >
+                               0);
                     if (should_eval) {
                         branch_taken = 1;
                         const htaccess_directive_t *ic;
                         for (ic = d->data.if_block.children; ic; ic = ic->next) {
                             if (ic->type == DIR_ERROR_DOCUMENT &&
-                                ic->data.error_doc.error_code == current_status &&
-                                ic->value && ic->value[0] == '/') {
+                                ic->data.error_doc.error_code == current_status && ic->value &&
+                                ic->value[0] == '/') {
                                 int vl = (int)strlen(ic->value);
                                 lsi_session_set_uri_internal(session, ic->value, vl);
-                                if (owned) htaccess_directives_free(directives);
+                                if (owned)
+                                    htaccess_directives_free(directives);
                                 return LSI_OK;
                             }
                         }
@@ -1692,26 +2395,27 @@ static int on_http_begin(lsi_session_t *session)
                 const htaccess_directive_t *fc;
                 for (fc = dir->data.files.children; fc; fc = fc->next) {
                     if (fc->type == DIR_ERROR_DOCUMENT &&
-                        fc->data.error_doc.error_code == current_status &&
-                        fc->value && fc->value[0] == '/') {
+                        fc->data.error_doc.error_code == current_status && fc->value &&
+                        fc->value[0] == '/') {
                         int vl = (int)strlen(fc->value);
                         lsi_session_set_uri_internal(session, fc->value, vl);
-                        if (owned) htaccess_directives_free(directives);
+                        if (owned)
+                            htaccess_directives_free(directives);
                         return LSI_OK;
                     }
                 }
             }
-            if (dir->type == DIR_FILES_MATCH && req_filename &&
-                dir->data.files_match.pattern) {
+            if (dir->type == DIR_FILES_MATCH && req_filename && dir->data.files_match.pattern) {
                 if (fm_regex_matches(dir->data.files_match.pattern, req_filename) == 1) {
                     const htaccess_directive_t *fc;
                     for (fc = dir->data.files_match.children; fc; fc = fc->next) {
                         if (fc->type == DIR_ERROR_DOCUMENT &&
-                            fc->data.error_doc.error_code == current_status &&
-                            fc->value && fc->value[0] == '/') {
+                            fc->data.error_doc.error_code == current_status && fc->value &&
+                            fc->value[0] == '/') {
                             int vl = (int)strlen(fc->value);
                             lsi_session_set_uri_internal(session, fc->value, vl);
-                            if (owned) htaccess_directives_free(directives);
+                            if (owned)
+                                htaccess_directives_free(directives);
                             return LSI_OK;
                         }
                     }
@@ -1813,14 +2517,20 @@ static int on_send_resp_header(lsi_session_t *session)
                 const htaccess_directive_t *child;
                 for (child = dir->data.files.children; child; child = child->next) {
                     switch (child->type) {
-                    case DIR_HEADER_SET: case DIR_HEADER_UNSET:
-                    case DIR_HEADER_APPEND: case DIR_HEADER_MERGE:
+                    case DIR_HEADER_SET:
+                    case DIR_HEADER_UNSET:
+                    case DIR_HEADER_APPEND:
+                    case DIR_HEADER_MERGE:
                     case DIR_HEADER_ADD:
-                    case DIR_HEADER_ALWAYS_SET: case DIR_HEADER_ALWAYS_UNSET:
-                    case DIR_HEADER_ALWAYS_APPEND: case DIR_HEADER_ALWAYS_MERGE:
+                    case DIR_HEADER_ALWAYS_SET:
+                    case DIR_HEADER_ALWAYS_UNSET:
+                    case DIR_HEADER_ALWAYS_APPEND:
+                    case DIR_HEADER_ALWAYS_MERGE:
                     case DIR_HEADER_ALWAYS_ADD:
-                    case DIR_HEADER_EDIT: case DIR_HEADER_EDIT_STAR:
-                    case DIR_HEADER_ALWAYS_EDIT: case DIR_HEADER_ALWAYS_EDIT_STAR:
+                    case DIR_HEADER_EDIT:
+                    case DIR_HEADER_EDIT_STAR:
+                    case DIR_HEADER_ALWAYS_EDIT:
+                    case DIR_HEADER_ALWAYS_EDIT_STAR:
                         exec_header(session, child);
                         break;
                     case DIR_ERROR_DOCUMENT:
@@ -1845,11 +2555,10 @@ static int on_send_resp_header(lsi_session_t *session)
                             if (ctype && ctl > 5 && strncasecmp(ctype, "text/", 5) == 0 &&
                                 !strcasestr(ctype, "charset=")) {
                                 char buf[256];
-                                int bl = snprintf(buf, sizeof(buf), "%.*s; charset=%s",
-                                                  ctl, ctype, child->value);
+                                int bl = snprintf(buf, sizeof(buf), "%.*s; charset=%s", ctl, ctype,
+                                                  child->value);
                                 if (bl > 0 && bl < (int)sizeof(buf))
-                                    lsi_session_set_resp_content_type(session,
-                                                                buf, bl);
+                                    lsi_session_set_resp_content_type(session, buf, bl);
                             }
                         }
                         break;
@@ -1858,8 +2567,8 @@ static int on_send_resp_header(lsi_session_t *session)
                             int ct_len = 0;
                             const char *ct = lsi_session_get_resp_content_type(session, &ct_len);
                             if (!ct || ct_len == 0)
-                                lsi_session_set_resp_content_type(session,
-                                    child->value, (int)strlen(child->value));
+                                lsi_session_set_resp_content_type(session, child->value,
+                                                                  (int)strlen(child->value));
                         }
                         break;
                     case DIR_IF:
@@ -1887,8 +2596,7 @@ static int on_send_resp_header(lsi_session_t *session)
             /* Nested If chains already executed inside exec_files_match
              * in original directive order via dispatch_child */
         } else if (fm_rc < 0) {
-            log_directive_fail(session, dir, "FilesMatch",
-                               "pattern match error");
+            log_directive_fail(session, dir, "FilesMatch", "pattern match error");
         }
         /* fm_rc == 0: no match, skip */
     }
@@ -1902,8 +2610,7 @@ static int on_send_resp_header(lsi_session_t *session)
             int ct_len = 0;
             const char *ct = lsi_session_get_resp_content_type(session, &ct_len);
             if (!ct || ct_len == 0) {
-                lsi_session_set_resp_content_type(session,
-                    dir->value, (int)strlen(dir->value));
+                lsi_session_set_resp_content_type(session, dir->value, (int)strlen(dir->value));
                 log_directive_ok(session, dir, "DefaultType");
             }
             break; /* singleton */
@@ -1923,10 +2630,10 @@ static int on_send_resp_header(lsi_session_t *session)
                     while (ext) {
                         /* Normalize: compare with or without leading dot */
                         const char *cmp = ext;
-                        if (cmp[0] == '.') cmp++;
+                        if (cmp[0] == '.')
+                            cmp++;
                         if (dot[1] && strcasecmp(dot + 1, cmp) == 0) {
-                            lsi_session_remove_resp_header(session,
-                                "Content-Type", 12);
+                            lsi_session_remove_resp_header(session, "Content-Type", 12);
                             log_directive_ok(session, dir, "RemoveType");
                             break;
                         }
@@ -1968,8 +2675,7 @@ static int on_send_resp_header(lsi_session_t *session)
             const char *ct = lsi_session_get_resp_content_type(session, &ct_len);
             /* Only apply to text/* without existing charset */
             /* Check if charset= already present (case-insensitive) */
-            if (ct && ct_len > 5 &&
-                strncasecmp(ct, "text/", 5) == 0) {
+            if (ct && ct_len > 5 && strncasecmp(ct, "text/", 5) == 0) {
                 int has_charset = 0;
                 for (int j = 0; j < ct_len - 7; j++) {
                     if (strncasecmp(ct + j, "charset=", 8) == 0) {
@@ -1979,8 +2685,7 @@ static int on_send_resp_header(lsi_session_t *session)
                 }
                 if (!has_charset) {
                     char buf[256];
-                    int n = snprintf(buf, sizeof(buf), "%.*s; charset=%s",
-                                     ct_len, ct, dir->value);
+                    int n = snprintf(buf, sizeof(buf), "%.*s; charset=%s", ct_len, ct, dir->value);
                     if (n > 0 && n < (int)sizeof(buf)) {
                         lsi_session_set_resp_content_type(session, buf, n);
                         log_directive_ok(session, dir, "AddDefaultCharset");
@@ -2014,8 +2719,7 @@ static int on_send_resp_header(lsi_session_t *session)
         /* Try dedicated Content-Type API first for OLS engine types */
         struct iovec ct_iov[1];
         int ct_count = g_api->get_resp_header((const lsi_session_t *)session,
-                                               LSI_RSPHDR_CONTENT_TYPE,
-                                               NULL, 0, ct_iov, 1);
+                                              LSI_RSPHDR_CONTENT_TYPE, NULL, 0, ct_iov, 1);
         if (ct_count > 0 && ct_iov[0].iov_len > 0) {
             /* iov data is NOT null-terminated — copy to buffer */
             ct_iov_len = (int)ct_iov[0].iov_len;
@@ -2030,7 +2734,10 @@ static int on_send_resp_header(lsi_session_t *session)
         content_type = lsi_session_get_resp_content_type(session, &ct_iov_len);
     if (!content_type)
         content_type = "application/octet-stream";
-    exec_expires(session, directives, content_type);
+        /* LSCache bridge: set X-LiteSpeed-Cache-Control from .htaccess */
+    exec_cache_bridge(session, directives);
+
+exec_expires(session, directives, content_type);
 
     /* (f) ErrorDocument directives.
      * NOTE: HTTP_BEGIN always fires with status=200 (before URI_MAP sets the
@@ -2046,8 +2753,7 @@ static int on_send_resp_header(lsi_session_t *session)
         if (ed_rc == 0)
             log_directive_ok(session, dir, "ErrorDocument");
         else if (ed_rc < 0)
-            log_directive_fail(session, dir, "ErrorDocument",
-                               "error document processing failed");
+            log_directive_fail(session, dir, "ErrorDocument", "error document processing failed");
     }
 
     /* (g) AddHandler / SetHandler / RemoveHandler / Action (no-op stubs) */
