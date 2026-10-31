@@ -284,11 +284,15 @@ rm -rf "$PACKAGE" libaio-libaio-0.3.113
 if [ -n "${LITEHTTPD_TP_DEPS_CACHE:-}" ]; then
     cp "$LITEHTTPD_TP_DEPS_CACHE/$PACKAGE.tar.gz" "$PACKAGE.tar.gz"
 else
-    wget --no-check-certificate https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz
-    mv libaio-libaio-0.3.113.tar.gz "$PACKAGE.tar.gz"
+    # pagure.io removed its archive endpoints; Debian serves the identical
+    # upstream git-tag tree from a stable CDN (inner dir: libaio-0.3.113)
+    wget --no-check-certificate https://deb.debian.org/debian/pool/main/liba/libaio/libaio_0.3.113.orig.tar.gz
+    mv libaio_0.3.113.orig.tar.gz "$PACKAGE.tar.gz"
 fi
 tar xzf "$PACKAGE.tar.gz"
-mv libaio-libaio-0.3.113 "$PACKAGE"
+# pagure archives unpack to libaio-libaio-0.3.113, Debian orig to
+# libaio-0.3.113 — accept either
+if [ -d libaio-libaio-0.3.113 ]; then mv libaio-libaio-0.3.113 "$PACKAGE"; fi
 rm -f "$PACKAGE.tar.gz"
 
 cd "$PACKAGE"

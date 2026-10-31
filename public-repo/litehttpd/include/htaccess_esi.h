@@ -17,8 +17,14 @@ extern "C" {
  * Loop protection: sub-requests carry X-LiteHttpd-Esi-Subrequest and the
  * module refuses dynamic fetches for marked requests. */
 #define ESI_DYN_MAX           16
-#define ESI_DYN_PER_MS_DFLT   1000
-#define ESI_DYN_TOTAL_MS_DFLT 2500
+/* Fragment budgets. The joiner's loopback sub-request can make the
+ * server spawn a COLD PHP process; on shared/loaded runners that spawn
+ * alone takes >1s (measured ~340ms warm on arm64, 2-3x slower on CI
+ * amd64). 3s/fragment and 8s/page keep the hard ceiling while letting
+ * cold first-hits complete instead of failing open. Override with
+ * LITEHTTPD_ESI_DYN_TIMEOUT_MS / LITEHTTPD_ESI_DYN_TOTAL_MS. */
+#define ESI_DYN_PER_MS_DFLT   3000
+#define ESI_DYN_TOTAL_MS_DFLT 8000
 #define ESI_DYN_BODY_MAX      (64 * 1024)
 #define ESI_SUBREQ_MARKER     "X-LiteHttpd-Esi-Subrequest"
 
