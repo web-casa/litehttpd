@@ -216,6 +216,54 @@ jobs:
           # the shared secret was created by the worker with mode 0600
           docker exec "$CT" sh -c 'test -s /var/run/litehttpd/botchallenge.secret && [ "$(stat -c %a /var/run/litehttpd/botchallenge.secret)" = 600 ]'
 
+      # ── Check 7: regression — protection strictness under load ──────
+      # Guards against two upstream OLS engine bug classes we must not
+      # inherit with our own implementations:
+      #  - litespeedtech/openlitespeed#533: the CAPTCHA gate was bypassed
+      #    non-deterministically (~1/3 of requests) while a challenge was
+      #    pending → soak our BotChallenge gate: EVERY request from a
+      #    non-verified client must be challenged (sequential + concurrent,
+      #    unique URLs, no content leaks).
+      #  - litespeedtech/openlitespeed#531: dynReqPerSec released the whole
+      #    backlog at the next timer tick instead of the configured rate →
+      #    hammer a cold RateLimit counter with 40-way concurrency and
+      #    assert the ceiling holds EXACTLY (allow = N + burst).
+      - name: E2E-7 regression strictness (ols#533 / ols#531 class)
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/gate $D/rl
+            echo gate-secret-content > $D/gate/index.html
+            echo rl-ok > $D/rl/index.html
+            printf "BotChallenge On\n" > $D/gate/.htaccess; chmod 644 $D/gate/.htaccess
+            printf "RateLimit 10/60 burst=5\n" > $D/rl/.htaccess; chmod 644 $D/rl/.htaccess
+            # cold the SHM rate counter: hard restart drops the anon segment
+            /usr/local/lsws/bin/lswsctrl stop >/dev/null 2>&1; sleep 2
+            /usr/local/lsws/bin/lswsctrl start >/dev/null 2>&1; sleep 3'
+          set -e
+          # ── 7a: gate soak, sequential (30 unique URLs) ──
+          chal=0; leak=0
+          for i in $(seq 1 30); do
+            body=$(curl -s -m 8 -A "curl/8" "http://127.0.0.1:8080/gate/index.html?u=$i")
+            echo "$body" | grep -q "function fnv" && chal=$((chal+1)) || true
+            echo "$body" | grep -q "gate-secret-content" && leak=$((leak+1)) || true
+          done
+          echo "7a sequential: challenged=$chal/30 leaks=$leak"
+          [ "$chal" -eq 30 ] && [ "$leak" -eq 0 ]
+          # ── 7a: gate soak, concurrent (10 parallel unique URLs) ──
+          seq 1 10 | xargs -P10 -I{} sh -c \
+            'curl -s -m 8 -A "curl/8" "http://127.0.0.1:8080/gate/index.html?c={}"' > /tmp/gate_conc.html
+          [ "$(grep -c "function fnv" /tmp/gate_conc.html)" -eq 10 ]
+          [ "$(grep -c "gate-secret-content" /tmp/gate_conc.html || true)" -eq 0 ]
+          echo "7a concurrent: 10/10 challenged, 0 leaks"
+          # ── 7b: cold RateLimit counter, 40-way concurrency, allow=15 ──
+          seq 1 40 | xargs -P40 -I{} curl -s -m 10 -o /dev/null -w "%{http_code}\n" \
+            http://127.0.0.1:8080/rl/index.html > /tmp/rl_codes.txt
+          ok=$(grep -c "^200$" /tmp/rl_codes.txt || true)
+          denied=$(grep -c "^403$" /tmp/rl_codes.txt || true)
+          echo "7b concurrency: successes=$ok denied=$denied (expect exactly 15/25)"
+          [ "$ok" -eq 15 ] && [ "$denied" -eq 25 ]
+
       - name: Collect evidence on failure
         if: failure()
         run: |
