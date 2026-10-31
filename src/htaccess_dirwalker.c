@@ -366,6 +366,9 @@ static int directives_match_for_override(const htaccess_directive_t *a,
     case DIR_BOT_CHALLENGE_TTL:
     case DIR_BOT_CHALLENGE_DIFFICULTY:
     case DIR_BOT_CHALLENGE_EXEMPT:
+    case DIR_BOT_CHALLENGE_TRUSTED_PROXY:
+    case DIR_BOT_CHALLENGE_PAGE:
+    case DIR_BOT_CHALLENGE_IF:
         return 1;
 
     /* Allow/Deny: match by value (CIDR or "all") */

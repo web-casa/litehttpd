@@ -148,14 +148,14 @@ TEST_F(BotChallengeTest, ChallengePageContainsPowParams)
 TEST_F(BotChallengeTest, OffByDefault)
 {
     htaccess_directive_t *d = mk(DIR_BOT_CHALLENGE, "off");
-    EXPECT_EQ(exec_bot_challenge(session_.handle(), d), BC_OFF);
+    EXPECT_EQ(exec_bot_challenge(session_.handle(), d, NULL), BC_OFF);
     free_list(d);
 }
 
 TEST_F(BotChallengeTest, NoCookieGetsChallenge)
 {
     htaccess_directive_t *d = mk(DIR_BOT_CHALLENGE, "on");
-    int rc = exec_bot_challenge(session_.handle(), d);
+    int rc = exec_bot_challenge(session_.handle(), d, NULL);
     EXPECT_EQ(rc, BC_CHALLENGE);
     EXPECT_EQ(session_.get_status_code(), 200);
     /* the challenge page with the PoW params was served */
@@ -171,7 +171,7 @@ TEST_F(BotChallengeTest, ValidCookiePasses)
     session_.add_request_header("Cookie",
                                 std::string("lhttpd_bot=") + cookie);
     htaccess_directive_t *d = mk(DIR_BOT_CHALLENGE, "on");
-    EXPECT_EQ(exec_bot_challenge(session_.handle(), d), BC_PASS);
+    EXPECT_EQ(exec_bot_challenge(session_.handle(), d, NULL), BC_PASS);
     free_list(d);
 }
 
@@ -182,6 +182,116 @@ TEST_F(BotChallengeTest, ExemptUaPasses)
                                    "(?i)(Googlebot|bingbot)");
     on->next = ex;
     session_.add_request_header("User-Agent", "Mozilla/5.0 Googlebot/2.1");
-    EXPECT_EQ(exec_bot_challenge(session_.handle(), on), BC_PASS);
+    EXPECT_EQ(exec_bot_challenge(session_.handle(), on, NULL), BC_PASS);
     free_list(on);
+}
+
+/* ── trusted-proxy effective IP ─────────────────────────────────── */
+
+TEST(BotEffectiveIp, TrustedPeerUsesRightmostXff)
+{
+    char out[64];
+    bc_pick_effective_ip("10.0.0.1", "1.2.3.4, 203.0.113.9",
+                         "10.0.0.0/8", out, sizeof(out));
+    EXPECT_STREQ(out, "203.0.113.9");
+}
+
+TEST(BotEffectiveIp, UntrustedPeerIgnoresXff)
+{
+    char out[64];
+    bc_pick_effective_ip("198.51.100.5", "1.2.3.4, 203.0.113.9",
+                         "10.0.0.0/8", out, sizeof(out));
+    EXPECT_STREQ(out, "198.51.100.5"); /* spoofable XFF never honored */
+}
+
+TEST(BotEffectiveIp, NoDirectiveMeansPeer)
+{
+    char out[64];
+    bc_pick_effective_ip("198.51.100.5", "1.2.3.4", NULL, out, sizeof(out));
+    EXPECT_STREQ(out, "198.51.100.5");
+    bc_pick_effective_ip("198.51.100.5", "1.2.3.4", "", out, sizeof(out));
+    EXPECT_STREQ(out, "198.51.100.5");
+}
+
+TEST(BotEffectiveIp, GarbageXffTokenFallsBackToPeer)
+{
+    char out[64];
+    bc_pick_effective_ip("10.0.0.1", "1.2.3.4, not-an-ip-at-all",
+                         "10.0.0.0/8", out, sizeof(out));
+    EXPECT_STREQ(out, "10.0.0.1");
+    bc_pick_effective_ip("10.0.0.1", "", "10.0.0.0/8", out, sizeof(out));
+    EXPECT_STREQ(out, "10.0.0.1");
+}
+
+/* ── JS escaping of the request URI ─────────────────────────────── */
+
+TEST(BotJsEscape, NeutralizesBreakouts)
+{
+    char out[256];
+    /* single quote, backslash, </script>, double quote all hex-escaped */
+    bc_js_escape("/a'b\\c</script>\"d", out, sizeof(out));
+    EXPECT_EQ(strchr(out, '\''), nullptr);
+    EXPECT_EQ(strchr(out, '"'), nullptr);
+    EXPECT_EQ(strstr(out, "<"), nullptr);
+    /* every backslash starts a \xHH escape — no lone raw backslash */
+    for (const char *p = out; (p = strchr(p, '\\')) != nullptr; p += 4) {
+        ASSERT_EQ(p[1], 'x');
+        ASSERT_TRUE((p[2] >= '0' && p[2] <= '9') ||
+                    (p[2] >= 'A' && p[2] <= 'F'));
+        ASSERT_TRUE((p[3] >= '0' && p[3] <= '9') ||
+                    (p[3] >= 'A' && p[3] <= 'F'));
+    }
+    /* every escape is \xHH — nothing outside [A-Za-z0-9/_?.=&%-~] */
+    for (const char *p = out; *p; p++) {
+        unsigned char c = (unsigned char)*p;
+        bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                    (c >= '0' && c <= '9') ||
+                    c == '/' || c == '_' || c == '?' || c == '.' ||
+                    c == '=' || c == '&' || c == '%' || c == '-' ||
+                    c == '~' || c == '\\';
+        EXPECT_TRUE(safe) << "raw char 0x" << std::hex << (int)c;
+    }
+    /* ordinary URIs pass through untouched */
+    char plain[128];
+    bc_js_escape("/shop/item?id=42&page=2", plain, sizeof(plain));
+    EXPECT_STREQ(plain, "/shop/item?id=42&page=2");
+}
+
+TEST(BotChallengePage, EscapesHostileUri)
+{
+    char page[3072];
+    ASSERT_GE(bc_build_challenge_page(page, sizeof(page),
+                                      "/x');</script>alert(1)//", "s1", 16), 0);
+    /* the hostile URI must not appear raw anywhere in the page */
+    EXPECT_EQ(strstr(page, "');</script>"), nullptr);
+    EXPECT_EQ(strstr(page, "</script>alert"), nullptr);
+    /* but the escaped form is present so the solver still navigates back */
+    EXPECT_NE(strstr(page, "\\x27"), nullptr);
+    EXPECT_NE(strstr(page, "\\x3C"), nullptr);
+}
+
+/* ── operator-supplied template ─────────────────────────────────── */
+
+TEST(BotTemplate, SubstitutesTokensAndEscapesUri)
+{
+    char out[512];
+    const char *tpl =
+        "<html>S=%{SALT} D=%{DIFF} U=%{URI} %{UNKNOWN} 100%</html>";
+    int n = bc_render_template(out, sizeof(out), tpl, "/a'b", "s9", 12);
+    ASSERT_GE(n, 0);
+    EXPECT_NE(strstr(out, "S=s9 D=12 U="), nullptr);
+    EXPECT_EQ(strchr(out, '\''), nullptr); /* URI quote escaped */
+    EXPECT_NE(strstr(out, "\\x27"), nullptr);
+    /* unknown token and bare % pass through untouched */
+    EXPECT_NE(strstr(out, "%{UNKNOWN}"), nullptr);
+    EXPECT_NE(strstr(out, "100%"), nullptr);
+    EXPECT_EQ(strstr(out, "%{SALT}"), nullptr);
+}
+
+TEST(BotTemplate, OverflowFailsClosed)
+{
+    char out[16];
+    const char *tpl = "%{URI}%{URI}%{URI}%{URI}%{URI}%{URI}";
+    EXPECT_EQ(bc_render_template(out, sizeof(out), tpl, "/long/path", "s", 8),
+              -1);
 }

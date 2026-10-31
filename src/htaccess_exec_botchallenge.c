@@ -4,6 +4,8 @@
 #include "htaccess_exec_botchallenge.h"
 #include "htaccess_botcrypto.h"
 #include "htaccess_regex.h"
+#include "htaccess_cidr.h"
+#include "htaccess_expr.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -211,12 +213,137 @@ int bc_check_cookie(const char *client_ip, const char *cookie_value)
     return 0;
 }
 
+/* ── effective client IP (trusted-proxy aware) ───────────────────── */
+
+/* compact IP sanity check (v4 dotted-quad or v6-ish with digits/:/. only) */
+static int bc_looks_like_ip(const char *s)
+{
+    if (!s || !*s)
+        return 0;
+    int digits = 0, dots = 0, colons = 0;
+    for (const char *p = s; *p; p++) {
+        if (*p == '.') dots++;
+        else if (*p == ':') colons++;
+        else if (*p >= '0' && *p <= '9') digits++;
+        else return 0;
+    }
+    return digits > 0 && (dots == 3 || colons >= 2);
+}
+
+/* rightmost XFF token — the address the trusted proxy APPENDED; the
+ * leftmost entries are client-supplied and spoofable (same rule as the
+ * brute-force engine). Returns a strdup'd validated IP or NULL. */
+static char *bc_xff_rightmost(const char *xff)
+{
+    if (!xff || !*xff)
+        return NULL;
+    const char *end = xff + strlen(xff);
+    while (end > xff && (end[-1] == ' ' || end[-1] == '\t'))
+        end--;
+    const char *start = end;
+    while (start > xff && start[-1] != ',')
+        start--;
+    while (start < end && (*start == ' ' || *start == '\t'))
+        start++;
+    if (start >= end || (size_t)(end - start) > 45)
+        return NULL;
+    char *ip = strndup(start, (size_t)(end - start));
+    if (ip && !bc_looks_like_ip(ip)) {
+        free(ip);
+        return NULL;
+    }
+    return ip;
+}
+
+/* space/comma separated IPv4 CIDR list membership */
+static int bc_ip_in_cidrs(const char *ip, const char *list)
+{
+    if (!ip || !list)
+        return 0;
+    cidr_v4_t ip_c, c;
+    if (cidr_parse(ip, &ip_c) != 0)
+        return 0;
+    char *copy = strdup(list);
+    if (!copy)
+        return 0;
+    int hit = 0;
+    char *sp = NULL;
+    for (char *tok = strtok_r(copy, " ,\t", &sp); tok;
+         tok = strtok_r(NULL, " ,\t", &sp)) {
+        if (cidr_parse(tok, &c) == 0 && cidr_match(&c, ip_c.network)) {
+            hit = 1;
+            break;
+        }
+    }
+    free(copy);
+    return hit;
+}
+
+/**
+ * Pick the IP the credential binds to. When the DIRECT peer is a
+ * configured trusted proxy, bind to the rightmost X-Forwarded-For token
+ * (validated as an IP); otherwise ignore XFF entirely and use the peer —
+ * a spoofable XFF must never rotate or share identity buckets.
+ * Returns 0 and fills out; never fails (falls back to peer/unknown).
+ */
+int bc_pick_effective_ip(const char *peer_ip, const char *xff,
+                         const char *trusted_cidrs, char *out,
+                         size_t out_sz)
+{
+    const char *chosen = peer_ip ? peer_ip : "unknown";
+    if (trusted_cidrs && trusted_cidrs[0] && peer_ip && peer_ip[0] &&
+        bc_ip_in_cidrs(peer_ip, trusted_cidrs) && xff && xff[0]) {
+        char *xff_ip = bc_xff_rightmost(xff);
+        if (xff_ip) {
+            snprintf(out, out_sz, "%s", xff_ip);
+            free(xff_ip);
+            return 0;
+        }
+    }
+    snprintf(out, out_sz, "%s", chosen);
+    return 0;
+}
+
 /* ── challenge page ──────────────────────────────────────────────── */
+
+/* Escape a string for embedding inside a single-quoted JS string in
+ * inline HTML: kills quote/backslash breakouts and </script> sequences.
+ * Hex-escapes every character that is not [A-Za-z0-9/_?.=&%-] — URI-
+ * safe characters pass through, everything else becomes \xHH. */
+int bc_js_escape(const char *in, char *out, size_t out_sz)
+{
+    if (!in || !out || out_sz == 0)
+        return -1;
+    static const char hex[] = "0123456789ABCDEF";
+    size_t o = 0;
+    for (const unsigned char *p = (const unsigned char *)in; *p; p++) {
+        unsigned char c = *p;
+        int safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                   (c >= '0' && c <= '9') ||
+                   c == '/' || c == '_' || c == '?' || c == '.' ||
+                   c == '=' || c == '&' || c == '%' || c == '-' || c == '~';
+        if (safe) {
+            if (o + 1 >= out_sz) return -1;
+            out[o++] = (char)c;
+        } else {
+            if (o + 4 >= out_sz) return -1;
+            out[o++] = '\\';
+            out[o++] = 'x';
+            out[o++] = hex[c >> 4];
+            out[o++] = hex[c & 0xF];
+        }
+    }
+    out[o] = '\0';
+    return (int)o;
+}
 
 int bc_build_challenge_page(char *buf, size_t buf_size, const char *uri,
                             const char *salt, int difficulty)
 {
     if (!buf || buf_size == 0 || !uri || !salt)
+        return -1;
+    char euri[2048];
+    if (bc_js_escape(uri, euri, sizeof(euri)) < 0)
         return -1;
     int n = snprintf(
         buf, buf_size,
@@ -232,8 +359,99 @@ int bc_build_challenge_page(char *buf, size_t buf_size, const char *uri,
         "if(z>=DIFF){location.replace(URI+(URI.indexOf('?')<0?'?':'&')"
         "+'__lhc='+n);break;}}\n"
         "</script></body></html>",
-        salt, difficulty, uri);
+        salt, difficulty, euri);
     return (n > 0 && (size_t)n < buf_size) ? n : -1;
+}
+
+/* Substitute %{SALT} %{DIFF} %{URI} in an operator-supplied template.
+ * URI is JS-escaped; SALT/DIFF are module-generated (trusted). Any
+ * rendering problem returns -1 so the caller falls back to the built-in
+ * page — a broken template must never break the gate. */
+int bc_render_template(char *buf, size_t buf_size, const char *tpl,
+                       const char *uri, const char *salt, int difficulty)
+{
+    if (!buf || buf_size == 0 || !tpl || !uri || !salt)
+        return -1;
+    char euri[2048];
+    if (bc_js_escape(uri, euri, sizeof(euri)) < 0)
+        return -1;
+    char diffs[16];
+    snprintf(diffs, sizeof(diffs), "%d", difficulty);
+    size_t o = 0;
+    for (const char *p = tpl; *p; p++) {
+        if (p[0] == '%' && p[1] == '{') {
+            const char *end = strchr(p + 2, '}');
+            if (end) {
+                size_t len = (size_t)(end - (p + 2));
+                const char *rep = NULL; size_t rlen = 0;
+                if (len == 4 && strncmp(p + 2, "SALT", 4) == 0) {
+                    rep = salt; rlen = strlen(salt);
+                } else if (len == 4 && strncmp(p + 2, "DIFF", 4) == 0) {
+                    rep = diffs; rlen = strlen(diffs);
+                } else if (len == 3 && strncmp(p + 2, "URI", 3) == 0) {
+                    rep = euri; rlen = strlen(euri);
+                }
+                if (rep) {
+                    if (o + rlen >= buf_size) return -1;
+                    memcpy(buf + o, rep, rlen);
+                    o += rlen;
+                    p = end;
+                    continue;
+                }
+            }
+        }
+        if (o + 1 >= buf_size) return -1;
+        buf[o++] = *p;
+    }
+    buf[o] = '\0';
+    return (int)o;
+}
+
+/**
+ * Load an operator template by path, confined to the .htaccess tree:
+ * an absolute path must resolve inside base_dir; a relative path is
+ * resolved against base_dir first. O_NOFOLLOW + realpath close the
+ * symlink/escape paths (same confinement family as AuthUserFile).
+ * Returns a malloc'd NUL-terminated body (<= 16 KiB) or NULL.
+ */
+static char *bc_load_template(const char *page_val, const char *base_dir)
+{
+    if (!page_val || !page_val[0] || !base_dir || !base_dir[0])
+        return NULL;
+    char full[4096];
+    if (page_val[0] == '/')
+        snprintf(full, sizeof(full), "%s", page_val);
+    else
+        snprintf(full, sizeof(full), "%s/%s", base_dir, page_val);
+    char resolved[4096], base_r[4096];
+    if (!realpath(full, resolved) || !realpath(base_dir, base_r))
+        return NULL;
+    size_t bl = strlen(base_r);
+    if (strncmp(resolved, base_r, bl) != 0 ||
+        (resolved[bl] != '/' && resolved[bl] != '\0'))
+        return NULL;
+    int fd = open(resolved, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0)
+        return NULL;
+    struct stat st;
+    if (fstat(fd, &st) != 0 || st.st_size <= 0 ||
+        st.st_size > 16 * 1024) {
+        close(fd);
+        return NULL;
+    }
+    char *body = malloc((size_t)st.st_size + 1);
+    if (!body) {
+        close(fd);
+        return NULL;
+    }
+    ssize_t r = read(fd, body, (size_t)st.st_size);
+    close(fd);
+    if (r != st.st_size) {
+        free(body);
+        return NULL;
+    }
+    body[r] = '\0';
+    return body;
 }
 
 /* ── executor ─────────────────────────────────────────────────────── */
@@ -289,7 +507,8 @@ static int find_cookie(const char *hdr, int hdr_len, const char *name,
 }
 
 int exec_bot_challenge(lsi_session_t *session,
-                       const htaccess_directive_t *directives)
+                       const htaccess_directive_t *directives,
+                       const char *base_dir)
 {
     if (!session || !directives)
         return BC_OFF;
@@ -298,6 +517,9 @@ int exec_bot_challenge(lsi_session_t *session,
     long ttl = BC_DEFAULT_TTL;
     int difficulty = BC_DEFAULT_DIFF;
     const char *exempt_re = NULL;
+    const char *trusted_proxies = NULL;
+    const char *page_path = NULL;
+    const char *cond_expr = NULL;
 
     for (const htaccess_directive_t *d = directives; d; d = d->next) {
         switch (d->type) {
@@ -315,29 +537,74 @@ int exec_bot_challenge(lsi_session_t *session,
         case DIR_BOT_CHALLENGE_EXEMPT:
             exempt_re = d->value;
             break;
+        case DIR_BOT_CHALLENGE_TRUSTED_PROXY:
+            trusted_proxies = d->value;
+            break;
+        case DIR_BOT_CHALLENGE_PAGE:
+            page_path = d->value;
+            break;
+        case DIR_BOT_CHALLENGE_IF:
+            cond_expr = d->value;
+            break;
         default:
             break;
         }
     }
     if (!enabled)
         return BC_OFF;
+    /* Optional ap_expr trigger, e.g. GeoIP-scoped gating:
+     *   BotChallengeIf "%{ENV:GEOIP_COUNTRY_CODE} !~ /^(US|GB)$/"
+     * Unparsable expression: fail open (gate off) and say so — a broken
+     * config must never lock humans out. */
+    if (cond_expr && cond_expr[0]) {
+        expr_node_t *e = expr_parse(cond_expr);
+        if (!e) {
+            lsi_log(session, LSI_LOG_WARN,
+                    "mod_htaccess: BotChallengeIf expression unparsable "
+                    "(gate disabled): %s",
+                    cond_expr);
+            return BC_OFF;
+        }
+        int hit = expr_eval(session, e);
+        expr_free(e);
+        if (!hit)
+            return BC_OFF; /* condition not met: no gate this request */
+    }
     if (ttl < 60)
         ttl = 60;
     if (difficulty < 8)
         difficulty = 8;
 
     int ip_len = 0;
-    const char *ip = lsi_session_get_client_ip(session, &ip_len);
-    char ipbuf[64];
-    if (ip && ip_len > 0) {
+    const char *peer = lsi_session_get_client_ip(session, &ip_len);
+    char peerbuf[64];
+    if (peer && ip_len > 0) {
         if (ip_len > 63)
             ip_len = 63;
-        memcpy(ipbuf, ip, ip_len);
-        ipbuf[ip_len] = '\0';
-        ip = ipbuf;
+        memcpy(peerbuf, peer, ip_len);
+        peerbuf[ip_len] = '\0';
+        peer = peerbuf;
     } else {
-        ip = NULL;
+        peer = NULL;
     }
+    /* Identity the credential binds to: rightmost XFF token when the
+     * direct peer is a configured trusted proxy, else the peer itself
+     * (a spoofable XFF must never rotate or merge identity buckets). */
+    char ipbuf[64];
+    const char *xff = NULL;
+    {
+        int xff_len = 0;
+        const char *h = lsi_session_get_req_header_by_name(
+            session, "X-Forwarded-For", 15, &xff_len);
+        if (h && xff_len > 0 && xff_len < 512) {
+            static __thread char xffbuf[512];
+            memcpy(xffbuf, h, (size_t)xff_len);
+            xffbuf[xff_len] = '\0';
+            xff = xffbuf;
+        }
+    }
+    bc_pick_effective_ip(peer, xff, trusted_proxies, ipbuf, sizeof(ipbuf));
+    const char *ip = ipbuf;
 
     /* 1. Valid cookie → pass. */
     int ck_len = 0;
@@ -454,10 +721,21 @@ int exec_bot_challenge(lsi_session_t *session,
 
     char salt[32];
     snprintf(salt, sizeof(salt), "s%ld", (long)time(NULL) / 86400);
-    char page[3072];
-    if (bc_build_challenge_page(page, sizeof(page), uribuf, salt,
-                                 difficulty) < 0)
-        return BC_OFF; /* build failure: fail open to normal serving */
+    char page[20 * 1024];
+    int page_len = -1;
+    char *tpl = bc_load_template(page_path, base_dir);
+    if (tpl) {
+        page_len = bc_render_template(page, sizeof(page), tpl, uribuf,
+                                      salt, difficulty);
+        free(tpl);
+    }
+    if (page_len < 0) {
+        /* no/invalid template: built-in page (16 KiB template + headroom
+         * must fit; overflow only for absurd templates → fail open) */
+        if (bc_build_challenge_page(page, 3072, uribuf, salt,
+                                     difficulty) < 0)
+            return BC_OFF;
+    }
 
     lsi_session_set_status(session, 200);
     lsi_session_add_resp_header(session, "Cache-Control", 13,

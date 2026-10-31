@@ -1869,6 +1869,12 @@ static int on_uri_map(lsi_session_t *session)
     for (dir = directives; dir != NULL; dir = dir->next) {
         if (dir->type == DIR_RATE_LIMIT) {
             int rl_rc = exec_ratelimit(session, dir);
+            if (rl_rc == RL_THROTTLED) {
+                /* 429 + Retry-After already served by the executor */
+                free(target_dir);
+                htaccess_directives_free(directives);
+                return LSI_DENY;
+            }
             if (rl_rc != LSI_OK) {
                 lsi_log(session, LSI_LOG_WARN,
                         "mod_htaccess: RateLimit exceeded for this client");
@@ -1885,7 +1891,7 @@ static int on_uri_map(lsi_session_t *session)
      * has been fully served (challenge page), stop processing. */
     {
         static int bc_warned = 0;
-        int bc_rc = exec_bot_challenge(session, directives);
+        int bc_rc = exec_bot_challenge(session, directives, target_dir);
         if (bc_rc != BC_OFF && bc_secret_degraded() && !bc_warned) {
             bc_warned = 1;
             lsi_log(NULL, LSI_LOG_WARN,

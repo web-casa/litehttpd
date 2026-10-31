@@ -36,3 +36,8 @@ RateLimit 10/10 burst=5 action=throttle
 | `log` | 计数并记录，但正常服务 |
 
 计数器与暴力破解保护的命名空间相互独立——重度浏览不会推高登录失败阈值。
+
+> `action=throttle` 现在返回 **429 Too Many Requests** 并附带
+> `Retry-After` 头（窗口重置前的秒数）。它绝不在 hook 里睡眠等待
+> —— 睡眠会占住 worker，让单个客户端拖垮全部 worker（正是上游
+> OLS issue #531 踩过的坑）。

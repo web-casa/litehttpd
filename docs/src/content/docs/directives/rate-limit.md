@@ -15,6 +15,9 @@ all OLS workers.
 - `N/M` — allow **N** requests per **M** seconds
 - `burst=B` — tolerate B requests above the limit before acting
 - `action=` — what to do when exceeded (default `deny`)
+  - `deny` → 403 immediately
+  - `throttle` → **429 + `Retry-After`** (never delays the worker)
+  - `log` → count only, serve normally
 
 ## Example
 
