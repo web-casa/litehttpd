@@ -62,7 +62,7 @@ jobs:
           cat > /tmp/notes.md <<'NOTES'
           ## litehttpd v__VERSION__
 
-          Apache .htaccess compatibility module for OpenLiteSpeed (84 directive types, full CI/release-gate coverage).
+          Apache .htaccess compatibility module for OpenLiteSpeed (98 directive types, full CI/release-gate coverage).
 
           ### RPM Packages (x86_64)
 
