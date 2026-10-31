@@ -200,6 +200,24 @@ inline rc::Gen<TaggedLine> taggedDirectiveLine()
                 return {"CacheDefaultExpire " + std::to_string(n),
                         DIR_CACHE_DEFAULT_EXPIRE};
             }),
+        /* BotChallenge family */
+        rc::gen::map(
+            rc::gen::element("On", "Off"),
+            [](const std::string &v) -> TaggedLine {
+                return {"BotChallenge " + v, DIR_BOT_CHALLENGE};
+            }),
+        rc::gen::map(
+            rc::gen::inRange(60, 86400),
+            [](int n) -> TaggedLine {
+                return {"BotChallengeTTL " + std::to_string(n),
+                        DIR_BOT_CHALLENGE_TTL};
+            }),
+        rc::gen::map(
+            rc::gen::inRange(8, 24),
+            [](int n) -> TaggedLine {
+                return {"BotChallengeDifficulty " + std::to_string(n),
+                        DIR_BOT_CHALLENGE_DIFFICULTY};
+            }),
         /* EsiEnable On|Off */
         rc::gen::map(
             rc::gen::element("On", "Off"),

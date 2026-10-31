@@ -158,6 +158,12 @@ typedef enum {
      * processing. Default Off: body filtering never runs unless the
      * directory asked for it. */
     DIR_ESI_ENABLE,                    /* 90 */
+
+    /** Bot challenge (v3): self-hosted JS PoW gate, default Off. */
+    DIR_BOT_CHALLENGE,                 /* 91 */
+    DIR_BOT_CHALLENGE_TTL,             /* 92 */
+    DIR_BOT_CHALLENGE_DIFFICULTY,      /* 93 */
+    DIR_BOT_CHALLENGE_EXEMPT,          /* 94 */
 } directive_type_t;
 
 /**

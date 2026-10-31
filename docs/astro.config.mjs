@@ -142,6 +142,7 @@ export default defineConfig({
             { slug: "directives/php" },
             { slug: "directives/options" },
             { slug: "directives/brute-force" },
+            { slug: "directives/bot-challenge" },
           ],
         },
         {

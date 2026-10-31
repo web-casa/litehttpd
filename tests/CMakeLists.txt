@@ -119,6 +119,16 @@ litehttpd_link_pcre2(test_esi_stream_hook)
 target_link_libraries(test_esi_stream_hook gtest_main pthread rt crypt)
 gtest_discover_tests(test_esi_stream_hook)
 
+add_executable(test_bot_challenge test_bot_challenge.cpp)
+target_sources(test_bot_challenge PRIVATE ../src/htaccess_exec_botchallenge.c
+                                         ../src/htaccess_botcrypto.c
+                                         ../src/htaccess_regex.c
+                                         ${MOCK_SOURCES})
+target_include_directories(test_bot_challenge PRIVATE ../include)
+litehttpd_link_pcre2(test_bot_challenge)
+target_link_libraries(test_bot_challenge gtest_main pthread)
+gtest_discover_tests(test_bot_challenge)
+
 add_executable(test_firewall_client test_firewall_client.cpp)
 target_sources(test_firewall_client PRIVATE ../src/htaccess_firewall_client.c)
 target_include_directories(test_firewall_client PRIVATE ../include)

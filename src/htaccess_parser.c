@@ -935,6 +935,65 @@ static htaccess_directive_t *parse_esi_enable(const char *args, int line)
 }
 
 /**
+ * Parse: BotChallenge On|Off
+ */
+static htaccess_directive_t *parse_bot_challenge(const char *args, int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+    for (char *q = val; *q; q++)
+        *q = (char)tolower((unsigned char)*q);
+    if (strcmp(val, "on") != 0 && strcmp(val, "off") != 0) {
+        free(val);
+        return NULL;
+    }
+    htaccess_directive_t *d = alloc_directive(DIR_BOT_CHALLENGE, line);
+    if (!d) { free(val); return NULL; }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: BotChallengeTTL N / BotChallengeDifficulty N — plain ints.
+ */
+static htaccess_directive_t *parse_bot_challenge_int(directive_type_t t,
+                                                     const char *args,
+                                                     int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+    for (const char *q = val; *q; q++)
+        if (!isdigit((unsigned char)*q)) {
+            free(val);
+            return NULL;
+        }
+    htaccess_directive_t *d = alloc_directive(t, line);
+    if (!d) { free(val); return NULL; }
+    d->value = val;
+    return d;
+}
+
+/**
+ * Parse: BotChallengeExempt regex — validated at exec time.
+ */
+static htaccess_directive_t *parse_bot_challenge_exempt(const char *args,
+                                                        int line)
+{
+    const char *p = skip_ws(args);
+    char *val = next_token(&p);
+    if (!val)
+        return NULL;
+    htaccess_directive_t *d = alloc_directive(DIR_BOT_CHALLENGE_EXEMPT, line);
+    if (!d) { free(val); return NULL; }
+    d->value = val;
+    return d;
+}
+
+/**
  * Parse: ExpiresActive On|Off
  */
 static htaccess_directive_t *parse_expires_active(const char *args, int line)
@@ -1703,6 +1762,21 @@ static htaccess_directive_t *parse_line(const char *line, int line_num)
     after = match_kw(p, "EsiEnable");
     if (after)
         return parse_esi_enable(after, line_num);
+
+    /* BotChallenge family */
+    after = match_kw(p, "BotChallenge");
+    if (after)
+        return parse_bot_challenge(after, line_num);
+    after = match_kw(p, "BotChallengeTTL");
+    if (after)
+        return parse_bot_challenge_int(DIR_BOT_CHALLENGE_TTL, after, line_num);
+    after = match_kw(p, "BotChallengeDifficulty");
+    if (after)
+        return parse_bot_challenge_int(DIR_BOT_CHALLENGE_DIFFICULTY, after,
+                                       line_num);
+    after = match_kw(p, "BotChallengeExempt");
+    if (after)
+        return parse_bot_challenge_exempt(after, line_num);
 
     /* ExpiresActive */
     after = match_kw(p, "ExpiresActive");

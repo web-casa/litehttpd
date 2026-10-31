@@ -362,6 +362,10 @@ static int directives_match_for_override(const htaccess_directive_t *a,
     case DIR_RATE_LIMIT:
     case DIR_SEC_RULE_ENGINE:
     case DIR_ESI_ENABLE:
+    case DIR_BOT_CHALLENGE:
+    case DIR_BOT_CHALLENGE_TTL:
+    case DIR_BOT_CHALLENGE_DIFFICULTY:
+    case DIR_BOT_CHALLENGE_EXEMPT:
         return 1;
 
     /* Allow/Deny: match by value (CIDR or "all") */

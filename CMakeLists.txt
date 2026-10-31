@@ -131,6 +131,8 @@ set(MODULE_SOURCES
     src/htaccess_stream.c
     src/htaccess_rewrite_native.c
     src/htaccess_esi_fetch.c
+    src/htaccess_botcrypto.c
+    src/htaccess_exec_botchallenge.c
     src/htaccess_esi.c
     src/htaccess_cidr_table.c
     src/htaccess_regex.c

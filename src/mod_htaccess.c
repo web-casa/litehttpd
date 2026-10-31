@@ -22,6 +22,7 @@
 #include "htaccess_exec_brute_force.h"
 #include "htaccess_exec_ratelimit.h"
 #include "htaccess_exec_modsec.h"
+#include "htaccess_exec_botchallenge.h"
 #include "htaccess_esi.h"
 #include "htaccess_stream.h"
 #include "htaccess_exec_cache.h"
@@ -1877,6 +1878,30 @@ static int on_uri_map(lsi_session_t *session)
                 lsi_session_end_resp(session);
                 return LSI_DENY;
             }
+        }
+    }
+
+    /* (a-1) Bot challenge — JS PoW gate; on BC_CHALLENGE the response
+     * has been fully served (challenge page), stop processing. */
+    {
+        static int bc_warned = 0;
+        int bc_rc = exec_bot_challenge(session, directives);
+        if (bc_rc != BC_OFF && bc_secret_degraded() && !bc_warned) {
+            bc_warned = 1;
+            lsi_log(NULL, LSI_LOG_WARN,
+                    "mod_htaccess: BotChallenge secret unavailable at "
+                    "%s (not readable and not creatable by this user); "
+                    "credential cookies fall back to a weak key — make "
+                    "the directory writable by the web server user "
+                    "(packaging ships tmpfiles.d: /run/litehttpd)",
+                    getenv("LITEHTTPD_BOT_SECRET") && getenv("LITEHTTPD_BOT_SECRET")[0]
+                        ? getenv("LITEHTTPD_BOT_SECRET")
+                        : BC_SECRET_PATH);
+        }
+        if (bc_rc == BC_CHALLENGE) {
+            free(target_dir);
+            htaccess_directives_free(directives);
+            return LSI_DENY; /* response already ended by the gate */
         }
     }
 

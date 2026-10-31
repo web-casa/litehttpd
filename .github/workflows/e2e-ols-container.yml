@@ -191,6 +191,31 @@ jobs:
           echo -n "control (WAF on): "; curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8080/t1/index.html?s=1%27%20OR%20%271%27%3D%271" | grep 403
           echo -n "bridged (SecRuleEngine Off): "; curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:8080/sec-off/form.php?s=1%27%20OR%20%271%27%3D%271" | grep 200
 
+      # ── Check 6: BotChallenge JS PoW gate (full loop) ───────────────
+      - name: E2E-6 bot challenge loop
+        run: |
+          docker exec "$CT" sh -c '
+            D=/var/www/vhosts/localhost/html
+            mkdir -p $D/bot
+            echo secret-content > $D/bot/index.html
+            printf "BotChallenge On\nBotChallengeTTL 120\nBotChallengeExempt \"(?i)googlebot\"\n" > $D/bot/.htaccess
+            chmod 644 $D/bot/.htaccess
+            # provisioning as shipped by packaging (tmpfiles.d / install):
+            # dir present and worker-writable; only the secret is fresh
+            install -d -m 0770 -o nobody -g nogroup /var/run/litehttpd
+            rm -f /var/run/litehttpd/botchallenge.secret
+            /usr/local/lsws/bin/lswsctrl restart'
+          sleep 4
+          set -e
+          # exempt UA passes straight through
+          curl -s -m 8 -A "Googlebot/2.1" http://127.0.0.1:8080/bot/index.html | grep -q secret-content
+          # no cookie -> challenge page with the inline solver
+          curl -s -m 8 -A "curl/8" http://127.0.0.1:8080/bot/index.html | grep -q "function fnv"
+          # solve the PoW like the served JS, answer, replay, tamper
+          python3 tests/e2e/bot_solver.py http://127.0.0.1:8080/bot/index.html
+          # the shared secret was created by the worker with mode 0600
+          docker exec "$CT" sh -c 'test -s /var/run/litehttpd/botchallenge.secret && [ "$(stat -c %a /var/run/litehttpd/botchallenge.secret)" = 600 ]'
+
       - name: Collect evidence on failure
         if: failure()
         run: |

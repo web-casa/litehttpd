@@ -137,11 +137,14 @@ inline rc::Gen<directive_type_t> directiveTypeV7()
 {
     return rc::gen::element(DIR_CACHE_ENABLE, DIR_CACHE_DISABLE, DIR_CACHE_MAX_EXPIRE,
                             DIR_CACHE_DEFAULT_EXPIRE, DIR_RATE_LIMIT,
-                            DIR_SEC_RULE_ENGINE, DIR_ESI_ENABLE);
+                            DIR_SEC_RULE_ENGINE, DIR_ESI_ENABLE,
+                            DIR_BOT_CHALLENGE, DIR_BOT_CHALLENGE_TTL,
+                            DIR_BOT_CHALLENGE_DIFFICULTY,
+                            DIR_BOT_CHALLENGE_EXEMPT);
 }
 
 /**
- * Generate any of the 91 directive types.
+ * Generate any of the 95 directive types.
  * NOTE: not all types have dedicated generators — unsupported types
  * fall back to DIR_HEADER_SET. See directiveOfType() for details.
  */
