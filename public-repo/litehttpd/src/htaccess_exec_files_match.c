@@ -1,12 +1,16 @@
 /**
  * htaccess_exec_files_match.c - FilesMatch directive executor
  *
- * Compiles the FilesMatch regex pattern and matches it against the filename.
+ * Compiles the FilesMatch PCRE pattern and matches it against the filename.
  * If matched, executes nested directives in original order by dispatching
  * to the appropriate executor (e.g., exec_header for Header directives).
  *
  * Validates: Requirements 9.1, 9.2, 9.3
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "htaccess_exec_files_match.h"
 #include "htaccess_exec_header.h"
 #include "htaccess_exec_error_doc.h"
@@ -15,7 +19,9 @@
 #include "htaccess_exec_handler.h"
 #include "htaccess_expr.h"
 
-#include <regex.h>
+#define PCRE2_CODE_UNIT_WIDTH 8
+#include <pcre2.h>
+
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -32,7 +38,7 @@
 static __thread struct {
     unsigned long hash;
     char         *pat;
-    regex_t       re;
+    pcre2_code   *re;
     int           valid;
 } fm_cache[FM_REGEX_CACHE_SLOTS];
 
@@ -44,36 +50,80 @@ static unsigned long fm_djb2(const char *str)
     return h;
 }
 
-static regex_t *fm_get_cached_regex(const char *pattern)
+static pcre2_code *fm_get_cached_regex(const char *pattern)
 {
     unsigned long h = fm_djb2(pattern);
     for (int i = 0; i < FM_REGEX_CACHE_SLOTS; i++) {
         if (fm_cache[i].valid && fm_cache[i].hash == h
             && strcmp(fm_cache[i].pat, pattern) == 0)
-            return &fm_cache[i].re;
+            return fm_cache[i].re;
     }
     int slot = -1;
     for (int i = 0; i < FM_REGEX_CACHE_SLOTS; i++) {
         if (!fm_cache[i].valid) { slot = i; break; }
     }
     if (slot < 0) {
-        regfree(&fm_cache[0].re);
+        pcre2_code_free(fm_cache[0].re);
         free(fm_cache[0].pat);
         for (int i = 0; i < FM_REGEX_CACHE_SLOTS - 1; i++)
             fm_cache[i] = fm_cache[i + 1];
         slot = FM_REGEX_CACHE_SLOTS - 1;
         fm_cache[slot].valid = 0;
     }
-    if (regcomp(&fm_cache[slot].re, pattern, REG_EXTENDED | REG_NOSUB) != 0)
+    int errorcode = 0;
+    PCRE2_SIZE erroroffset = 0;
+    fm_cache[slot].re = pcre2_compile((PCRE2_SPTR)pattern,
+                                      PCRE2_ZERO_TERMINATED,
+                                      0,
+                                      &errorcode,
+                                      &erroroffset,
+                                      NULL);
+    if (!fm_cache[slot].re)
         return NULL;
+    (void)pcre2_jit_compile(fm_cache[slot].re, PCRE2_JIT_COMPLETE);
     fm_cache[slot].hash = h;
     fm_cache[slot].pat = strdup(pattern);
     if (!fm_cache[slot].pat) {
-        regfree(&fm_cache[slot].re);
+        pcre2_code_free(fm_cache[slot].re);
+        fm_cache[slot].re = NULL;
         return NULL;
     }
     fm_cache[slot].valid = 1;
-    return &fm_cache[slot].re;
+    return fm_cache[slot].re;
+}
+
+static int fm_regex_exec(pcre2_code *re, const char *filename)
+{
+    int rc;
+    pcre2_match_data *match_data;
+    pcre2_match_context *match_context;
+
+    match_data = pcre2_match_data_create_from_pattern(re, NULL);
+    if (!match_data)
+        return -1;
+
+    match_context = pcre2_match_context_create(NULL);
+    if (!match_context) {
+        pcre2_match_data_free(match_data);
+        return -1;
+    }
+    (void)pcre2_set_match_limit(match_context, 100000);
+    (void)pcre2_set_depth_limit(match_context, 1000);
+
+    rc = pcre2_match(re,
+                     (PCRE2_SPTR)filename,
+                     PCRE2_ZERO_TERMINATED,
+                     0,
+                     0,
+                     match_data,
+                     match_context);
+
+    pcre2_match_context_free(match_context);
+    pcre2_match_data_free(match_data);
+
+    if (rc == PCRE2_ERROR_NOMATCH)
+        return 0;
+    return (rc >= 0) ? 1 : -1;
 }
 
 /**
@@ -226,8 +276,9 @@ int exec_files_match(lsi_session_t *session, const htaccess_directive_t *dir,
         return LSI_ERROR;
     }
 
-    /* Compile the regex pattern (cached) */
-    regex_t *rep = fm_get_cached_regex(pattern);
+    /* Compile the PCRE regex pattern (cached). Apache FilesMatch uses PCRE
+     * syntax; real Drupal .htaccess files rely on lookahead expressions. */
+    pcre2_code *rep = fm_get_cached_regex(pattern);
     if (!rep) {
         lsi_log(session, LSI_LOG_WARN,
                 "FilesMatch: invalid regex pattern '%s' at line %d",
@@ -236,9 +287,16 @@ int exec_files_match(lsi_session_t *session, const htaccess_directive_t *dir,
     }
 
     /* Match filename against the pattern */
-    rc = regexec(rep, filename, 0, NULL, 0);
+    rc = fm_regex_exec(rep, filename);
 
-    if (rc != 0) {
+    if (rc < 0) {
+        lsi_log(session, LSI_LOG_WARN,
+                "FilesMatch: pattern match failed for '%s' at line %d",
+                pattern, dir->line_number);
+        return LSI_ERROR;
+    }
+
+    if (rc == 0) {
         /* No match — skip all children */
         return 0; /* 0 = no match (not error) */
     }
@@ -284,8 +342,8 @@ int fm_regex_matches(const char *pattern, const char *filename)
         return -1;
     if (strlen(pattern) > MAX_REGEX_LEN)
         return -1;
-    regex_t *rep = fm_get_cached_regex(pattern);
+    pcre2_code *rep = fm_get_cached_regex(pattern);
     if (!rep)
         return -1;
-    return (regexec(rep, filename, 0, NULL, 0) == 0) ? 1 : 0;
+    return fm_regex_exec(rep, filename);
 }

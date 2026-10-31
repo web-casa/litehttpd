@@ -5,21 +5,21 @@ purpose: pretty URL routing, protected maintenance paths, and static asset cache
 cases:
   - id: MEDIAWIKI_001
     category: app-health
-    desc: homepage returns 200
+    desc: canonical main page returns 200
     method: GET
-    path: /
+    path: /wiki/Main_Page
     assert:
       - status_exact: 200
+      - body_contains: MediaWiki has been installed
 
   - id: MEDIAWIKI_002
     category: routing
-    desc: pretty URL resolves through front controller
+    desc: homepage redirects to canonical pretty URL
     method: GET
-    path: /wiki/Main_Page
-    probe_path: /_probe/router.php?uri=/wiki/Main_Page
+    path: /
     assert:
-      - status_exact: 200
-      - probe_field_exact: SCRIPT_NAME=/index.php
+      - status_exact: 301
+      - location_exact: /wiki/Main_Page
 
   - id: MEDIAWIKI_003
     category: deny

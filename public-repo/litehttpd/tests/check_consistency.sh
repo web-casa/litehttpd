@@ -26,7 +26,7 @@ check() {
         PASS=$((PASS + 1))
     else
         WARN=$((WARN + 1))
-        ERRORS="$ERRORS\n  - $label"
+        ERRORS="${ERRORS}"$'\n'"  - $label"
     fi
 }
 
@@ -51,7 +51,7 @@ for t in $ENUM_TYPES; do
     check "Parser missing: $t" "$found"
 done
 echo "  Parser: $PASS covered, $WARN missing"
-P_PASS=$PASS; P_WARN=$WARN
+P_WARN=$WARN
 PASS=0; WARN=0
 
 # --- Step 3: Check printer coverage ---
@@ -64,7 +64,7 @@ for t in $ENUM_TYPES; do
     check "Printer missing: $t" "$found"
 done
 echo "  Printer: $PASS covered, $WARN missing"
-PR_PASS=$PASS; PR_WARN=$WARN
+PR_WARN=$WARN
 PASS=0; WARN=0
 
 # --- Step 4: Check executor coverage ---
@@ -79,7 +79,7 @@ for t in $ENUM_TYPES; do
     check "Executor missing: $t" "$found"
 done
 echo "  Executors: $PASS covered, $WARN missing"
-E_PASS=$PASS; E_WARN=$WARN
+E_WARN=$WARN
 PASS=0; WARN=0
 
 # --- Step 5: Check dirwalker deep-copy coverage ---
@@ -94,7 +94,7 @@ for t in $NEED_COPY; do
     check "Dirwalker missing deep-copy: $t" "$found"
 done
 echo "  Dirwalker: $PASS covered, $WARN missing"
-D_PASS=$PASS; D_WARN=$WARN
+D_WARN=$WARN
 PASS=0; WARN=0
 
 # --- Step 6: Check directive free coverage ---
@@ -108,7 +108,7 @@ for t in $NEED_FREE; do
     check "Free missing: $t" "$found"
 done
 echo "  Free: $PASS covered, $WARN missing"
-F_PASS=$PASS; F_WARN=$WARN
+F_WARN=$WARN
 PASS=0; WARN=0
 
 # --- Step 7: Generator coverage ---
@@ -121,7 +121,7 @@ for t in $ENUM_TYPES; do
     check "Generator missing: $t" "$found"
 done
 echo "  Generator: $PASS covered, $WARN missing"
-G_PASS=$PASS; G_WARN=$WARN
+G_WARN=$WARN
 
 # --- Summary ---
 TOTAL_WARN=$((P_WARN + PR_WARN + E_WARN + D_WARN + F_WARN + G_WARN))
@@ -140,7 +140,7 @@ echo "  Total gaps:     $TOTAL_WARN"
 
 if [ "$TOTAL_WARN" -gt 0 ]; then
     echo ""
-    echo "  Gaps found:$ERRORS"
+    printf '  Gaps found:%s\n' "$ERRORS"
 fi
 echo "========================================"
 

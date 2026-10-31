@@ -249,3 +249,4 @@ jobs:
             tests/e2e/apps-matrix/out/do-vps/apps-matrix-run.log
             tests/e2e/apps-matrix/out/do-vps/apps-matrix-out.tgz
           if-no-files-found: ignore
+          retention-days: 7

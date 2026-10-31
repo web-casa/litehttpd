@@ -11,6 +11,10 @@ lib/
 !tests/e2e/lib/
 !tests/e2e/apps-matrix/lib/
 !tests/e2e/apps-matrix/lib/**
+!public-repo/litehttpd/tests/e2e/lib/
+!public-repo/litehttpd/tests/e2e/lib/**
+!public-repo/litehttpd/tests/e2e/apps-matrix/lib/
+!public-repo/litehttpd/tests/e2e/apps-matrix/lib/**
 *.o
 *.so
 *.a

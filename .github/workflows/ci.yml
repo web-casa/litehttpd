@@ -313,6 +313,7 @@ jobs:
           name: apps-matrix-smoke
           path: ${{ runner.temp }}/apps-matrix-smoke
           if-no-files-found: ignore
+          retention-days: 7
 
   # ── Job 7: Advisory Coverage Summary ───────────────────────────────
   coverage-advisory:
@@ -336,3 +337,4 @@ jobs:
           name: coverage-xml
           path: build-coverage/coverage.xml
           if-no-files-found: ignore
+          retention-days: 7

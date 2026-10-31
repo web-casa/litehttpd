@@ -4,8 +4,8 @@
  * Delegates rewrite processing to OLS's native RewriteEngine by:
  * 1. Checking RewriteEngine On/Off
  * 2. Rebuilding RewriteCond/Rule text from parsed directives
- * 3. Calling g_api->parse_rewrite_rules() to get an opaque handle
- * 4. Calling g_api->exec_rewrite_rules() to execute against the session
+ * 3. Calling lsiapi_parse_rewrite_rules() to get an opaque handle
+ * 4. Calling lsiapi_exec_rewrite_rules() to execute against the session
  *
  * On stock OLS (no rewrite patch), gracefully returns -1.
  */
@@ -288,9 +288,8 @@ int exec_rewrite_rules(lsi_session_t *session,
     if (!engine_on)
         return 0;
 
-    /* 2. Check g_api has rewrite support (requires custom OLS) */
-    if (!g_api || !g_api->parse_rewrite_rules ||
-        !g_api->exec_rewrite_rules || !g_api->free_rewrite_rules) {
+    /* 2. Check rewrite support (requires custom OLS with ABI marker) */
+    if (!lsiapi_has_rewrite_extensions()) {
         /* Capability already logged at module init — skip silently */
         return -1;
     }
@@ -300,8 +299,8 @@ int exec_rewrite_rules(lsi_session_t *session,
 
     if (rw_cache.valid && rw_cache.fingerprint == fp) {
         /* Cache hit — skip text rebuild and re-parse */
-        int rc = g_api->exec_rewrite_rules(session, rw_cache.handle,
-                                            rewrite_base, base_len);
+        int rc = lsiapi_exec_rewrite_rules(session, rw_cache.handle,
+                                           rewrite_base, base_len);
         if (rc == 1) return 1;
         if (rc >= 301 && rc <= 399) return rc;  /* Redirect with status */
         if (rc == 403 || rc == 410) return rc;
@@ -314,20 +313,20 @@ int exec_rewrite_rules(lsi_session_t *session,
     if (!text || text_len == 0)
         return 0;
 
-    void *handle = g_api->parse_rewrite_rules(text, text_len);
+    void *handle = lsiapi_parse_rewrite_rules(text, text_len);
     free(text);
     if (!handle)
         return 0;
 
     /* Update cache */
     if (rw_cache.valid && rw_cache.handle)
-        g_api->free_rewrite_rules(rw_cache.handle);
+        lsiapi_free_rewrite_rules(rw_cache.handle);
     rw_cache.fingerprint = fp;
     rw_cache.handle = handle;
     rw_cache.valid = 1;
 
     /* 4. Execute rules against current session */
-    int rc = g_api->exec_rewrite_rules(session, handle, rewrite_base, base_len);
+    int rc = lsiapi_exec_rewrite_rules(session, handle, rewrite_base, base_len);
 
     /* 5. Interpret result (handle stays cached, not freed per-request) */
     if (rc == 1)
@@ -343,8 +342,7 @@ int exec_rewrite_rules(lsi_session_t *session,
 void rewrite_cache_cleanup(void)
 {
     if (rw_cache.valid && rw_cache.handle) {
-        if (g_api && g_api->free_rewrite_rules)
-            g_api->free_rewrite_rules(rw_cache.handle);
+        lsiapi_free_rewrite_rules(rw_cache.handle);
         rw_cache.handle = NULL;
         rw_cache.valid = 0;
         rw_cache.fingerprint = 0;
