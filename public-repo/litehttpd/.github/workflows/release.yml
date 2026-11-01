@@ -17,7 +17,15 @@ permissions:
 jobs:
   preflight:
     runs-on: ubuntu-22.04
+    outputs:
+      can_publish: ${{ steps.gate.outputs.can_publish }}
     steps:
+      - name: Publishing gate
+        id: gate
+        # secrets are only readable at STEP level, not in job-level if:
+        # export the verdict as a job output consumers can gate on
+        run: '[ -n "${{ secrets.GPG_PRIVATE_KEY }}" ] && echo can_publish=true >> "$GITHUB_OUTPUT" || echo can_publish=false >> "$GITHUB_OUTPUT"'
+
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -520,12 +528,12 @@ jobs:
   # builds the yum metadata and syncs to R2. Independent of the GitHub
   # Release being finalized; gated on the RPM builds + tests passing.
   publish-rpm-repo:
-    needs: [build-rpm-module, build-rpm-ols, test]
+    needs: [preflight, build-rpm-module, build-rpm-ols, test]
     # GPG/AWS publish secrets live only on the private repo's runners;
     # on the public mirror this job has nothing to sign with — skip it
     # there (the private pipeline performs the real repository publish,
     # verified live on rpms.litehttpd.com) instead of failing red.
-    if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+    if: needs.preflight.outputs.can_publish == 'true'
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
