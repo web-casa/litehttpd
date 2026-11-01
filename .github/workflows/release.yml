@@ -459,7 +459,7 @@ jobs:
 
                 echo "=== Tarballs built ==="; ls -lh /output/*.tgz
               fi
-            '
+            ' 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Attach RPM to release
         run: |
