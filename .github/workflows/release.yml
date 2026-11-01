@@ -307,9 +307,9 @@ jobs:
           git config --global http.version HTTP/1.1 || true
           git config --global http.lowSpeedLimit 32768 || true
           git config --global http.lowSpeedTime 120 || true
-          git clone --depth 1 --recurse-submodules --shallow-submodules --branch v1.9.1 \
+          git clone --depth 1 --recurse-submodules --shallow-submodules --branch v1.9.4 \
             https://github.com/litespeedtech/openlitespeed.git /tmp/ols-src
-          cd /tmp/ols-src && tar czf /tmp/v1.9.1.tar.gz --exclude=.git --transform="flags=r;s,^\.,openlitespeed-1.9.1," .
+          cd /tmp/ols-src && tar czf /tmp/v1.9.4.tar.gz --exclude=.git --transform="flags=r;s,^\.,openlitespeed-1.9.1," .
 
       - name: Create module source tarball
         run: |
@@ -328,7 +328,7 @@ jobs:
           docker run --rm \
             --platform ${{ matrix.platform }} \
             -v ${{ github.workspace }}:/src:ro \
-            -v /tmp/v1.9.1.tar.gz:/tmp/v1.9.1.tar.gz:ro \
+            -v /tmp/v1.9.4.tar.gz:/tmp/v1.9.4.tar.gz:ro \
             -v /tmp/litehttpd-module-src.tar.gz:/tmp/litehttpd-module-src.tar.gz:ro \
             -v /tmp/third-party-src.tar.gz:/tmp/third-party-src.tar.gz:ro \
             -v /tmp/third-party-deps-src.tar.gz:/tmp/third-party-deps-src.tar.gz:ro \
@@ -366,7 +366,7 @@ jobs:
               fi
 
               mkdir -p /root/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-              cp /tmp/v1.9.1.tar.gz /root/rpmbuild/SOURCES/
+              cp /tmp/v1.9.4.tar.gz /root/rpmbuild/SOURCES/
               cp /src/patches/0001-lsiapi-phpconfig.patch /root/rpmbuild/SOURCES/
               cp /src/patches/0002-lsiapi-rewrite.patch /root/rpmbuild/SOURCES/
               cp /src/patches/0003-readapacheconf.patch /root/rpmbuild/SOURCES/
