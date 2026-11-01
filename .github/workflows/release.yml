@@ -252,7 +252,14 @@ jobs:
               find /root/rpmbuild/RPMS -name "litehttpd-*.rpm" ! -name "*debug*" \
                 -exec cp {} /output/ \;
               ls -lh /output/
-            '
+            ' > /tmp/buildrpm.out 2>&1 || rc=$?
+          cat /tmp/buildrpm.out >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          if [ "$rc" -ne 0 ]; then
+            echo "docker exited rc=$rc — last 40 lines:"
+            tail -40 /tmp/buildrpm.out
+            tail -12 /tmp/buildrpm.out | sed 's/^/::error:: /' || true
+            exit "$rc"
+          fi
 
       - name: Attach RPM to release
         run: |
@@ -324,6 +331,12 @@ jobs:
 
       - name: Build RPM
         run: |
+          # Docker output goes to a file; on failure the tail is echoed
+          # as ::error:: workflow commands so it lands in the CHECK
+          # ANNOTATIONS (readable unauthenticated via the API) and in
+          # the step summary — job logs themselves need admin auth.
+          set -o pipefail
+          rc=0
           mkdir -p output
           docker run --rm \
             --platform ${{ matrix.platform }} \
@@ -459,7 +472,7 @@ jobs:
 
                 echo "=== Tarballs built ==="; ls -lh /output/*.tgz
               fi
-            ' 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+            '
 
       - name: Attach RPM to release
         run: |
