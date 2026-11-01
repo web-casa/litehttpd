@@ -521,6 +521,11 @@ jobs:
   # Release being finalized; gated on the RPM builds + tests passing.
   publish-rpm-repo:
     needs: [build-rpm-module, build-rpm-ols, test]
+    # GPG/AWS publish secrets live only on the private repo's runners;
+    # on the public mirror this job has nothing to sign with — skip it
+    # there (the private pipeline performs the real repository publish,
+    # verified live on rpms.litehttpd.com) instead of failing red.
+    if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
@@ -643,6 +648,7 @@ jobs:
   # ── Attach patches + checksums, then publish the release ───────────
   finalize-release:
     needs: [build-module, build-rpm-module, build-rpm-ols, publish-rpm-repo, test]
+    if: ${{ always() && !cancelled() && (needs.publish-rpm-repo.result == 'success' || needs.publish-rpm-repo.result == 'skipped') }}
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}
