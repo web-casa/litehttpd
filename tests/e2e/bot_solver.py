@@ -3,13 +3,18 @@
 
 Run inside the CI runner against the OLS container:
     python3 tests/e2e/bot_solver.py http://127.0.0.1:8080/bot/index.html
+    python3 tests/e2e/bot_solver.py --xff http://127.0.0.1:8080/xff/index.html
 
 Steps: solve FNV-1a PoW (daily salt, 16 leading zero bits), answer via
-?__lhc=<nonce>, verify Set-Cookie + protected content, replay with the
-cookie, and confirm a tampered cookie is re-challenged.
+?__lhc=<nonce>. The gate answers with a 302 to the CLEAN URL plus the
+credential cookie — exactly like a browser, a cookie-aware opener follows
+it and must land on the protected content (never on a __lhc URL). Then
+replay with the cookie, and confirm a tampered cookie is re-challenged.
 """
+import http.cookiejar
 import sys
 import time
+import urllib.error
 import urllib.request
 
 
@@ -30,6 +35,43 @@ def solve(salt: str, difficulty: int = 16) -> int:
         n += 1
 
 
+class Client:
+    """Cookie-aware HTTP client (browser stand-in). Exposes the last
+    response so callers can inspect the 302's Location and Set-Cookie."""
+
+    def __init__(self):
+        self.jar = http.cookiejar.CookieJar()
+        self.opener = urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(self.jar)
+        )
+
+    def open(self, url: str, headers: dict | None = None,
+             follow: bool = True):
+        req = urllib.request.Request(url)
+        for k, v in (headers or {}).items():
+            req.add_header(k, v)
+        if follow:
+            return self.opener.open(req, timeout=10)
+        # manual redirect handling: capture the 302 itself
+        try:
+            return self.opener.open(req, timeout=10)
+        except urllib.error.HTTPError as e:
+            return e
+
+    def cookie_value(self) -> str:
+        for c in self.jar:
+            if c.name == "lhttpd_bot":
+                return c.value
+        raise AssertionError("no lhttpd_bot cookie in jar")
+
+
+def plain_open(url: str, headers: dict | None = None):
+    req = urllib.request.Request(url)
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    return urllib.request.urlopen(req, timeout=10)
+
+
 def xff_mode(base: str) -> int:
     """Trusted-proxy variant: mint through an X-Forwarded-For header,
     replay from another host in the SAME /24 (must pass), and from a
@@ -38,17 +80,17 @@ def xff_mode(base: str) -> int:
     nonce = solve(salt)
 
     def get(u: str, xff: str, cookie: str | None = None):
-        r = urllib.request.Request(u)
-        r.add_header("X-Forwarded-For", xff)
+        hdr = {"X-Forwarded-For": xff}
         if cookie:
-            r.add_header("Cookie", f"lhttpd_bot={cookie}")
-        return urllib.request.urlopen(r, timeout=10)
+            hdr["Cookie"] = f"lhttpd_bot={cookie}"
+        return plain_open(u, hdr)
 
-    r = get(f"{base}?__lhc={nonce}", "1.2.3.4, 203.0.113.5")
-    setc = r.headers.get("Set-Cookie", "")
-    assert "lhttpd_bot=" in setc, f"no cookie minted: {setc!r}"
-    cookie = setc.split("lhttpd_bot=")[1].split(";")[0]
-    assert "fnv" not in r.read().decode(), "answer did not pass"
+    # the answer 302s to the clean URL; capture the cookie off the 302
+    c = Client()
+    r302 = c.open(f"{base}?__lhc={nonce}",
+                  headers={"X-Forwarded-For": "1.2.3.4, 203.0.113.5"})
+    assert "fnv" not in r302.read().decode(), "answer did not pass"
+    cookie = c.cookie_value()
 
     same = get(base, "203.0.113.99", cookie).read().decode()
     assert "fnv" not in same and same.strip(), "same-class replay failed"
@@ -71,25 +113,24 @@ def main() -> int:
     salt = "s%d" % (int(time.time()) // 86400)
     nonce = solve(salt)
 
-    r = urllib.request.urlopen(f"{base}?__lhc={nonce}", timeout=10)
+    c = Client()
+    # answer → 302 to the clean URL with the cookie; following it must
+    # land on the content (browser-equivalent flow)
+    r = c.open(f"{base}?__lhc={nonce}")
     body = r.read().decode()
-    setc = r.headers.get("Set-Cookie", "")
-    assert "lhttpd_bot=" in setc, f"no cookie minted: {setc!r}"
     assert "function fnv" not in body and body.strip(), "answer did not pass"
-    cookie = setc.split("lhttpd_bot=")[1].split(";")[0]
+    assert "__lhc" not in r.url, f"landed on {r.url}"
+    cookie = c.cookie_value()
 
-    req = urllib.request.Request(base)
-    req.add_header("Cookie", f"lhttpd_bot={cookie}")
-    replay = urllib.request.urlopen(req, timeout=10).read().decode()
+    replay = plain_open(base, {"Cookie": f"lhttpd_bot={cookie}"}).read().decode()
     assert "function fnv" not in replay and replay.strip(), "cookie replay failed"
 
     tampered = cookie[:-1] + ("0" if cookie[-1] != "0" else "1")
-    req2 = urllib.request.Request(base)
-    req2.add_header("Cookie", f"lhttpd_bot={tampered}")
-    rechallenge = urllib.request.urlopen(req2, timeout=10).read().decode()
+    rechallenge = plain_open(
+        base, {"Cookie": f"lhttpd_bot={tampered}"}).read().decode()
     assert "function fnv" in rechallenge, "tampered cookie was not re-challenged"
 
-    print("bot_solver: challenge -> PoW -> cookie -> replay -> tamper OK")
+    print("bot_solver: challenge -> PoW -> 302-clean-URL -> replay -> tamper OK")
     return 0
 
 

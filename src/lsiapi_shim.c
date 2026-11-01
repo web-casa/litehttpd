@@ -641,6 +641,39 @@ int lsi_session_set_uri_internal(lsi_session_t *session, const char *uri, int ur
                              uri_len, NULL, 0);
 }
 
+/* Internal rewrite of path AND query. qs=NULL/qs_len=0 with delete_qs=1
+ * drops the query string entirely; otherwise the query is replaced.
+ * lsi_session_set_uri_internal() alone PRESERVES the existing query
+ * (LSI_URL_QS_NOCHANGE) — a __lhc-cleanup that only rewrites the path
+ * is a no-op on the query. */
+int lsi_session_rewrite_uri_qs(lsi_session_t *session, const char *uri,
+                               int uri_len, const char *qs, int qs_len,
+                               int delete_qs)
+{
+    GUARD_API_INT();
+    /* LSI_URL_REWRITE=1; LSI_URL_QS_SET=2<<4, LSI_URL_QS_DELETE=3<<4 */
+    int op = delete_qs ? (1 | (3 << 4)) : (1 | (2 << 4));
+    return g_api->set_uri_qs((const lsi_session_t *)session, op, uri,
+                             uri_len, delete_qs ? NULL : qs,
+                             delete_qs ? 0 : qs_len);
+}
+
+/* 302 to a path+query of our choosing. Used by the BotChallenge gate
+ * after minting the credential: the browser (and any CDN) lands on the
+ * CLEAN URL, so a ?__lhc=<nonce> request never yields a cacheable
+ * credential-free 200. */
+int lsi_session_redirect_uri_qs(lsi_session_t *session, const char *uri,
+                                int uri_len, const char *qs, int qs_len,
+                                int delete_qs)
+{
+    GUARD_API_INT();
+    /* LSI_URL_REDIRECT_302=4; QS_SET=2<<4, QS_DELETE=3<<4 */
+    int op = delete_qs ? (4 | (3 << 4)) : (4 | (2 << 4));
+    return g_api->set_uri_qs((const lsi_session_t *)session, op, uri,
+                             uri_len, delete_qs ? NULL : qs,
+                             delete_qs ? 0 : qs_len);
+}
+
 int lsi_session_file_exists(lsi_session_t *session, const char *path)
 {
     GUARD_API_INT();

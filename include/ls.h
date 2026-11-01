@@ -547,6 +547,14 @@ int         lsi_session_set_dir_option(lsi_session_t *session,
                                        const char *option, int enabled);
 int         lsi_session_get_dir_option(lsi_session_t *session,
                                        const char *option);
+int         lsi_session_redirect_uri_qs(lsi_session_t *session,
+                                    const char *uri, int uri_len,
+                                    const char *qs, int qs_len,
+                                    int delete_qs);
+int         lsi_session_rewrite_uri_qs(lsi_session_t *session,
+                                    const char *uri, int uri_len,
+                                    const char *qs, int qs_len,
+                                    int delete_qs);
 int         lsi_session_set_uri_internal(lsi_session_t *session,
                                          const char *uri, int uri_len);
 int         lsi_session_file_exists(lsi_session_t *session, const char *path);

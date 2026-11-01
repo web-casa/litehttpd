@@ -342,7 +342,7 @@ int bc_build_challenge_page(char *buf, size_t buf_size, const char *uri,
 {
     if (!buf || buf_size == 0 || !uri || !salt)
         return -1;
-    char euri[2048];
+    char euri[8192]; /* worst case: uribuf cap 2047 * \xHH(4) + NUL */
     if (bc_js_escape(uri, euri, sizeof(euri)) < 0)
         return -1;
     int n = snprintf(
@@ -372,7 +372,7 @@ int bc_render_template(char *buf, size_t buf_size, const char *tpl,
 {
     if (!buf || buf_size == 0 || !tpl || !uri || !salt)
         return -1;
-    char euri[2048];
+    char euri[8192]; /* uribuf cap 2047 * \xHH(4) + NUL */
     if (bc_js_escape(uri, euri, sizeof(euri)) < 0)
         return -1;
     char diffs[16];
@@ -471,6 +471,10 @@ static long find_pow_answer(const char *qs, int qs_len)
             const char *p = qs + i + (int)nl;
             const char *end = qs + qs_len;
             for (; p < end && *p >= '0' && *p <= '9'; p++) {
+                /* a valid nonce never exceeds 2^31; bail on anything
+                 * bigger before the signed multiply overflows (UB) */
+                if (v > 999999999L)
+                    return -1;
                 v = v * 10 + (*p - '0');
                 used = 1;
             }
@@ -633,49 +637,46 @@ int exec_bot_challenge(lsi_session_t *session,
                      BC_COOKIE_NAME, cookie_val, ttl);
             lsi_session_add_resp_header(session, "Set-Cookie", 10,
                                         setc, (int)strlen(setc));
-            /* Strip the __lhc param from the URI before serving. */
-            int uri_len = 0;
+            /* Answer accepted. Instead of serving the content on the
+             * ?__lhc= URL (which would leave the nonce in the browser's
+             * address bar, pollute cache keys, and let a CDN cache a
+             * credential-free 200 as a PoW-free copy), redirect 302 to
+             * the CLEAN URL: the browser re-requests with the fresh
+             * cookie and lands on a cacheable, canonical address. */
+            int uri_len = 0, qs_len = 0;
             const char *uri = lsi_session_get_uri(session, &uri_len);
+            const char *qs = lsi_session_get_query_string(session, &qs_len);
             if (uri && uri_len > 0) {
-                char clean[4096];
-                int n = 0;
-                const char *qm = memchr(uri, '?', (size_t)uri_len);
-                size_t base = qm ? (size_t)(qm - uri) : (size_t)uri_len;
-                if (base < sizeof(clean)) {
-                    memcpy(clean, uri, base);
-                    n = (int)base;
-                    /* rebuild the query without __lhc */
-                    const char *q = qm ? qm + 1 : NULL;
-                    int qlen = q ? uri_len - (int)base - 1 : 0;
-                    char newq[2048];
-                    int qn = 0;
-                    int i = 0;
-                    while (i < qlen) {
-                        int seg_end = i;
-                        while (seg_end < qlen && q[seg_end] != '&')
-                            seg_end++;
-                        int seg_len = seg_end - i;
-                        int is_ans =
-                            (seg_len > 6 &&
-                             memcmp(q + i, BC_QUERY_KEY "=",
-                                    strlen(BC_QUERY_KEY "=")) == 0);
-                        if (!is_ans) {
-                            if (qn > 0 && qn < (int)sizeof(newq))
-                                newq[qn++] = '&';
-                            if (qn + seg_len < (int)sizeof(newq)) {
-                                memcpy(newq + qn, q + i, (size_t)seg_len);
-                                qn += seg_len;
-                            }
+                char newq[2048];
+                int qn = 0;
+                int i = 0;
+                int had_answer = 0;
+                while (i < qs_len) {
+                    int seg_end = i;
+                    while (seg_end < qs_len && qs[seg_end] != '&')
+                        seg_end++;
+                    int seg_len = seg_end - i;
+                    int is_ans =
+                        (seg_len > 6 &&
+                         memcmp(qs + i, BC_QUERY_KEY "=",
+                                strlen(BC_QUERY_KEY "=")) == 0);
+                    if (is_ans) {
+                        had_answer = 1;
+                    } else {
+                        if (qn > 0 && qn < (int)sizeof(newq))
+                            newq[qn++] = '&';
+                        if (qn + seg_len < (int)sizeof(newq)) {
+                            memcpy(newq + qn, qs + i, (size_t)seg_len);
+                            qn += seg_len;
                         }
-                        i = seg_end + 1;
                     }
-                    if (qn > 0 && n + 1 + qn < (int)sizeof(clean)) {
-                        clean[n++] = '?';
-                        memcpy(clean + n, newq, (size_t)qn);
-                        n += qn;
-                    }
-                    clean[n] = '\0';
-                    lsi_session_set_uri_internal(session, clean, n);
+                    i = seg_end + 1;
+                }
+                if (had_answer) {
+                    lsi_session_redirect_uri_qs(
+                        session, uri, uri_len, newq, qn,
+                        qn == 0 /* nothing left → drop the query */);
+                    return BC_REDIRECT; /* 302; engine ends the response */
                 }
             }
             return BC_PASS;
@@ -732,8 +733,8 @@ int exec_bot_challenge(lsi_session_t *session,
     if (page_len < 0) {
         /* no/invalid template: built-in page (16 KiB template + headroom
          * must fit; overflow only for absurd templates → fail open) */
-        if (bc_build_challenge_page(page, 3072, uribuf, salt,
-                                     difficulty) < 0)
+        if (bc_build_challenge_page(page, (int)sizeof(page), uribuf,
+                                     salt, difficulty) < 0)
             return BC_OFF;
     }
 
