@@ -629,7 +629,9 @@ if [ -z "${LITEHTTPD_TP_DEPS_CACHE:-}" ]; then
 fi
 
 ./buildconf
-CFLAGS="-fPIC" LIBS=-lpthread ./configure --prefix="$PREFIX" --with-ssl="$PREFIX" --with-brotli=no --enable-shared=no --enable-ldap=no --without-nghttp2 --without-nghttp3
+# boringssl 8b43ff0's libssl.a needs the C++ runtime (std::terminate,
+# __cxa_*); its configure probes are pure-C and fail without -lstdc++
+CFLAGS="-fPIC" LIBS="-lpthread -lstdc++" ./configure --prefix="$PREFIX" --with-ssl="$PREFIX" --with-brotli=no --enable-shared=no --enable-ldap=no --without-nghttp2 --without-nghttp3
 make -j"${LITEHTTPD_BUILD_JOBS:-$(nproc)}"
 make install
 BUILD_CURL_SH
@@ -723,7 +725,10 @@ PREFIX="$(pwd)"
 mkdir -p "$PREFIX/src" "$PREFIX/lib" "$PREFIX/include"
 cd "$PREFIX/src"
 
-BSSL_COMMIT=9fc1c33e9c21439ce5f87855a6591a9324e569fd
+# boringssl rev pinned by litespeedtech/third-party 2f450154 (their
+# build_bssl.sh checks out 8b43ff0; the older 9fc1c33 no longer matches
+# the third-party bssl_lstls.patch and fails to compile)
+BSSL_COMMIT=8b43ff0f72137b31b23d482f0b2344186d797b03
 if [ -n "${LITEHTTPD_TP_DEPS_CACHE:-}" ]; then
     rm -rf boringssl
     tar xzf "$LITEHTTPD_TP_DEPS_CACHE/boringssl-$BSSL_COMMIT.tar.gz"
@@ -746,7 +751,9 @@ fi
 rm -rf build
 
 patch -p1 < ../../patches/boringssl/bssl_lstls.patch
-patch -p1 < ../../patches/boringssl/bssl_inttypes.patch
+# bssl_inttypes.patch (test/tool files only) no longer applies on
+# 8b43ff0 — upstream fixed the includes; we build crypto/ssl/decrepit
+# only, so it is not needed.
 sed -i -e "s/-Werror//" CMakeLists.txt
 
 mkdir build
@@ -760,9 +767,18 @@ cmake --build . --target crypto -j"${LITEHTTPD_BUILD_JOBS:-4}"
 cmake --build . --target ssl -j"${LITEHTTPD_BUILD_JOBS:-4}"
 cmake --build . --target decrepit -j"${LITEHTTPD_BUILD_JOBS:-4}"
 
-cp crypto/libcrypto.a ../../../lib
-cp ssl/libssl.a ../../../lib
-cp decrepit/libdecrepit.a ../../../lib
+# This loop runs INSIDE build/. 8b43ff0 links the libs into the build
+# root (libcrypto.a ...); older revs put them under build/<target>/
+for t in crypto ssl decrepit; do
+    if [ -f "lib$t.a" ]; then
+        cp "lib$t.a" ../../../lib
+    elif [ -f "$t/lib$t.a" ]; then
+        cp "$t/lib$t.a" ../../../lib
+    else
+        echo "FATAL: boringssl lib$t.a not found in build/" >&2
+        exit 1
+    fi
+done
 
 cd ..
 cp -r include/openssl ../../include/
