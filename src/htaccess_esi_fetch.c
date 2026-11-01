@@ -80,12 +80,18 @@ static char esi_fail_why[128];
 static char *esi_fetch_once(const char *uri, const char *host_hdr,
                             const char *cookie_hdr, uint64_t deadline);
 
-/* Self-landing race: with N OLS workers the loopback connection can land
- * on the very worker blocked in the EOF join (it cannot accept until we
- * return) — that attempt always times out. Retry on a FRESH connection:
- * each attempt lands on an independently chosen worker, so 3 short
- * attempts drive the failure probability to ~1/N^3 while the total stays
- * inside the caller's deadline. */
+/* Self-landing race: OLS workers each hold their own SO_REUSEPORT
+ * listener and the KERNEL hashes each new connection to one of them —
+ * including to the very worker blocked in our EOF join (it queues in
+ * that worker's backlog, never gets served, times out with zero bytes).
+ *
+ * A fixed attempt count is the wrong shape: the per-attempt miss chance
+ * is ~1/N (N = workers), so with a small CI container (N≈2) even 3
+ * retries left a ~12% per-fragment failure — 72% across a 10-page soak.
+ * Instead retry on FRESH connections for as long as the budget allows
+ * (150ms floor per attempt): ~20 attempts inside the default 3s → the
+ * all-miss probability collapses to ~1/N^20 even on tiny installs,
+ * while the total stays inside the caller's deadline. */
 static char *esi_dyn_fetch_real(const char *uri, const char *host_hdr,
                                 const char *cookie_hdr, int deadline_ms)
 {
@@ -95,27 +101,28 @@ static char *esi_dyn_fetch_real(const char *uri, const char *host_hdr,
         deadline_ms = 1;
 
     esi_fail_why[0] = '\0';
-    for (int attempt = 0; attempt < 3; attempt++) {
-        int slice = deadline_ms / 3;
-        if (slice < 150)
-            slice = 150;
-        int left = deadline_ms - attempt * (deadline_ms / 3 > 0 ? deadline_ms / 3 : 1);
-        if (slice > left)
-            slice = left;
-        if (slice <= 0)
+    uint64_t started = now_ms();
+    int attempts = 0;
+    for (;;) {
+        uint64_t now = now_ms();
+        int left = deadline_ms - (int)(now - started);
+        if (left <= 0)
             break;
+        int slice = left < 150 ? left : 150;
         char *body = esi_fetch_once(uri, host_hdr, cookie_hdr,
-                                    now_ms() + (uint64_t)slice);
+                                    now + (uint64_t)slice);
+        attempts++;
         if (body)
             return body;
     }
-    /* All attempts failed — the fragment will splice empty (fail-open).
+    /* Every attempt failed — the fragment will splice empty (fail-open).
      * Say WHY at WARN so the E2E failure collector (which dumps
-     * error.log) turns the next CI flake into data instead of guesswork. */
+     * error.log) turns any future occurrence into data. */
     lsi_log(NULL, LSI_LOG_WARN,
-            "mod_htaccess: dynamic ESI include failed after 3 attempts "
-            "(uri=%s why=%s) — fragment spliced empty (fail-open)",
-            uri, esi_fail_why[0] ? esi_fail_why : "unknown");
+            "mod_htaccess: dynamic ESI include failed after %d attempts "
+            "in %dms (uri=%s why=%s) — fragment spliced empty (fail-open)",
+            attempts, deadline_ms, uri,
+            esi_fail_why[0] ? esi_fail_why : "unknown");
     return NULL;
 }
 
