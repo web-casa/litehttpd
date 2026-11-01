@@ -14,6 +14,7 @@
  * >= 2 for dynamic ESI.
  */
 #include "htaccess_esi.h"
+#include "ls.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -71,6 +72,10 @@ static int wait_fd(int fd, short events, uint64_t deadline_ms)
     return rc > 0 && (pfd.revents & events);
 }
 
+/* Diagnostics for the last esi_fetch_once failure (why the fragment is
+ * missing): filled per call, read only for logging after all retries. */
+static char esi_fail_why[128];
+
 /* One attempt: connect, send, read — all bounded by the absolute deadline. */
 static char *esi_fetch_once(const char *uri, const char *host_hdr,
                             const char *cookie_hdr, uint64_t deadline);
@@ -89,6 +94,7 @@ static char *esi_dyn_fetch_real(const char *uri, const char *host_hdr,
     if (deadline_ms <= 0)
         deadline_ms = 1;
 
+    esi_fail_why[0] = '\0';
     for (int attempt = 0; attempt < 3; attempt++) {
         int slice = deadline_ms / 3;
         if (slice < 150)
@@ -103,6 +109,13 @@ static char *esi_dyn_fetch_real(const char *uri, const char *host_hdr,
         if (body)
             return body;
     }
+    /* All attempts failed — the fragment will splice empty (fail-open).
+     * Say WHY at WARN so the E2E failure collector (which dumps
+     * error.log) turns the next CI flake into data instead of guesswork. */
+    lsi_log(NULL, LSI_LOG_WARN,
+            "mod_htaccess: dynamic ESI include failed after 3 attempts "
+            "(uri=%s why=%s) — fragment spliced empty (fail-open)",
+            uri, esi_fail_why[0] ? esi_fail_why : "unknown");
     return NULL;
 }
 
@@ -122,10 +135,12 @@ static char *esi_fetch_once(const char *uri, const char *host_hdr,
 
     int rc = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
     if (rc < 0 && errno != EINPROGRESS) {
+        snprintf(esi_fail_why, sizeof(esi_fail_why), "connect errno=%d", errno);
         close(fd);
         return NULL;
     }
     if (rc < 0 && !wait_fd(fd, POLLOUT, deadline)) {
+        snprintf(esi_fail_why, sizeof(esi_fail_why), "connect timeout");
         close(fd);
         return NULL;
     }
@@ -147,6 +162,7 @@ static char *esi_fetch_once(const char *uri, const char *host_hdr,
                      (cookie_hdr && cookie_hdr[0]) ? cookie_hdr : "",
                      (cookie_hdr && cookie_hdr[0]) ? "\r\n" : "");
     if (n <= 0 || n >= (int)sizeof(req)) {
+        snprintf(esi_fail_why, sizeof(esi_fail_why), "request build overflow");
         close(fd);
         return NULL;
     }
@@ -187,16 +203,25 @@ static char *esi_fetch_once(const char *uri, const char *host_hdr,
     resp[len] = '\0';
 
     /* Status line must be 200 */
-    if (len < 12 || memcmp(resp, "HTTP/1.", 7) != 0)
+    if (len < 12 || memcmp(resp, "HTTP/1.", 7) != 0) {
+        snprintf(esi_fail_why, sizeof(esi_fail_why),
+                 "short/non-http response len=%zu", len);
         goto fail;
+    }
     int status = atoi(resp + 9);
-    if (status != 200)
+    if (status != 200) {
+        snprintf(esi_fail_why, sizeof(esi_fail_why),
+                 "status=%d len=%zu", status, len);
         goto fail;
+    }
 
     /* Body starts after the header terminator */
     char *body = strstr(resp, "\r\n\r\n");
-    if (!body)
+    if (!body) {
+        snprintf(esi_fail_why, sizeof(esi_fail_why),
+                 "no header terminator len=%zu", len);
         goto fail;
+    }
     body += 4;
     size_t body_len = len - (size_t)(body - resp);
     if (body_len > ESI_DYN_BODY_MAX)
@@ -210,8 +235,11 @@ static char *esi_fetch_once(const char *uri, const char *host_hdr,
             const char *eol = strstr(h, "\r\n");
             if (!eol || eol > hdr_end)
                 break;
-            if (strncasecmp(h, "Transfer-Encoding:", 18) == 0)
+            if (strncasecmp(h, "Transfer-Encoding:", 18) == 0) {
+                snprintf(esi_fail_why, sizeof(esi_fail_why),
+                         "chunked response rejected");
                 goto fail;
+            }
             h = eol + 2;
         }
     }
