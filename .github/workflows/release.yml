@@ -316,7 +316,7 @@ jobs:
           git config --global http.lowSpeedTime 120 || true
           git clone --depth 1 --recurse-submodules --shallow-submodules --branch v1.9.4 \
             https://github.com/litespeedtech/openlitespeed.git /tmp/ols-src
-          cd /tmp/ols-src && tar czf /tmp/v1.9.4.tar.gz --exclude=.git --transform="flags=r;s,^\.,openlitespeed-1.9.1," .
+          cd /tmp/ols-src && tar czf /tmp/v1.9.4.tar.gz --exclude=.git --transform="flags=r;s,^\.,openlitespeed-1.9.4," .
 
       - name: Create module source tarball
         run: |
