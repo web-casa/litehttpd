@@ -482,6 +482,36 @@ int lsi_session_set_uri_internal(lsi_session_t *session,
     return LSI_OK;
 }
 
+/* ---- v2: path + query rewrite (BotChallenge __lhc cleanup) ---- */
+
+int lsi_session_rewrite_uri_qs(lsi_session_t *session, const char *uri,
+                               int uri_len, const char *qs, int qs_len,
+                               int delete_qs) {
+    if (!session || !uri || uri_len <= 0) return LSI_ERROR;
+    auto *m = to_mock(session);
+    m->rewrite_uri_ = std::string(uri, static_cast<size_t>(uri_len));
+    m->rewrite_qs_ = (delete_qs || !qs || qs_len <= 0)
+                         ? std::string()
+                         : std::string(qs, static_cast<size_t>(qs_len));
+    m->rewrite_delete_qs_ = delete_qs ? 1 : 0;
+    m->rewrite_called_++;
+    return LSI_OK;
+}
+
+int lsi_session_redirect_uri_qs(lsi_session_t *session, const char *uri,
+                                int uri_len, const char *qs, int qs_len,
+                                int delete_qs) {
+    if (!session || !uri || uri_len <= 0) return LSI_ERROR;
+    auto *m = to_mock(session);
+    m->redirect302_uri_ = std::string(uri, static_cast<size_t>(uri_len));
+    m->redirect302_qs_ = (delete_qs || !qs || qs_len <= 0)
+                             ? std::string()
+                             : std::string(qs, static_cast<size_t>(qs_len));
+    m->redirect302_delete_qs_ = delete_qs ? 1 : 0;
+    m->redirect302_called_++;
+    return LSI_OK;
+}
+
 /* ---- v2: File existence check ---- */
 
 int lsi_session_file_exists(lsi_session_t *session, const char *path) {

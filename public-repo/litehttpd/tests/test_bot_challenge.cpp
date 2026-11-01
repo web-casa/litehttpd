@@ -295,3 +295,90 @@ TEST(BotTemplate, OverflowFailsClosed)
     EXPECT_EQ(bc_render_template(out, sizeof(out), tpl, "/long/path", "s", 8),
               -1);
 }
+
+/* ── regressions for the three codex-review findings ─────────────── */
+
+TEST(BotChallengePage, MaxHostileUriStillGated)
+{
+    /* 2047-char URI made entirely of chars that expand to \xHH: the old
+     * 2048-byte escape buffer overflowed the check and the gate failed
+     * OPEN. With the 8192 buffer the page must build and stay escaped. */
+    std::string hostile(2047, '\'');
+    hostile = "/x" + hostile;
+    if (hostile.size() > 2047)
+        hostile.resize(2047);
+    char page[16384];
+    ASSERT_GE(bc_build_challenge_page(page, sizeof(page), hostile.c_str(),
+                                      "s1", 16), 0);
+    /* the template's own quoting is fine; the URI itself must arrive
+     * fully escaped — no raw quote RUN (the hostile input was all
+     * quotes) and at least one \x27 escape in the URI slot */
+    EXPECT_EQ(strstr(page, "''"), nullptr);
+    EXPECT_NE(strstr(page, "\\x27\\x27"), nullptr);
+}
+
+TEST_F(BotChallengeTest, PowAnswerOverflowRejectedNotUB)
+{
+    /* a multi-hundred-digit __lhc once drove signed long overflow (UB);
+     * it must be rejected cleanly (treated as no answer → challenge) */
+    htaccess_directive_t *on = mk(DIR_BOT_CHALLENGE, "on");
+    session_.set_query_string(
+        "__lhc=99999999999999999999999999999999999999999999999999999");
+    int rc = exec_bot_challenge(session_.handle(), on, NULL);
+    EXPECT_EQ(rc, BC_CHALLENGE); /* not a crash, not a pass */
+    free_list(on);
+}
+
+TEST_F(BotChallengeTest, LhcParamActuallyStrippedFromQuery)
+{
+    /* get_uri() is path-only and set_uri_internal() preserves the query,
+     * so the old cleanup was a NO-OP: __lhc stayed in the URL (cache-key
+     * pollution; a CDN could cache the credential-free 200). The gate
+     * must now rewrite the query explicitly. */
+    htaccess_directive_t *on = mk(DIR_BOT_CHALLENGE, "on");
+    /* craft a solved answer: reuse the real solver path via __lhc with a
+     * nonce that satisfies the default difficulty is expensive; instead
+     * verify the strip through the answer branch using a low difficulty */
+    htaccess_directive_t *d1 = mk(DIR_BOT_CHALLENGE_DIFFICULTY, "8");
+    d1->next = on;
+
+    /* find a nonce for today's salt at difficulty 8 */
+    char salt[32];
+    snprintf(salt, sizeof(salt), "s%ld", (long)time(NULL) / 86400);
+    long n = 0;
+    auto fnv = [](const char *s) -> uint32_t {
+        uint32_t h = 2166136261u;
+        for (; *s; s++) { h ^= (uint8_t)*s; h *= 16777619u; }
+        return h;
+    };
+    std::string msg = std::string(salt) + ":0";
+    (void)msg;
+    while (n < 100000000L) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s:%ld", salt, n);
+        if ((fnv(buf) >> 24) == 0) break; /* 8 leading zero bits */
+        n++;
+    }
+    ASSERT_LT(n, 100000000L);
+
+    std::string qs = std::string("keep=1&__lhc=") + std::to_string(n) +
+                     "&also=2";
+    session_.set_request_uri("/gate/page");
+    session_.set_query_string(qs);
+    int rc = exec_bot_challenge(session_.handle(), d1, NULL);
+    ASSERT_EQ(rc, BC_REDIRECT); /* 302 to the clean URL, not a 200 */
+    EXPECT_GE(session_.redirect302_calls(), 1);
+    EXPECT_EQ(session_.redirect302_qs(), "keep=1&also=2");
+    EXPECT_EQ(session_.redirect302_deleted_qs(), 0);
+    free_list(d1);
+
+    /* and when __lhc was the only param → the query is deleted */
+    htaccess_directive_t *on2 = mk(DIR_BOT_CHALLENGE, "on");
+    htaccess_directive_t *d2 = mk(DIR_BOT_CHALLENGE_DIFFICULTY, "8");
+    d2->next = on2;
+    session_.set_request_uri("/gate/page");
+    session_.set_query_string(std::string("__lhc=") + std::to_string(n));
+    ASSERT_EQ(exec_bot_challenge(session_.handle(), d2, NULL), BC_REDIRECT);
+    EXPECT_EQ(session_.redirect302_deleted_qs(), 1);
+    free_list(d2);
+}

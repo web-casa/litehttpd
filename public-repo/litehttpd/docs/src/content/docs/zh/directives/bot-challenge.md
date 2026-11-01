@@ -44,7 +44,9 @@ BotChallengeExempt "(?i)(googlebot|bingbot)"
    完全相同的 32 位哈希），直到高位连续 *difficulty* 个 0，然后跳转
    `<uri>?__lhc=<nonce>`。
 3. 该请求到达门上：一次性校验 nonce，签发 HMAC-SHA256 凭证
-   cookie，并从 URI 中去掉查询参数——访问者无感知。
+   cookie，随后 **302 跳转到净化后的 URL**（去掉 `__lhc` 参数、保留
+   其余参数）。浏览器带着新 cookie 重新请求并落在规范、可缓存的地址
+   —— 带 `?__lhc=...` 的免凭证请求永远不会产生可缓存的 200。
 4. 后续请求校验有效期 + MAC（常量时间比较）。凭证绑定客户端 IP
    段（IPv4 `/24`、IPv6 前 4 组），cookie 被盗后也难以跨网段复用。
 

@@ -10,7 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-TARGET_OLS_VERSION="1.9.1"
+TARGET_OLS_VERSION="1.9.4"
 FAIL=0
 
 fail() {

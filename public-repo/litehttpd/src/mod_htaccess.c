@@ -1904,10 +1904,10 @@ static int on_uri_map(lsi_session_t *session)
                         ? getenv("LITEHTTPD_BOT_SECRET")
                         : BC_SECRET_PATH);
         }
-        if (bc_rc == BC_CHALLENGE) {
+        if (bc_rc == BC_CHALLENGE || bc_rc == BC_REDIRECT) {
             free(target_dir);
             htaccess_directives_free(directives);
-            return LSI_DENY; /* response already ended by the gate */
+            return LSI_DENY; /* response handled by the gate */
         }
     }
 
