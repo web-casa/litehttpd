@@ -48,8 +48,11 @@ BotChallengeExempt "(?i)(googlebot|bingbot)"
    verifier uses) over `salt:nonce` until the top *difficulty* bits are
    zero, then navigates to `<uri>?__lhc=<nonce>`.
 3. That request reaches the gate: the nonce is verified in one pass,
-   an HMAC-SHA256 credential cookie is issued, and the query parameter
-   is stripped — the visitor never sees it.
+   an HMAC-SHA256 credential cookie is issued, and the server answers
+   with a **302 to the clean URL** (the `__lhc` parameter dropped, any
+   other parameters kept). The browser re-requests with the fresh
+   cookie and lands on a canonical, cacheable address — the
+   credential-free `?__lhc=...` request never yields a cacheable 200.
 4. Subsequent requests verify expiry + MAC (constant-time). The
    credential is bound to the client's IP class (IPv4 `/24`, IPv6
    first 4 groups), so a stolen cookie does not travel well.

@@ -1,7 +1,7 @@
-%global ols_version  1.9.1
-%global litehttpd_version 2.3.0
+%global ols_version  1.9.4
+%global litehttpd_version 2.4.0
 %global install_dir  /usr/local/lsws
-%global third_party_commit 7297c534b844d808fce7ec42798ef2b1f3aa5259
+%global third_party_commit 2f45015407c5c4baa5bbe30d7a37c2f82ec050a3
 %global php_version 7.4.33
 %global lsapi_version 8.1
 %global php_src_sha256 5a2337996f07c8a097e03d46263b5c98d2c8e355227756351421003bea8f463e
@@ -284,11 +284,15 @@ rm -rf "$PACKAGE" libaio-libaio-0.3.113
 if [ -n "${LITEHTTPD_TP_DEPS_CACHE:-}" ]; then
     cp "$LITEHTTPD_TP_DEPS_CACHE/$PACKAGE.tar.gz" "$PACKAGE.tar.gz"
 else
-    wget --no-check-certificate https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz
-    mv libaio-libaio-0.3.113.tar.gz "$PACKAGE.tar.gz"
+    # pagure.io removed its archive endpoints; Debian serves the identical
+    # upstream git-tag tree from a stable CDN (inner dir: libaio-0.3.113)
+    wget --no-check-certificate https://deb.debian.org/debian/pool/main/liba/libaio/libaio_0.3.113.orig.tar.gz
+    mv libaio_0.3.113.orig.tar.gz "$PACKAGE.tar.gz"
 fi
 tar xzf "$PACKAGE.tar.gz"
-mv libaio-libaio-0.3.113 "$PACKAGE"
+# pagure archives unpack to libaio-libaio-0.3.113, Debian orig to
+# libaio-0.3.113 — accept either
+if [ -d libaio-libaio-0.3.113 ]; then mv libaio-libaio-0.3.113 "$PACKAGE"; fi
 rm -f "$PACKAGE.tar.gz"
 
 cd "$PACKAGE"
@@ -1203,6 +1207,17 @@ fi
 %{_tmpfilesdir}/litehttpd.conf
 
 %changelog
+* Sat Oct 31 2026 LiteHTTPD <noreply@web.casa> - 1.9.1-5.litehttpd
+- Rebase patched OpenLiteSpeed build to v1.9.4 (litehttpd 2.4.0):
+  - upstream 1.9.4: WebAdmin disabled by default; admin_php rebuilt for
+    CVE-2026-109618 / CVE-2026-109619 (php2shell, CVSS 9.2); brotli
+    1.2.1 for CVE-2026-111497; 103 Early Hints; server push dropped
+  - upstream 1.9.3: CGI execution and protocol security hardening
+  - upstream 1.9.2: HTTP/2 and HTTP/3 header validation, lsquic 4.9.3+
+  - third-party pinned to 2f450154 (brotli v1.2.1 submodule)
+  - litehttpd 2.4.0: BotChallenge codex-review fixes (URI-length gate
+    bypass, 302-to-clean-URL after PoW, PoW overflow guard)
+
 * Thu Jul 02 2026 LiteHTTPD <noreply@web.casa> - 1.9.1-4.litehttpd
 - Add pinned source-cache mode for release builds:
   - litespeedtech/third-party pinned to commit %{third_party_commit}

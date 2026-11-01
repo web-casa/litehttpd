@@ -242,6 +242,14 @@ int         lsi_session_get_dir_option(lsi_session_t *session,
                                        const char *option);
 
 /* Internal URI redirect (v2: DirectoryIndex) */
+int         lsi_session_redirect_uri_qs(lsi_session_t *session,
+                                    const char *uri, int uri_len,
+                                    const char *qs, int qs_len,
+                                    int delete_qs);
+int         lsi_session_rewrite_uri_qs(lsi_session_t *session,
+                                    const char *uri, int uri_len,
+                                    const char *qs, int qs_len,
+                                    int delete_qs);
 int         lsi_session_set_uri_internal(lsi_session_t *session,
                                          const char *uri, int uri_len);
 int         lsiapi_has_custom_extensions(void);
@@ -336,6 +344,12 @@ public:
     void set_auth_header(const std::string &value);
     void add_existing_file(const std::string &path);
     void set_query_string(const std::string &qs);
+    int rewrite_calls() const { return rewrite_called_; }
+    const std::string &rewrite_qs() const { return rewrite_qs_; }
+    int rewrite_deleted_qs() const { return rewrite_delete_qs_; }
+    int redirect302_calls() const { return redirect302_called_; }
+    const std::string &redirect302_qs() const { return redirect302_qs_; }
+    int redirect302_deleted_qs() const { return redirect302_delete_qs_; }
 
     /* ---- Inspection helpers (called by test assertions) ---- */
 
@@ -402,6 +416,8 @@ private:
     friend int         ::lsi_session_set_dir_option(lsi_session_t*, const char*, int);
     friend int         ::lsi_session_get_dir_option(lsi_session_t*, const char*);
     friend int         ::lsi_session_set_uri_internal(lsi_session_t*, const char*, int);
+    friend int         ::lsi_session_rewrite_uri_qs(lsi_session_t*, const char*, int, const char*, int, int);
+    friend int         ::lsi_session_redirect_uri_qs(lsi_session_t*, const char*, int, const char*, int, int);
     friend int         ::lsi_session_file_exists(lsi_session_t*, const char*);
     friend const char *::lsi_session_get_method(lsi_session_t*, int*);
     friend const char *::lsi_session_get_auth_header(lsi_session_t*, int*);
@@ -434,6 +450,14 @@ private:
 
     /* v2: Internal redirect URI */
     std::string internal_uri_;
+    std::string rewrite_uri_;
+    std::string rewrite_qs_;
+    int rewrite_delete_qs_ = 0;
+    int rewrite_called_ = 0;
+    std::string redirect302_uri_;
+    std::string redirect302_qs_;
+    int redirect302_delete_qs_ = 0;
+    int redirect302_called_ = 0;
 
     /* v2: Request method */
     std::string method_;

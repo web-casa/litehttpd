@@ -2,6 +2,50 @@
 
 All notable changes to litehttpd will be documented in this file.
 
+## [2.4.0] - 2026-11-01
+
+Rebased onto OpenLiteSpeed 1.9.4 — carrying its security fixes — plus
+the BotChallenge hardening from the external codex review.
+
+### Changed — platform
+- **Patched OLS base 1.9.1 → 1.9.4** (all four patches apply; verified
+  against the v1.9.4 tree):
+  - 1.9.4: **WebAdmin disabled by default** and admin_php rebuilt for
+    **CVE-2026-109618 / CVE-2026-109619** ("php2shell", CVSS 9.2
+    unauthenticated PHP RCE — our self-built admin_php uses PHP 7.4.33
+    and cannot be source-patched; the default-off WebAdmin plus
+    firewalling :7080 is the effective mitigation), brotli 1.2.1
+    (CVE-2026-111497), 103 Early Hints, server push dropped.
+  - 1.9.3: CGI execution and protocol security hardening.
+  - 1.9.2: HTTP/2 + HTTP/3 header validation.
+  - third-party pinned to 2f450154 (brotli v1.2.1 submodule; lsquic
+    ships inside the OLS tree).
+  - Known note: admin_php remains on EOL PHP 7.4 — keep WebAdmin off
+    (the new default) or firewall it; moving it to a patched PHP 8.x
+    is tracked as follow-up work.
+- The module itself was already runtime-verified on 1.9.4 (CI E2E
+  container) — only the release packaging pinned 1.9.1 until now.
+
+### Fixed — BotChallenge (external codex review of 2.2.0..2.3.0)
+- **Gate bypass via overlong URI** (HIGH): a 2047-byte URI of
+  quote-only characters overflowed the 2048-byte JS-escape check, the
+  challenge page failed to build, and the gate failed OPEN — the most
+  hostile inputs were exactly the ones let through. Escape buffers
+  sized for the worst case (8192) and the built-in page renders into
+  the full buffer.
+- **Solved-challenge answer left `?__lhc=<nonce>` in the URL** (HIGH,
+  cache-poisoning adjacent): the cleanup rewrote only the path while
+  OLS preserved the query — so a CDN could cache the credential-free
+  200 as a PoW-free copy of the content. A solved nonce now gets a
+  **302 to the clean URL** (other params kept; query dropped when
+  __lhc was the only one); the browser lands on a canonical,
+  cacheable address.
+- **Remote-triggered signed overflow** (MED): multi-hundred-digit
+  `__lhc` values overflowed a long during parsing (UB); oversized
+  values are now rejected cleanly.
+- Regression unit tests pin all three (suite 1161/1161); the E2E
+  solver follows the real browser flow (302 + cookie jar).
+
 ## [2.3.0] - 2026-10-31
 
 The self-hosted bot-defense release: LSWS Enterprise "managed challenge"

@@ -4,7 +4,7 @@
 set -euo pipefail
 
 OUT_DIR="${1:-/tmp}"
-THIRD_PARTY_COMMIT="${THIRD_PARTY_COMMIT:-7297c534b844d808fce7ec42798ef2b1f3aa5259}"
+THIRD_PARTY_COMMIT="${THIRD_PARTY_COMMIT:-2f45015407c5c4baa5bbe30d7a37c2f82ec050a3}"
 PHP_VERSION="${PHP_VERSION:-7.4.33}"
 LSAPI_VERSION="${LSAPI_VERSION:-8.1}"
 PHP_SHA256="${PHP_SHA256:-5a2337996f07c8a097e03d46263b5c98d2c8e355227756351421003bea8f463e}"
@@ -26,7 +26,10 @@ MODSEC_TF_PSA_CRYPTO_COMMIT="${MODSEC_TF_PSA_CRYPTO_COMMIT:-29160dd877d29658279f
 MODSEC_MLDSA_NATIVE_COMMIT="${MODSEC_MLDSA_NATIVE_COMMIT:-5772b4f4a0105694b1203abb582273f78fa951b7}"
 MODSEC_SECRULES_TESTS_COMMIT="${MODSEC_SECRULES_TESTS_COMMIT:-a3d4405e5a2c90488c387e589c5534974575e35b}"
 
-LIBAIO_SHA256="${LIBAIO_SHA256:-716c7059703247344eb066b54ecbc3ca2134f0103307192e6c2b7dab5f9528ab}"
+# libaio 0.3.113: pagure.io removed its archive endpoints (404 since
+# 2026-10); Debian's orig tarball is the same upstream git-tag tree
+# (verified by full tree-diff) served from a stable CDN.
+LIBAIO_SHA256="${LIBAIO_SHA256:-2c44d1c5fd0d43752287c9ae1eb9c023f04ef848ea8d4aafa46e9aedb678200b}"
 PCRE_SHA256="${PCRE_SHA256:-4e6ce03e0336e8b4a3d6c2b70b1c5e18590a5673a98186da90d4f33c23defc09}"
 PCRE2_SHA256="${PCRE2_SHA256:-0e138387df7835d7403b8351e2226c1377da804e0737db0e071b48f07c9d12ee}"
 PSOL_SHA256="${PSOL_SHA256:-97408b04bf7395ab34d7b5baed95ae3dc928746213ca02590773b66a7697a7dc}"
@@ -290,7 +293,7 @@ create_third_party_deps_cache() {
     rm -f "$tmp_archive"
 
     download_checked \
-        "https://pagure.io/libaio/archive/libaio-0.3.113/libaio-libaio-0.3.113.tar.gz" \
+        "https://deb.debian.org/debian/pool/main/liba/libaio/libaio_0.3.113.orig.tar.gz" \
         "$cache_root/libaio-0.3.113.tar.gz" \
         "$LIBAIO_SHA256"
     download_checked \

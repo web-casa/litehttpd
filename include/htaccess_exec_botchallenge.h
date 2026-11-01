@@ -46,6 +46,8 @@ extern "C" {
 #define BC_PASS        0  /* valid cookie / verified PoW: serve normally */
 #define BC_CHALLENGE   1  /* no/invalid cookie: challenge page served */
 #define BC_OFF         2  /* directive off for this tree */
+#define BC_REDIRECT    3  /* PoW accepted: cookie minted, 302 to the clean
+                             URL already queued — caller ends processing */
 
 /**
  * Evaluate bot challenge directives for this request. On BC_CHALLENGE the
